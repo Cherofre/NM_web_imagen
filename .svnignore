@@ -1,0 +1,15 @@
+config.local.json
+outputs
+logs
+saved_images
+.chrome-debug
+.venv
+.runtime
+__pycache__
+dist
+*.zip
+*.pyc
+*.pyo
+server.out.log
+server.err.log
+page-check*.png

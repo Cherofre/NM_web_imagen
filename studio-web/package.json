@@ -1,0 +1,24 @@
+{
+  "name": "web-imagen-tool-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test:size": "node scripts/verify-size-rules.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "lucide-react": "^0.523.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "vite": "^7.1.9"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9"
+  }
+}

@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网页生图工具</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260503-wide-layout-v1" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <main class="workspace">
+        <section class="control-panel reveal reveal-delay-1">
+          <div class="panel-header">
+            <div class="engine-switch" role="tablist" aria-label="选择引擎">
+              <button class="engine-pill active" type="button" data-engine-tab="gpt-image-2">GPT Image 2</button>
+              <button class="engine-pill" type="button" data-engine-tab="banana">Banana Gemini</button>
+            </div>
+            <div class="panel-header-meta">
+              <button class="panel-action-button" type="button" id="open-config-modal">配置中心</button>
+              <button class="panel-action-button secondary" type="button" id="save-config-quick">保存配置</button>
+              <button class="panel-action-button secondary" type="button" id="load-config-defaults">读取默认值</button>
+            </div>
+          </div>
+
+          <form class="engine-form" id="banana-form" data-engine="banana">
+            <div class="form-scroll-region" data-form-scroll>
+              <section
+                class="section-card section-fold is-config"
+                data-config-section
+                data-key-name="api_key"
+                data-base-name="api_base_url"
+                data-model-name="model_type"
+                data-collapsed="false"
+              >
+              <div class="section-summary-row" data-config-toggle role="button" tabindex="0" aria-expanded="true">
+                <div class="section-heading compact-heading">
+                  <h2>连接</h2>
+                </div>
+                <div class="section-summary-copy">
+                  <span class="summary-state" data-config-state>未配置</span>
+                  <span class="summary-text" data-config-summary>填写 API Key、Base URL 和模型名</span>
+                </div>
+                <span class="section-summary-action" data-config-action>收起</span>
+              </div>
+              <div class="section-fold-body">
+                <div class="field-grid compact-grid">
+                  <label class="field field-span-2">
+                    <span>API Key</span>
+                    <div class="secret-input-wrap">
+                      <input name="api_key" type="password" placeholder="输入 Banana API Key" autocomplete="off" data-secret-input />
+                      <button
+                        class="secret-toggle-button"
+                        type="button"
+                        data-toggle-secret
+                        aria-label="显示 Banana API Key"
+                        title="显示或隐藏当前 API Key"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M2.7 12s3.4-6.3 9.3-6.3S21.3 12 21.3 12s-3.4 6.3-9.3 6.3S2.7 12 2.7 12Z" />
+                          <circle cx="12" cy="12" r="2.8" />
+                        </svg>
+                      </button>
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span>API Base URL</span>
+                    <input name="api_base_url" type="text" value="https://banana-api.example.com" />
+                  </label>
+                  <label class="field">
+                    <span>模型名</span>
+                    <input name="model_type" type="text" value="gemini-3-pro-image-preview" />
+                  </label>
+                </div>
+              </div>
+              </section>
+
+              <div class="section-card">
+              <div class="section-heading">
+                <h2>参数</h2>
+              </div>
+              <div class="field-grid compact-grid">
+                <label class="field field-span-4">
+                  <span>提示词</span>
+                  <textarea name="prompt" rows="3" placeholder="描述你想生成的画面、风格、镜头、光线等"></textarea>
+                </label>
+                <label class="field">
+                  <span>批量数量</span>
+                  <input name="batch_size" type="number" min="1" max="8" step="1" value="1" />
+                </label>
+                <label class="field">
+                  <span>随机种子</span>
+                  <input name="seed" type="number" value="-1" />
+                </label>
+                <label class="field">
+                  <span>比例</span>
+                  <select name="aspect_ratio">
+                    <option>Auto</option>
+                    <option>1:1</option>
+                    <option>1:4</option>
+                    <option>1:8</option>
+                    <option>4:1</option>
+                    <option>8:1</option>
+                    <option>9:16</option>
+                    <option>16:9</option>
+                    <option>21:9</option>
+                    <option>2:3</option>
+                    <option>3:2</option>
+                    <option>3:4</option>
+                    <option>4:3</option>
+                    <option>4:5</option>
+                    <option>5:4</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>图像分辨率</span>
+                  <select name="image_size">
+                    <option>无</option>
+                    <option>1K</option>
+                    <option selected>2K</option>
+                    <option>4K</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Top-P</span>
+                  <input name="top_p" type="number" min="0" max="1" step="0.01" value="0.95" />
+                </label>
+              </div>
+              <div class="toggle-row">
+                <div class="timeout-field timeout-chip-field" data-timeout-field>
+                  <span>超时</span>
+                  <input name="timeout_seconds" type="number" min="60" max="1800" step="10" value="60" data-timeout-input aria-label="超时秒数" />
+                  <label class="timeout-toggle" title="不设置请求超时时间，适合上游响应很慢时等待结果。">
+                    <input name="infinite_timeout" type="checkbox" checked data-timeout-toggle />
+                    <span>无限</span>
+                  </label>
+                </div>
+                <label class="toggle" title="这次请求不走系统代理，网络异常或代理冲突时可以尝试开启。">
+                  <input name="bypass_proxy" type="checkbox" />
+                  <span>绕过代理</span>
+                </label>
+                <label class="toggle" title="跳过 HTTPS 证书校验。只建议在自建接口证书异常时临时开启。">
+                  <input name="disable_ssl" type="checkbox" />
+                  <span>禁用 SSL 校验</span>
+                </label>
+              </div>
+              </div>
+
+              <div class="section-card reference-card">
+              <div class="section-heading reference-heading">
+                <h2>参考图</h2>
+                <button class="mini-action-button" type="button" data-clear-reference>清空</button>
+              </div>
+              <label class="upload-zone compact-upload">
+                <input
+                  class="zone-file-input"
+                  id="banana-reference-files"
+                  name="reference_files"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  data-limit="14"
+                />
+                <span class="upload-title">点击添加，或拖入图片</span>
+                <span class="upload-subtitle" data-file-summary aria-live="polite">最多 14 张，支持多次追加</span>
+              </label>
+              <div class="reference-preview-strip" data-reference-preview></div>
+              </div>
+            </div>
+
+            <div class="button-row form-actions">
+              <button class="primary-button" type="submit">开始生成</button>
+              <button class="ghost-button" type="button" data-reset-form="banana-form">恢复默认</button>
+            </div>
+          </form>
+
+          <form class="engine-form active" id="gpt-image-2-form" data-engine="gpt-image-2">
+            <div class="form-scroll-region" data-form-scroll>
+              <section
+                class="section-card section-fold is-config"
+                data-config-section
+                data-key-name="api_key"
+                data-base-name="base_url"
+                data-model-name="model"
+                data-collapsed="false"
+              >
+              <div class="section-summary-row" data-config-toggle role="button" tabindex="0" aria-expanded="true">
+                <div class="section-heading compact-heading">
+                  <h2>连接</h2>
+                </div>
+                <div class="section-summary-copy">
+                  <span class="summary-state" data-config-state>未配置</span>
+                  <span class="summary-text" data-config-summary>填写 API Key、Base URL 和模型名</span>
+                </div>
+                <span class="section-summary-action" data-config-action>收起</span>
+              </div>
+              <div class="section-fold-body">
+                <div class="field-grid compact-grid">
+                  <label class="field field-span-2">
+                    <span>API Key</span>
+                    <div class="secret-input-wrap">
+                      <input name="api_key" type="password" placeholder="输入 GPT Image 2 API Key" autocomplete="off" data-secret-input />
+                      <button
+                        class="secret-toggle-button"
+                        type="button"
+                        data-toggle-secret
+                        aria-label="显示 GPT Image 2 API Key"
+                        title="显示或隐藏当前 API Key"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M2.7 12s3.4-6.3 9.3-6.3S21.3 12 21.3 12s-3.4 6.3-9.3 6.3S2.7 12 2.7 12Z" />
+                          <circle cx="12" cy="12" r="2.8" />
+                        </svg>
+                      </button>
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span>Base URL</span>
+                    <input name="base_url" type="text" value="https://gpt-image-api.example.com" />
+                  </label>
+                  <label class="field">
+                    <span>模型名</span>
+                    <input name="model" type="text" value="gpt-image-2" />
+                  </label>
+                </div>
+              </div>
+              </section>
+
+              <div class="section-card">
+              <div class="section-heading">
+                <h2>参数</h2>
+              </div>
+              <div class="field-grid compact-grid gpt-params-grid">
+                <label class="field field-span-2 prompt-field">
+                  <span>提示词</span>
+                  <textarea name="prompt" rows="3" placeholder="描述主体、风格、材质、构图、镜头和细节"></textarea>
+                </label>
+                <label class="field field-span-2 prompt-field">
+                  <span>负面提示词</span>
+                  <textarea name="negative_prompt" rows="2" placeholder="可选，例如 low quality, blurry, extra fingers"></textarea>
+                </label>
+                <label class="field field-span-4 poster-text-field">
+                  <span>画面文字</span>
+                  <input name="poster_text" type="text" placeholder="可选，逐字填写必须出现在图里的标题或短句，例如：原神 x 鸣潮" />
+                </label>
+                <div class="field size-setting-field">
+                  <span>尺寸</span>
+                  <button class="size-setting-button" type="button" data-open-size-modal>
+                    <span data-size-summary>auto</span>
+                    <small>点击设置</small>
+                  </button>
+                </div>
+                <div class="size-native-controls" aria-hidden="true">
+                  <select name="size" tabindex="-1">
+                    <option selected>auto</option>
+                    <option>1024x1024</option>
+                    <option>1536x1024</option>
+                    <option>1024x1536</option>
+                    <option>1536x864</option>
+                    <option>2048x2048</option>
+                    <option>2048x1152</option>
+                    <option>3840x2160</option>
+                    <option>2160x3840</option>
+                    <option>custom</option>
+                  </select>
+                </div>
+                <div class="field custom-size-field size-native-controls" data-custom-size-field aria-hidden="true">
+                  <div class="custom-size-header">
+                    <span>自定义尺寸</span>
+                    <small class="custom-size-hint" data-custom-size-hint>custom 后生效，宽高需为 16 的倍数。</small>
+                  </div>
+                  <input name="custom_size" type="hidden" value="1536x864" data-custom-size-input />
+                  <div class="custom-size-pair" title="选择 custom 时生效。宽高都需要是 16 的倍数。">
+                    <input
+                      type="number"
+                      min="16"
+                      max="3840"
+                      step="16"
+                      value="1536"
+                      placeholder="宽"
+                      aria-label="自定义宽度"
+                      data-custom-size-width
+                    />
+                    <span class="custom-size-separator" aria-hidden="true">x</span>
+                    <input
+                      type="number"
+                      min="16"
+                      max="3840"
+                      step="16"
+                      value="864"
+                      placeholder="高"
+                      aria-label="自定义高度"
+                      data-custom-size-height
+                    />
+                  </div>
+                </div>
+                <label class="field">
+                  <span>质量</span>
+                  <select name="quality">
+                    <option>auto</option>
+                    <option>low</option>
+                    <option>medium</option>
+                    <option selected>high</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>数量</span>
+                  <input name="n" type="number" min="1" max="10" step="1" value="1" />
+                </label>
+                <label class="field">
+                  <span>随机种子</span>
+                  <input name="seed" type="number" value="-1" />
+                </label>
+                <div class="field api-setting-field">
+                  <span>接口设置</span>
+                  <button class="api-setting-button" type="button" data-open-api-modal>
+                    <span data-api-summary>auto / auto</span>
+                    <small>点击设置</small>
+                  </button>
+                </div>
+                <label class="field">
+                  <span>风格预设</span>
+                  <select name="style_preset">
+                    <option selected>none</option>
+                    <option>photographic</option>
+                    <option>digital-art</option>
+                    <option>anime</option>
+                    <option>3d-render</option>
+                    <option>oil-painting</option>
+                    <option>watercolor</option>
+                    <option>sketch</option>
+                  </select>
+                </label>
+                <div class="api-native-controls" aria-hidden="true">
+                  <select name="response_format" tabindex="-1">
+                    <option selected>auto</option>
+                    <option>url</option>
+                    <option>b64_json</option>
+                  </select>
+                  <select name="api_endpoint" tabindex="-1">
+                    <option selected>auto</option>
+                    <option>/v1/images/generations</option>
+                    <option>/v1/images/edits</option>
+                    <option>/v1/responses</option>
+                  </select>
+                </div>
+                <label class="field">
+                  <span>编辑模式</span>
+                  <select name="edit_mode">
+                    <option selected>generate</option>
+                    <option>reference</option>
+                    <option>outpaint</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>参考强度</span>
+                  <input name="reference_strength" type="number" min="0" max="1" step="0.05" value="0.7" />
+                </label>
+              </div>
+              <div class="toggle-row">
+                <label class="toggle" title="自动补强提示词，让模型更容易理解画面要求。">
+                  <input name="enhance_prompt" type="checkbox" checked />
+                  <span>增强提示词</span>
+                </label>
+                <label class="toggle" title="启用接口侧安全检查，通常建议保持开启。">
+                  <input name="safety_check" type="checkbox" checked />
+                  <span>安全检查</span>
+                </label>
+                <div class="timeout-field timeout-chip-field" data-timeout-field>
+                  <span>超时</span>
+                  <input name="timeout" type="number" min="1" max="3600" step="1" value="300" data-timeout-input aria-label="超时秒数" />
+                  <label class="timeout-toggle" title="不设置请求超时时间，适合上游响应很慢时等待结果。">
+                    <input name="infinite_timeout" type="checkbox" data-timeout-toggle />
+                    <span>无限</span>
+                  </label>
+                </div>
+              </div>
+              </div>
+
+              <div class="section-card reference-card">
+              <div class="section-heading reference-heading">
+                <h2>参考图</h2>
+                <button class="mini-action-button" type="button" data-clear-reference>清空</button>
+              </div>
+              <label class="upload-zone compact-upload">
+                <input
+                  class="zone-file-input"
+                  id="gpt-reference-files"
+                  name="reference_files"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  data-limit="16"
+                />
+                <span class="upload-title">点击添加，或拖入图片</span>
+                <span class="upload-subtitle" data-file-summary aria-live="polite">最多 16 张，支持多次追加</span>
+              </label>
+              <div class="reference-preview-strip" data-reference-preview></div>
+              </div>
+            </div>
+
+            <div class="button-row form-actions">
+              <button class="primary-button" type="submit">开始生成</button>
+              <button class="ghost-button" type="button" data-reset-form="gpt-image-2-form">恢复默认</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="result-panel reveal reveal-delay-2">
+          <div class="result-main-scroll">
+            <div class="result-topbar">
+              <div>
+                <h2 id="result-title">等待生成</h2>
+              </div>
+              <div class="result-actions">
+                <button
+                  class="ghost-button ghost-button-small result-history-button"
+                  type="button"
+                  id="open-history-modal"
+                  title="查看历史生成记录、图片、提示词和参数"
+                  aria-label="查看历史生成记录、图片、提示词和参数"
+                >
+                  历史
+                </button>
+                <button
+                  class="ghost-button ghost-button-small"
+                  type="button"
+                  id="open-result-details"
+                  title="查看元数据和返回信息"
+                  aria-label="查看元数据和返回信息"
+                >
+                  详情
+                </button>
+                <button class="ghost-button ghost-button-small" type="button" id="open-outputs-folder" title="打开 web_tool/outputs 文件夹">打开文件夹</button>
+                <button class="ghost-button ghost-button-small" type="button" id="clear-results">清空</button>
+              </div>
+            </div>
+
+            <div id="status-banner" class="status-banner idle">
+              就绪
+            </div>
+
+            <section
+              class="queue-panel"
+              id="queue-panel"
+              hidden
+              role="button"
+              tabindex="0"
+              aria-expanded="false"
+              aria-label="任务队列，点击整块可以折叠或展开"
+              data-collapsed="true"
+            >
+              <div class="queue-header">
+                <div>
+                  <h3>任务队列</h3>
+                  <p id="queue-summary">暂无排队任务</p>
+                </div>
+                <div class="queue-actions">
+                  <span class="queue-toggle-chip" id="queue-toggle-chip" aria-hidden="true">展开</span>
+                  <button class="ghost-button ghost-button-small" type="button" id="clear-queue">清空队列</button>
+                </div>
+              </div>
+              <div class="queue-list" id="queue-list"></div>
+            </section>
+
+            <div id="generation-progress" class="generation-progress" hidden>
+              <div class="progress-topline">
+                <span id="progress-label">准备生成</span>
+                <span id="progress-elapsed">0 秒</span>
+              </div>
+              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="progress-fill" class="progress-fill"></span>
+              </div>
+              <p id="progress-note" class="progress-note">正在整理参数。</p>
+            </div>
+
+            <div id="result-gallery" class="gallery-grid empty">
+              <div class="empty-state">
+                <p>暂时还没有图片。</p>
+                <p>点击“开始生成”后会显示预览和下载。</p>
+              </div>
+            </div>
+
+          </div>
+
+          <section class="asset-shelf" id="asset-shelf">
+            <div class="asset-shelf-header">
+              <div>
+                <h3>最近生成</h3>
+                <p id="asset-summary">本页生成会沉淀为缩略图，完整记录点右上角“历史”。</p>
+              </div>
+              <div class="asset-actions">
+                <button class="ghost-button ghost-button-small" type="button" id="clear-assets">清空素材</button>
+              </div>
+            </div>
+            <div class="asset-strip empty" id="asset-strip">
+              <p>暂无最近生成。</p>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="history-modal-shell" id="history-modal" hidden>
+      <button class="history-modal-backdrop" type="button" data-close-history aria-label="关闭历史记录"></button>
+      <section
+        class="history-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-modal-title"
+        aria-describedby="history-modal-summary"
+      >
+        <div class="history-modal-header">
+          <div>
+            <p class="history-modal-kicker">历史记录</p>
+            <h2 id="history-modal-title">生成记录和参数</h2>
+            <p id="history-modal-summary">读取 outputs/history.json 中的记录。</p>
+          </div>
+          <div class="history-modal-actions">
+            <button class="ghost-button ghost-button-small" type="button" id="refresh-history">刷新</button>
+            <button class="ghost-button" type="button" data-close-history>关闭</button>
+          </div>
+        </div>
+
+        <div class="history-layout">
+          <aside class="history-list-panel" aria-label="历史生成记录">
+            <div class="history-tools" aria-label="筛选历史记录">
+              <label class="history-search-field">
+                <span>搜索</span>
+                <input id="history-search" type="search" placeholder="提示词、模型、文件名" autocomplete="off" />
+              </label>
+              <label class="history-filter-field">
+                <span>筛选</span>
+                <select id="history-engine-filter">
+                  <option value="favorite">收藏</option>
+                  <option value="all" selected>全部</option>
+                  <option value="gpt-image-2">GPT Image 2</option>
+                  <option value="banana">Banana Gemini</option>
+                  <option value="unknown">其他</option>
+                </select>
+              </label>
+            </div>
+            <div class="history-count" id="history-count">还没有读取历史。</div>
+            <div class="history-list" id="history-list"></div>
+          </aside>
+          <section class="history-detail-panel" id="history-detail" aria-live="polite">
+            <div class="history-empty">
+              <p>选择一条历史记录查看图片、提示词和参数。</p>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <div class="details-modal-shell" id="result-details-modal" hidden>
+      <button class="details-modal-backdrop" type="button" data-close-details-modal aria-label="关闭详情"></button>
+      <section
+        class="details-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="details-modal-title"
+        aria-describedby="result-details-summary"
+      >
+        <div class="details-modal-header">
+          <div>
+            <p class="details-modal-kicker">结果详情</p>
+            <h2 id="details-modal-title">元数据和返回信息</h2>
+            <p id="result-details-summary">没有额外详情</p>
+          </div>
+          <button class="ghost-button" type="button" data-close-details-modal>关闭</button>
+        </div>
+
+        <div class="result-details-body">
+          <div id="result-meta" class="meta-grid"></div>
+
+          <div class="console-card">
+            <div class="console-header">
+              <h3>返回信息</h3>
+              <button class="ghost-button ghost-button-small" type="button" id="copy-meta">复制元数据</button>
+            </div>
+            <div id="message-list" class="message-list"></div>
+            <pre id="meta-json" class="meta-json">暂无元数据</pre>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="confirm-modal-shell" id="confirm-modal" hidden>
+      <button class="confirm-modal-backdrop" type="button" data-confirm-cancel aria-label="取消操作"></button>
+      <section
+        class="confirm-modal-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-modal-title"
+        aria-describedby="confirm-modal-message"
+      >
+        <p class="confirm-modal-kicker">确认操作</p>
+        <h2 id="confirm-modal-title">确定继续？</h2>
+        <p id="confirm-modal-message">这一步需要确认后才会执行。</p>
+        <p class="confirm-modal-preview" id="confirm-modal-preview" hidden></p>
+        <div class="confirm-modal-actions">
+          <button class="ghost-button" type="button" data-confirm-cancel>取消</button>
+          <button class="danger-button" type="button" id="confirm-modal-confirm">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="size-modal-shell" id="size-modal" hidden>
+      <button class="size-modal-backdrop" type="button" data-close-size-modal aria-label="关闭尺寸设置"></button>
+      <section
+        class="size-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="size-modal-title"
+      >
+        <div class="size-modal-header">
+          <div>
+            <h2 id="size-modal-title">设置图像尺寸</h2>
+            <p id="size-modal-current">当前：auto</p>
+          </div>
+          <button class="icon-close-button" type="button" data-close-size-modal aria-label="关闭尺寸设置">×</button>
+        </div>
+
+        <div class="size-mode-tabs" role="tablist" aria-label="尺寸模式">
+          <button class="active" type="button" data-size-mode="auto">自动</button>
+          <button type="button" data-size-mode="preset">按比例</button>
+          <button type="button" data-size-mode="custom">自定义宽高</button>
+        </div>
+
+        <div class="size-mode-panel active" data-size-panel="auto">
+          <div class="size-mode-icon" aria-hidden="true">A</div>
+          <h3>自动尺寸</h3>
+          <p>由上游接口决定最终尺寸。</p>
+        </div>
+
+        <div class="size-mode-panel" data-size-panel="preset">
+          <div class="size-choice-group">
+            <span>基准分辨率</span>
+            <div class="size-choice-grid" id="size-modal-resolution">
+              <button class="active" type="button" data-size-resolution="1024">1K</button>
+              <button type="button" data-size-resolution="2048">2K</button>
+              <button type="button" data-size-resolution="3840">4K</button>
+            </div>
+          </div>
+          <div class="size-choice-group">
+            <span>图像比例</span>
+            <div class="size-choice-grid ratio-grid" id="size-modal-ratio">
+              <button class="active" type="button" data-size-ratio="1:1">1:1</button>
+              <button type="button" data-size-ratio="3:2">3:2</button>
+              <button type="button" data-size-ratio="2:3">2:3</button>
+              <button type="button" data-size-ratio="16:9">16:9</button>
+              <button type="button" data-size-ratio="9:16">9:16</button>
+              <button type="button" data-size-ratio="4:3">4:3</button>
+              <button type="button" data-size-ratio="3:4">3:4</button>
+              <button type="button" data-size-ratio="21:9">21:9</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="size-mode-panel" data-size-panel="custom">
+          <div class="custom-size-pair size-modal-custom-pair">
+            <input id="size-modal-width" type="number" min="16" max="3840" step="16" value="1536" aria-label="自定义宽度" />
+            <span class="custom-size-separator" aria-hidden="true">x</span>
+            <input id="size-modal-height" type="number" min="16" max="3840" step="16" value="864" aria-label="自定义高度" />
+          </div>
+          <p class="size-modal-hint" id="size-modal-hint">宽高需为 16 的倍数。</p>
+        </div>
+
+        <div class="size-modal-result">
+          <span>将使用</span>
+          <strong id="size-modal-result">auto</strong>
+          <small id="size-modal-result-note"></small>
+        </div>
+
+        <div class="size-modal-actions">
+          <button class="ghost-button" type="button" data-close-size-modal>取消</button>
+          <button class="primary-button" type="button" id="size-modal-apply">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="api-modal-shell" id="api-modal" hidden>
+      <button class="api-modal-backdrop" type="button" data-close-api-modal aria-label="关闭接口设置"></button>
+      <section class="api-modal-card" role="dialog" aria-modal="true" aria-labelledby="api-modal-title">
+        <div class="size-modal-header">
+          <div>
+            <h2 id="api-modal-title">接口设置</h2>
+            <p id="api-modal-current">当前：auto / auto</p>
+          </div>
+          <button class="icon-close-button" type="button" data-close-api-modal aria-label="关闭接口设置">×</button>
+        </div>
+        <label class="field">
+          <span>接口类型</span>
+          <select id="api-modal-endpoint">
+            <option>auto</option>
+            <option>/v1/images/generations</option>
+            <option>/v1/images/edits</option>
+            <option>/v1/responses</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>返回格式</span>
+          <select id="api-modal-format">
+            <option>auto</option>
+            <option>url</option>
+            <option>b64_json</option>
+          </select>
+        </label>
+        <div class="size-modal-result">
+          <span>将使用</span>
+          <strong id="api-modal-result">auto / auto</strong>
+        </div>
+        <div class="size-modal-actions">
+          <button class="ghost-button" type="button" data-close-api-modal>取消</button>
+          <button class="primary-button" type="button" id="api-modal-apply">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="config-modal-shell" id="config-modal" hidden>
+      <div class="config-modal-backdrop" data-close-config></div>
+      <section
+        class="config-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="config-modal-title"
+        aria-describedby="config-feedback"
+      >
+        <div class="config-modal-header">
+          <div>
+            <p class="config-modal-kicker">配置中心</p>
+            <h2 id="config-modal-title">保存、导入和读取连接配置</h2>
+          </div>
+          <button class="ghost-button" type="button" data-close-config>关闭</button>
+        </div>
+
+        <div class="config-feedback idle" id="config-feedback" role="status" aria-live="polite">
+          配置会自动保存到浏览器；需要跨浏览器复用时，可以保存到本地文件。
+        </div>
+
+        <div class="config-modal-grid">
+          <article class="config-info-card config-profile-card">
+            <h3>配置方案</h3>
+            <div class="config-engine-switch" role="tablist" aria-label="选择要保存的接口配置">
+              <button class="config-engine-card active" type="button" data-config-engine="gpt-image-2">
+                <span>GPT Image 2</span>
+                <strong id="config-gpt-model">gpt-image-2</strong>
+                <em id="config-gpt-base">未填写地址</em>
+              </button>
+              <button class="config-engine-card" type="button" data-config-engine="banana">
+                <span>Banana Gemini</span>
+                <strong id="config-banana-model">gemini-3-pro-image-preview</strong>
+                <em id="config-banana-base">未填写地址</em>
+              </button>
+            </div>
+            <div class="config-profile-preview" id="config-profile-preview" aria-live="polite">
+              正在读取当前表单。
+            </div>
+            <div class="config-profile-form">
+              <input id="config-profile-name" type="text" placeholder="方案名，例如：GPT 正式 / Banana 测试" />
+              <div class="config-save-actions">
+                <button class="primary-button" type="button" id="save-config-profile">保存为方案</button>
+                <button class="ghost-button" type="button" id="save-config-file">同步到本地文件</button>
+              </div>
+            </div>
+            <div class="config-profile-list" id="config-profile-list">
+              <p class="config-profile-empty">还没有保存配置方案。</p>
+            </div>
+          </article>
+
+          <details class="config-info-card config-more-card">
+            <summary>浏览器、后端和导入导出</summary>
+            <div class="config-more-body">
+              <section>
+                <h3>浏览器本地保存</h3>
+                <p>表单改动会自动写入当前浏览器；这里适合日常使用，不会生成文件。</p>
+                <div class="config-action-row">
+                  <button class="ghost-button" type="button" id="export-config">导出浏览器配置 JSON</button>
+                  <button class="ghost-button" type="button" id="clear-local-config">清空本地保存</button>
+                </div>
+              </section>
+              <section>
+                <h3>后端和文件</h3>
+                <p>从环境变量或 `config.local.json` 读取默认值，也可以导入外部 JSON。</p>
+                <div class="config-action-row">
+                  <button class="ghost-button" type="button" id="load-defaults-modal">读取后端默认</button>
+                  <button class="ghost-button" type="button" id="trigger-import-config">导入配置 JSON</button>
+                  <input class="visually-hidden-file-input" id="import-config-input" type="file" accept="application/json,.json" />
+                </div>
+              </section>
+              <section>
+                <h3>支持的配置来源</h3>
+                <pre class="config-hint">GPT_IMAGE_2_API_KEY
+GPT_IMAGE_2_BASE_URL
+GPT_IMAGE_2_MODEL
+BANANA_API_KEY
+BANANA_API_BASE_URL
+BANANA_MODEL_TYPE
+
+web_tool/config.local.json</pre>
+                <p class="config-subnote">环境变量优先级高于本地配置文件；文件格式可以从“导出 JSON”拿到。</p>
+              </section>
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>
+
+    <div class="image-lightbox" id="image-lightbox" hidden>
+      <button class="image-lightbox-backdrop" type="button" data-close-lightbox aria-label="关闭图片预览"></button>
+      <section
+        class="image-lightbox-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-lightbox-title"
+        aria-describedby="image-lightbox-caption"
+      >
+        <div class="image-lightbox-header">
+          <div>
+            <p class="image-lightbox-kicker">图片预览</p>
+            <h2 id="image-lightbox-title">预览图片</h2>
+          </div>
+          <div class="image-lightbox-actions" aria-label="图片缩放控制">
+            <div class="image-zoom-controls" role="group" aria-label="缩放图片">
+              <button class="ghost-button ghost-button-small" type="button" data-lightbox-zoom="out" title="缩小图片" aria-label="缩小图片">-</button>
+              <span class="image-zoom-value" id="image-lightbox-zoom-value">适配</span>
+              <button class="ghost-button ghost-button-small" type="button" data-lightbox-zoom="in" title="放大图片" aria-label="放大图片">+</button>
+              <button class="ghost-button ghost-button-small" type="button" data-lightbox-zoom="fit" title="适配窗口">适配</button>
+              <button class="ghost-button ghost-button-small" type="button" data-lightbox-zoom="actual" title="按原始像素比例查看">100%</button>
+            </div>
+            <button class="ghost-button" type="button" data-close-lightbox>关闭</button>
+          </div>
+        </div>
+        <div
+          class="image-lightbox-stage"
+          id="image-lightbox-stage"
+          tabindex="0"
+          aria-label="图片预览区域，可滚轮缩放，放大后可拖拽查看细节"
+        >
+          <img id="image-lightbox-img" alt="" />
+        </div>
+        <p class="image-lightbox-caption" id="image-lightbox-caption"></p>
+      </section>
+    </div>
+
+    <script src="/static/app.js?v=20260503-wide-layout-v1"></script>
+  </body>
+</html>

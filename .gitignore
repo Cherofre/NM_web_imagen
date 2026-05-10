@@ -1,0 +1,16 @@
+config.local.json
+logs/
+saved_images/
+outputs/
+*.png
+.chrome-debug/
+.playwright-mcp/
+.runtime/
+__pycache__/
+*.pyc
+*.pyo
+server.out.log
+server.err.log
+page-check*.png
+studio-web/node_modules/
+studio-web/tsconfig.tsbuildinfo

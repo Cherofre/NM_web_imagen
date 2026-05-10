@@ -1,0 +1,17 @@
+{
+  "active_engine": "banana",
+  "forms": {
+    "banana-form": {
+      "api_key": "your-banana-key",
+      "api_base_url": "https://banana-api.example.com",
+      "model_type": "gemini-3-pro-image-preview",
+      "infinite_timeout": true,
+      "timeout_seconds": "60"
+    },
+    "gpt-image-2-form": {
+      "api_key": "your-gpt-image-2-key",
+      "base_url": "https://gpt-image-api.example.com",
+      "model": "gpt-image-2"
+    }
+  }
+}
