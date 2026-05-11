@@ -1702,6 +1702,11 @@ img {
   line-height: 1.5;
 }
 
+.stacked-field {
+  display: grid;
+  gap: 8px;
+}
+
 .toggle {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;

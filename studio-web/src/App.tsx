@@ -49,6 +49,7 @@ type ReferenceSnapshot = {
   size?: number;
   mime_type?: string;
   src?: string;
+  dimensions?: { width?: number; height?: number };
 };
 
 type GeneratedImage = {
@@ -121,6 +122,7 @@ type GptForm = {
   base_url: string;
   model: string;
   chat_model: string;
+  reasoning_effort: string;
   prompt: string;
   negative_prompt: string;
   poster_text: string;
@@ -188,6 +190,17 @@ const gptEditModeLabels: Record<string, string> = {
   reference: "参考",
   outpaint: "扩图",
 };
+const gptChatModelOptions = ["gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
+const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh"];
+const gptReasoningLabels: Record<string, string> = {
+  auto: "自动",
+  none: "无",
+  minimal: "极低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+};
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
 
@@ -221,7 +234,8 @@ const defaultGptForm: GptForm = {
   api_key: "",
   base_url: "https://gpt-image-api.example.com",
   model: "gpt-image-2",
-  chat_model: "gpt-5.4",
+  chat_model: "gpt-5.5",
+  reasoning_effort: "medium",
   prompt: "",
   negative_prompt: "",
   poster_text: "",
@@ -331,6 +345,7 @@ function compactReferenceSnapshot(snapshot: ReferenceSnapshot, keepSrc = true): 
     size: snapshot.size,
     mime_type: snapshot.mime_type,
     src: keepSrc ? snapshot.src : undefined,
+    dimensions: snapshot.dimensions,
   };
   return Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined && value !== "")) as ReferenceSnapshot;
 }
@@ -458,12 +473,33 @@ function loadWorkbenchSessionState() {
   return { sessions, activeSessionId };
 }
 
+function normalizeSessionStatePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const source = payload as { sessions?: unknown; active_session_id?: unknown; activeSessionId?: unknown };
+  const sessions = normalizeSessions(source.sessions);
+  if (!sessions.length) return null;
+  const activeCandidate = typeof source.active_session_id === "string"
+    ? source.active_session_id
+    : typeof source.activeSessionId === "string"
+    ? source.activeSessionId
+    : "";
+  return {
+    sessions,
+    activeSessionId: sessions.some((session) => session.id === activeCandidate) ? activeCandidate : sessions[0].id,
+  };
+}
+
 function normalizeGptForm(value: Partial<GptForm> = {}): GptForm {
   const normalizedSize = normalizeCustomImageSize(value.custom_size || defaultGptForm.custom_size).value;
+  const reasoningEffort = gptReasoningOptions.includes(String(value.reasoning_effort || ""))
+    ? String(value.reasoning_effort)
+    : defaultGptForm.reasoning_effort;
   return {
     ...defaultGptForm,
     ...value,
     custom_size: normalizedSize,
+    chat_model: value.chat_model || defaultGptForm.chat_model,
+    reasoning_effort: reasoningEffort,
     n: coerceNumber(value.n, defaultGptForm.n),
     seed: coerceNumber(value.seed, defaultGptForm.seed),
     reference_strength: coerceNumber(value.reference_strength, defaultGptForm.reference_strength),
@@ -505,12 +541,13 @@ function buildConfigPayload(activeEngine: Engine, gpt: GptForm, banana: BananaFo
     version: 1,
     active_engine: activeEngine,
     forms: {
-      "gpt-image-2-form": {
-        api_key: gpt.api_key.trim(),
-        base_url: gpt.base_url.trim(),
-        model: gpt.model.trim(),
-        chat_model: gpt.chat_model.trim(),
-      },
+    "gpt-image-2-form": {
+      api_key: gpt.api_key.trim(),
+      base_url: gpt.base_url.trim(),
+      model: gpt.model.trim(),
+      chat_model: gpt.chat_model.trim(),
+      reasoning_effort: gpt.reasoning_effort.trim(),
+    },
       "banana-form": {
         api_key: banana.api_key.trim(),
         api_base_url: banana.api_base_url.trim(),
@@ -549,6 +586,7 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
     base_url: gpt.base_url,
     model: gpt.chat_model || gpt.model,
     chat_model: gpt.chat_model,
+    reasoning_effort: gpt.reasoning_effort,
     timeout: gpt.timeout,
   };
 }
@@ -556,6 +594,8 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
 const gptHistoryKeys: Array<keyof GptForm> = [
   "prompt",
   "negative_prompt",
+  "chat_model",
+  "reasoning_effort",
   "poster_text",
   "size",
   "custom_size",
@@ -661,6 +701,8 @@ function App() {
   const gptComposerSizeTierRef = useRef<GptComposerSizeTier>(gptComposerSizeTier);
   const gptComposerAspectRef = useRef<GptComposerAspect>(gptComposerAspect);
   const tooltipTimerRef = useRef<number | null>(null);
+  const sessionsHydratedRef = useRef(false);
+  const sessionSaveTimerRef = useRef<number | null>(null);
 
   const activePrompt = getPrompt(activeEngine, gptForm, bananaForm);
   const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
@@ -701,13 +743,65 @@ function App() {
   }, [gptComposerAspect]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadServerSessions() {
+      try {
+        const response = await fetch("/api/studio/sessions");
+        if (!response.ok) throw new Error(await readError(response));
+        const payload = await response.json();
+        const normalized = normalizeSessionStatePayload(payload);
+        if (!cancelled && normalized) {
+          setSessions(normalized.sessions);
+          setActiveSessionId(normalized.activeSessionId);
+          localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
+          localStorage.setItem(activeSessionStorageKey, normalized.activeSessionId);
+        }
+      } catch {
+        // localStorage is still the startup fallback when the backend file is absent or unreadable.
+      } finally {
+        sessionsHydratedRef.current = true;
+      }
+    }
+    void loadServerSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionsHydratedRef.current) return undefined;
     try {
       localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
     } catch {
       localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
       setNotice("会话图片引用过多，已只保留文字上下文");
     }
-  }, [sessions]);
+    if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+    sessionSaveTimerRef.current = window.setTimeout(() => {
+      void fetch("/api/studio/sessions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          active_session_id: activeSessionId,
+          sessions: compactSessionsForStorage(sessions),
+        }),
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(await readError(response));
+          return response.json();
+        })
+        .then((payload) => {
+          const normalized = normalizeSessionStatePayload(payload);
+          if (normalized) {
+            localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
+          }
+        })
+        .catch((error) => setNotice(error instanceof Error ? error.message : "保存会话失败"));
+    }, 650);
+    return () => {
+      if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+    };
+  }, [sessions, activeSessionId]);
 
   useEffect(() => {
     localStorage.setItem(activeSessionStorageKey, activeSessionId);
@@ -2294,7 +2388,28 @@ function App() {
                   <Field label="API Key"><input type="password" placeholder="sk-..." value={gptForm.api_key} onChange={(event) => setGptForm({ ...gptForm, api_key: event.target.value })} /></Field>
                   <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => setGptForm({ ...gptForm, base_url: event.target.value })} /></Field>
                   <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
-                  <Field label="聊天模型"><input placeholder="gpt-5.4" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} /></Field>
+                  <Field label="聊天模型">
+                    <div className="stacked-field">
+                      <select
+                        value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setGptForm({ ...gptForm, chat_model: value === "custom" ? gptForm.chat_model : value });
+                        }}
+                      >
+                        <option value="gpt-5.5">gpt-5.5</option>
+                        <option value="gpt-5.4">gpt-5.4</option>
+                        <option value="gpt-5.2">gpt-5.2</option>
+                        <option value="custom">自定义</option>
+                      </select>
+                      <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} />
+                    </div>
+                  </Field>
+                  <Field label="思考强度">
+                    <select value={gptForm.reasoning_effort} onChange={(event) => setGptForm({ ...gptForm, reasoning_effort: event.target.value })}>
+                      {gptReasoningOptions.map((item) => <option key={item} value={item}>{gptReasoningLabels[item]}</option>)}
+                    </select>
+                  </Field>
                 </>
               ) : (
                 <>
