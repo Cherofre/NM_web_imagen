@@ -1,11 +1,11 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 15:35 +08:00
-- Phase: Cleanup / Packaging Hygiene
+- Last Updated: 2026-05-11 17:54 +08:00
+- Phase: GPT Default Startup / New Package Sync
 - Branch: main
-- Goal: Keep the Studio image tool shareable as `NM_web_imagen`, remove obsolete `web_imagen_tool` leftovers, and preserve the current backend persistence/chat work.
-- Current Focus: The React/Vite Studio frontend is built into `static/studio` and served at `/`; the old static UI remains available at `/classic`. Backend Studio sessions persist in `outputs/studio_sessions.json`, reference snapshots persist under `outputs/session_refs/`, and local config/output/runtime folders stay out of commits/packages.
+- Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
+- Current Focus: The Studio frontend now always opens on GPT Image 2, ignores backend/config `active_engine: banana` during startup, and only validates Banana/Gemini configuration when the user selects that engine.
 
 ## Resume Here
 - Start with: `git status --short --branch`
@@ -26,6 +26,8 @@
 - [x] Updated README, launcher error text, and `/classic` UI wording away from `web_tool` / `web_imagen_tool`.
 - [x] Synced a package-clean copy to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - [x] Initialized the G: sync copy as a git repo on `main` with commit `9d66a70`.
+- [x] Changed startup engine handling so the app defaults to GPT Image 2 even if backend defaults or browser storage previously selected Banana/Gemini.
+- [x] Added engine-selection validation so Banana/Gemini missing-config prompts appear when the user clicks Banana/Gemini, not during GPT startup.
 
 ## Verification
 - Latest cleanup verification:
@@ -38,11 +40,19 @@
   - `python -m unittest tests.test_studio_sessions` in I: repo: passed.
   - `npm ci`, `npm run build`, `npm run test:size`, and `python -m unittest tests.test_studio_sessions` in the G: sync copy: passed before cleanup of temporary `node_modules/`.
   - After G: verification cleanup, excluded local/sync artifacts were absent: `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `GwenImageGen.exe`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, and internal ledger files.
+- Latest startup verification:
+  - `npm run build` from `studio-web`: passed.
+  - `npm run test:size` from `studio-web`: passed.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `python -m unittest tests.test_studio_sessions`: passed.
+  - Browser smoke on `http://127.0.0.1:7862/` with temporary `active_engine: banana`, complete GPT config, and incomplete Banana config: opened with GPT Image 2 active, no connection drawer on startup, and Banana/Gemini click opened the drawer with missing API Key warning.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
 - `/classic` intentionally keeps old no-build static UI files; do not delete `static/index.html`, `static/app.js`, or `static/styles.css` unless the rollback path is intentionally retired.
 - No live paid image-generation request is required for packaging cleanup.
+- `C:\Users\Cherofre\.codex\memories` from the project-local `AGENTS.md` could not be created on this machine due access denial; current global memory remains under `C:\Users\mumengfei\.codex\memories`.
+- User clarified the share target should keep new and old packages side by side: do not delete or update `web_imagen_tool/` or `web_imagen_tool.zip` while syncing this fix.
 
 ## History
 - 2026-05-03: Created ledger after the user explicitly asked about `project-ledger-loop`.

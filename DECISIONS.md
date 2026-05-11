@@ -1,6 +1,8 @@
 # Decisions
 
 ## Active Decisions
+- 2026-05-11: Keep new and old share packages side by side; update only `NM_web_imagen/` and `NM_web_imagen.zip`, leaving `web_imagen_tool/` and `web_imagen_tool.zip` intact.
+- 2026-05-11: Always start the Studio UI on GPT Image 2 and defer Banana/Gemini config validation until the user selects Banana/Gemini.
 - 2026-05-10: Keep the Studio-inspired conversation stream browser-local only and do not write it into `outputs/history.json`.
 - 2026-05-10: Use `7861` as this Studio branch's default port so it can coexist with the main/simple branch on `7860`.
 - 2026-05-10: Save only connection fields in `config.local.json`; generation parameters should come from frontend defaults unless changed per request.
@@ -20,6 +22,20 @@
 - Reason: The user wanted continuous editing-style workspace behavior without adding CPA, accounts, Redis, remote sync, or backend history schema changes.
 - Alternatives considered: Persist turns into `outputs/history.json`; add a backend session endpoint; copy the external Studio architecture.
 - Consequences / follow-up: Clearing results clears the current local conversation; history remains the durable backend record. Future export/import can be added separately if needed.
+
+## 2026-05-11 - New/Old Package Coexistence
+- Status: active
+- Decision: Preserve the old `web_imagen_tool/` folder and `web_imagen_tool.zip` in the share directory, while applying current fixes only to `NM_web_imagen/` and `NM_web_imagen.zip`.
+- Reason: The user clarified that new and old should coexist, and the old zip should not be updated.
+- Alternatives considered: Replace the old folder/zip with the renamed package; delete the old artifacts during cleanup.
+- Consequences / follow-up: Future sync and cleanup commands must target the new `NM_web_imagen` path explicitly and avoid broad deletion in the share root.
+
+## 2026-05-11 - GPT Image 2 Startup Default
+- Status: active
+- Decision: Initialize the frontend on GPT Image 2 and ignore `active_engine` from backend defaults during startup. Validate Banana/Gemini config only when the user selects the Banana/Gemini tab.
+- Reason: Starting on Banana/Gemini caused an immediate missing-config prompt even when the desired default workflow is GPT.
+- Alternatives considered: Preserve the last selected engine from browser storage; keep backend `active_engine` authoritative; delay all startup validation.
+- Consequences / follow-up: Browser storage still records user selections after startup, but a fresh reload returns to GPT Image 2 by design.
 
 ## 2026-05-10 - Header Config vs Advanced Parameters
 - Status: active

@@ -656,10 +656,7 @@ function isSameOriginOutput(src: string) {
 
 function App() {
   const initialSessionState = useRef(loadWorkbenchSessionState());
-  const [activeEngine, setActiveEngine] = useState<Engine>(() => {
-    const saved = localStorage.getItem(engineStorageKey);
-    return saved === "banana" ? "banana" : "gpt-image-2";
-  });
+  const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => loadJson(gptStorageKey, defaultGptForm));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => loadJson(bananaStorageKey, defaultBananaForm));
   const [references, setReferences] = useState<File[]>([]);
@@ -864,15 +861,12 @@ function App() {
       const response = await fetch("/api/config/defaults");
       if (!response.ok) throw new Error(await readError(response));
       const payload = (await response.json()) as ConfigPayload;
-      const nextEngine = payload.active_engine === "banana" || payload.active_engine === "gpt-image-2" ? payload.active_engine : activeEngine;
       const nextGpt = normalizeGptForm({ ...gptForm, ...(payload.forms?.["gpt-image-2-form"] || {}) });
       const nextBanana = normalizeBananaForm({ ...bananaForm, ...(payload.forms?.["banana-form"] || {}) });
       setGptForm(nextGpt);
       setBananaForm(nextBanana);
-      if (payload.active_engine === "banana" || payload.active_engine === "gpt-image-2") {
-        setActiveEngine(payload.active_engine);
-      }
-      const issues = configIssues(nextEngine, nextGpt, nextBanana);
+      const startupEngine: Engine = "gpt-image-2";
+      const issues = configIssues(startupEngine, nextGpt, nextBanana);
       if (!hasPromptedForConfig) {
         setHasPromptedForConfig(true);
         if (issues.length > 0) {
@@ -1176,6 +1170,15 @@ function App() {
       appendReferenceFiles([file], "outputs 图片");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "添加参考图失败");
+    }
+  }
+
+  function selectEngine(engine: Engine) {
+    setActiveEngine(engine);
+    const issues = configIssues(engine, gptForm, bananaForm);
+    if (issues.length > 0) {
+      setConnectionOpen(true);
+      setNotice(`请先补全 ${engineLabel(engine)} 配置：${issues.join("、")}`);
     }
   }
 
@@ -1837,10 +1840,10 @@ function App() {
           </div>
           <div className="workspace-controls">
             <div className="mode-tabs" role="tablist" aria-label="选择引擎">
-              <button type="button" className={activeEngine === "gpt-image-2" ? "active" : ""} onClick={() => setActiveEngine("gpt-image-2")}>
+              <button type="button" className={activeEngine === "gpt-image-2" ? "active" : ""} onClick={() => selectEngine("gpt-image-2")}>
                 GPT Image 2
               </button>
-              <button type="button" className={activeEngine === "banana" ? "active" : ""} onClick={() => setActiveEngine("banana")}>
+              <button type="button" className={activeEngine === "banana" ? "active" : ""} onClick={() => selectEngine("banana")}>
                 Banana Gemini
               </button>
             </div>
