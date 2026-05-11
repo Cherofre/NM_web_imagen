@@ -41,6 +41,15 @@ import {
 
 type Engine = "gpt-image-2" | "banana";
 type TurnStatus = "running" | "success" | "error";
+type SubmitMode = "generate" | "chat";
+
+type ReferenceSnapshot = {
+  id: string;
+  name: string;
+  size?: number;
+  mime_type?: string;
+  src?: string;
+};
 
 type GeneratedImage = {
   id?: string;
@@ -70,6 +79,7 @@ type HistoryEntry = {
 type ConversationTurn = {
   id: string;
   engine: Engine;
+  mode?: SubmitMode;
   prompt: string;
   negativePrompt?: string;
   createdAt: string;
@@ -77,8 +87,18 @@ type ConversationTurn = {
   status: TurnStatus;
   elapsedSeconds?: number;
   images: GeneratedImage[];
+  referenceSnapshots?: ReferenceSnapshot[];
+  reply?: string;
   error?: string;
   meta?: Record<string, unknown>;
+};
+
+type SubmitOverrides = {
+  mode?: SubmitMode;
+  engine?: Engine;
+  prompt?: string;
+  references?: File[];
+  referenceSnapshots?: ReferenceSnapshot[];
 };
 
 type TooltipState = {
@@ -100,6 +120,7 @@ type GptForm = {
   api_key: string;
   base_url: string;
   model: string;
+  chat_model: string;
   prompt: string;
   negative_prompt: string;
   poster_text: string;
@@ -176,6 +197,15 @@ type PreviewImage = {
   objectUrl?: boolean;
 };
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error("读取参考图失败")));
+    reader.readAsDataURL(file);
+  });
+}
+
 function createEmptySession(title = "新对话"): WorkbenchSession {
   const now = new Date().toISOString();
   return {
@@ -191,6 +221,7 @@ const defaultGptForm: GptForm = {
   api_key: "",
   base_url: "https://gpt-image-api.example.com",
   model: "gpt-image-2",
+  chat_model: "gpt-5.4",
   prompt: "",
   negative_prompt: "",
   poster_text: "",
@@ -293,17 +324,29 @@ function compactGeneratedImage(image: GeneratedImage): GeneratedImage {
   return Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined && value !== "")) as GeneratedImage;
 }
 
-function compactTurn(turn: ConversationTurn): ConversationTurn {
+function compactReferenceSnapshot(snapshot: ReferenceSnapshot, keepSrc = true): ReferenceSnapshot {
+  const compact: ReferenceSnapshot = {
+    id: snapshot.id,
+    name: snapshot.name,
+    size: snapshot.size,
+    mime_type: snapshot.mime_type,
+    src: keepSrc ? snapshot.src : undefined,
+  };
+  return Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined && value !== "")) as ReferenceSnapshot;
+}
+
+function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): ConversationTurn {
   return {
     ...turn,
     images: turn.images.map(compactGeneratedImage),
+    referenceSnapshots: turn.referenceSnapshots?.map((snapshot) => compactReferenceSnapshot(snapshot, keepReferenceSrc)),
   };
 }
 
-function compactSessionsForStorage(sessions: WorkbenchSession[]) {
+function compactSessionsForStorage(sessions: WorkbenchSession[], keepReferenceSrc = true) {
   return sortSessionsNewestFirst(sessions).slice(0, 80).map((session) => ({
     ...session,
-    turns: session.turns.slice(-maxTurns).map(compactTurn),
+    turns: session.turns.slice(-maxTurns).map((turn) => compactTurn(turn, keepReferenceSrc)),
   }));
 }
 
@@ -366,7 +409,7 @@ function normalizeSessions(value: unknown): WorkbenchSession[] {
     .map((item) => {
       if (!item || typeof item !== "object") return null;
       const source = item as Partial<WorkbenchSession>;
-      const turns = Array.isArray(source.turns) ? source.turns.slice(-maxTurns).map(compactTurn) : [];
+      const turns = Array.isArray(source.turns) ? source.turns.slice(-maxTurns).map((turn) => compactTurn(turn)) : [];
       const now = new Date().toISOString();
       return {
         id: typeof source.id === "string" && source.id ? source.id : makeId("session"),
@@ -466,6 +509,7 @@ function buildConfigPayload(activeEngine: Engine, gpt: GptForm, banana: BananaFo
         api_key: gpt.api_key.trim(),
         base_url: gpt.base_url.trim(),
         model: gpt.model.trim(),
+        chat_model: gpt.chat_model.trim(),
       },
       "banana-form": {
         api_key: banana.api_key.trim(),
@@ -484,6 +528,29 @@ function createFormData(engine: Engine, gpt: GptForm, banana: BananaForm, refere
   });
   references.forEach((file) => data.append("reference_files", file));
   return data;
+}
+
+function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana: BananaForm) {
+  if (engine === "banana") {
+    return {
+      prompt,
+      api_key: banana.api_key,
+      api_base_url: banana.api_base_url,
+      model_type: banana.model_type,
+      top_p: banana.top_p,
+      timeout_seconds: banana.timeout_seconds,
+      bypass_proxy: banana.bypass_proxy,
+      disable_ssl: banana.disable_ssl,
+    };
+  }
+  return {
+    prompt,
+    api_key: gpt.api_key,
+    base_url: gpt.base_url,
+    model: gpt.chat_model || gpt.model,
+    chat_model: gpt.chat_model,
+    timeout: gpt.timeout,
+  };
 }
 
 const gptHistoryKeys: Array<keyof GptForm> = [
@@ -558,6 +625,7 @@ function App() {
   const [references, setReferences] = useState<File[]>([]);
   const [sessions, setSessions] = useState<WorkbenchSession[]>(() => initialSessionState.current.sessions);
   const [activeSessionId, setActiveSessionId] = useState(() => initialSessionState.current.activeSessionId);
+  const [submitMode, setSubmitMode] = useState<SubmitMode>("generate");
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "history">("sessions");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -636,7 +704,7 @@ function App() {
     try {
       localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
     } catch {
-      localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
+      localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
       setNotice("会话图片引用过多，已只保留文字上下文");
     }
   }, [sessions]);
@@ -877,6 +945,31 @@ function App() {
     });
   }
 
+  async function createReferenceSnapshots(files: File[]): Promise<ReferenceSnapshot[]> {
+    const snapshots = await Promise.all(
+      files.map(async (file, index) => {
+        const id = `${file.name}-${file.size}-${file.lastModified}-${index}`;
+        try {
+          return {
+            id,
+            name: file.name || `reference-${index + 1}.png`,
+            size: file.size,
+            mime_type: file.type || "image/png",
+            src: await readFileAsDataUrl(file),
+          } satisfies ReferenceSnapshot;
+        } catch {
+          return {
+            id,
+            name: file.name || `reference-${index + 1}.png`,
+            size: file.size,
+            mime_type: file.type || "image/png",
+          } satisfies ReferenceSnapshot;
+        }
+      }),
+    );
+    return snapshots.filter((item) => item.name);
+  }
+
   function moveReference(fromIndex: number, toIndex: number) {
     if (fromIndex === toIndex) return;
     setReferences((current) => {
@@ -997,26 +1090,74 @@ function App() {
     }
   }
 
-  async function submit(event?: FormEvent) {
-    event?.preventDefault();
-    if (!hasCompleteConfig) {
-      setConnectionOpen(true);
-      setNotice(`请先补全接口配置：${activeConfigIssues.join("、")}`);
+  async function referenceSnapshotToFile(snapshot: ReferenceSnapshot, index: number) {
+    if (!snapshot.src) {
+      return null;
+    }
+    try {
+      const response = await fetch(snapshot.src);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      return new File([blob], snapshot.name.replace(/[\\/:*?"<>|]+/g, "-") || `reference-${index + 1}.png`, {
+        type: blob.type || snapshot.mime_type || "image/png",
+        lastModified: Date.now(),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function copyReferencesFromTurn(turn: ConversationTurn) {
+    const snapshots = turn.referenceSnapshots || [];
+    if (!snapshots.length) {
+      setNotice("这一轮没有可复制的参考图");
       return;
     }
-    let submitGptForm = gptForm;
-    if (activeEngine === "gpt-image-2") {
-      const normalized = normalizeCustomSize(false);
-      if (normalized?.notice) setNotice(normalized.notice);
-      submitGptForm = { ...gptForm, custom_size: normalized.value };
+    const files = (await Promise.all(snapshots.map(referenceSnapshotToFile))).filter((file): file is File => Boolean(file));
+    if (!files.length) {
+      setNotice("这轮参考图只保留了文件名，当前页面里没有可复用的图片数据");
+      return;
     }
-    const prompt = activePrompt.trim();
+    appendReferenceFiles(files, "这轮参考图");
+  }
+
+  async function regenerateFromTurn(turn: ConversationTurn) {
+    setActiveEngine(turn.engine);
+    setSubmitMode("generate");
+    if (turn.engine === "banana") {
+      setBananaForm((current) => ({ ...current, prompt: turn.prompt }));
+    } else {
+      setGptForm((current) => ({ ...current, prompt: turn.prompt }));
+    }
+    const turnReferences = (
+      await Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile))
+    ).filter((file): file is File => Boolean(file));
+    await submit(undefined, {
+      mode: "generate",
+      engine: turn.engine,
+      prompt: turn.prompt,
+      references: turnReferences,
+      referenceSnapshots: turn.referenceSnapshots || [],
+    });
+  }
+
+  async function submit(event?: FormEvent, overrides: SubmitOverrides = {}) {
+    event?.preventDefault();
+    const currentMode = overrides.mode || submitMode;
+    const currentEngine = overrides.engine || activeEngine;
+    const currentGptForm = currentEngine === "gpt-image-2" && overrides.prompt !== undefined ? { ...gptForm, prompt: overrides.prompt } : gptForm;
+    const currentBananaForm = currentEngine === "banana" && overrides.prompt !== undefined ? { ...bananaForm, prompt: overrides.prompt } : bananaForm;
+    const currentReferences = overrides.references || references;
+    const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm);
+    const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
+    const prompt = (overrides.prompt ?? getPrompt(currentEngine, currentGptForm, currentBananaForm)).trim();
     if (!prompt) {
-      setNotice("请先填写提示词");
+      setNotice(currentMode === "chat" ? "请先输入要记录的聊天内容" : "请先填写提示词");
       promptRef.current?.focus();
       return;
     }
 
+    const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
     const turnId = makeId("turn");
     const createdAt = new Date().toISOString();
     let targetSessionId = activeSessionId;
@@ -1024,15 +1165,127 @@ function App() {
       const created = createSessionFromPrompt(prompt);
       targetSessionId = created.id;
     }
+
+    if (currentMode === "chat") {
+      const turn: ConversationTurn = {
+        id: turnId,
+        engine: currentEngine,
+        mode: "chat",
+        prompt,
+        createdAt,
+        status: "running",
+        images: [],
+        referenceSnapshots,
+        meta: {
+          model: currentModel,
+          reference_count: currentReferences.length,
+          mode: "chat",
+        },
+      };
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === targetSessionId
+            ? {
+                ...session,
+                title: session.turns.length === 0 || session.title === "新对话" ? sessionTitleFromTurns([turn]) : session.title,
+                updatedAt: createdAt,
+                turns: [...session.turns, turn].slice(-maxTurns),
+              }
+            : session,
+        ),
+      );
+      setPrompt(currentEngine, "", setGptForm, currentGptForm, setBananaForm, currentBananaForm);
+      setTimeout(() => promptRef.current?.focus(), 0);
+      setBusy(true);
+      setStatus(`${engineLabel(currentEngine)} 聊天中`);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch(`/api/chat/${currentEngine}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createChatPayload(currentEngine, prompt, currentGptForm, currentBananaForm)),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+        const reply = typeof payload.reply === "string" && payload.reply.trim() ? payload.reply.trim() : "上游聊天接口没有返回文字。";
+        const elapsed = Number(payload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === targetSessionId
+              ? {
+                  ...session,
+                  updatedAt: new Date().toISOString(),
+                  turns: session.turns.map((item) =>
+                    item.id === turnId
+                      ? {
+                          ...item,
+                          status: "success",
+                          finishedAt: new Date().toISOString(),
+                          elapsedSeconds: elapsed,
+                          reply,
+                          meta: payload.meta || item.meta,
+                        }
+                      : item,
+                  ),
+                }
+              : session,
+          ),
+        );
+        setStatus("聊天已回复");
+        setNotice(referenceSnapshots.length ? `聊天已回复，包含 ${referenceSnapshots.length} 张参考图快照` : "聊天已回复");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "聊天失败";
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === targetSessionId
+              ? {
+                  ...session,
+                  updatedAt: new Date().toISOString(),
+                  turns: session.turns.map((item) =>
+                    item.id === turnId
+                      ? {
+                          ...item,
+                          status: "error",
+                          finishedAt: new Date().toISOString(),
+                          elapsedSeconds: (performance.now() - startedAt) / 1000,
+                          error: message,
+                        }
+                      : item,
+                  ),
+                }
+              : session,
+          ),
+        );
+        setStatus("聊天失败");
+        setNotice(message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    if (currentConfigIssues.length > 0) {
+      setConnectionOpen(true);
+      setNotice(`请先补全接口配置：${currentConfigIssues.join("、")}`);
+      return;
+    }
+    let submitGptForm = currentGptForm;
+    if (currentEngine === "gpt-image-2") {
+      const normalized = normalizeCustomSize(false);
+      if (normalized?.notice) setNotice(normalized.notice);
+      submitGptForm = { ...currentGptForm, custom_size: normalized.value };
+    }
     const turn: ConversationTurn = {
       id: turnId,
-      engine: activeEngine,
+      engine: currentEngine,
+      mode: "generate",
       prompt,
-      negativePrompt: gptForm.negative_prompt,
+      negativePrompt: submitGptForm.negative_prompt,
       createdAt,
       status: "running",
       images: [],
-      meta: { model: activeModel, reference_count: references.length },
+      referenceSnapshots,
+      meta: { model: currentModel, reference_count: currentReferences.length },
     };
     setSessions((current) =>
       current.map((session) =>
@@ -1047,13 +1300,13 @@ function App() {
       ),
     );
     setBusy(true);
-    setStatus(`${engineLabel(activeEngine)} 生成中`);
+    setStatus(`${engineLabel(currentEngine)} 生成中`);
     const startedAt = performance.now();
 
     try {
-      const response = await fetch(`/api/generate/${activeEngine}`, {
+      const response = await fetch(`/api/generate/${currentEngine}`, {
         method: "POST",
-        body: createFormData(activeEngine, submitGptForm, bananaForm, references),
+        body: createFormData(currentEngine, submitGptForm, currentBananaForm, currentReferences),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
@@ -1541,14 +1794,73 @@ function App() {
             turns.map((turn, turnIndex) => (
               <article className="turn" key={turn.id}>
                 <div className="user-bubble">
-                  <div className="bubble-meta">{formatTime(turn.createdAt)} · {engineLabel(turn.engine)}</div>
+                  <div className="bubble-meta">
+                    {formatTime(turn.createdAt)} · {turn.mode === "chat" ? "聊天" : engineLabel(turn.engine)}
+                    {turn.referenceSnapshots?.length ? ` · 参考图 ${turn.referenceSnapshots.length}` : ""}
+                  </div>
                   <p>{turn.prompt}</p>
+                  {turn.referenceSnapshots?.length ? (
+                    <div className="turn-reference-strip" aria-label={`本轮参考图 ${turn.referenceSnapshots.length} 张`}>
+                      {turn.referenceSnapshots.map((reference, index) => (
+                        reference.src ? (
+                          <button
+                            type="button"
+                            className="turn-reference-thumb"
+                            key={reference.id || `${turn.id}-reference-${index}`}
+                            onClick={() => openPreviewImage({ src: reference.src || "", name: reference.name })}
+                            title={reference.name}
+                          >
+                            <img src={reference.src} alt={reference.name} loading="lazy" />
+                          </button>
+                        ) : (
+                          <span className="turn-reference-file" key={reference.id || `${turn.id}-reference-${index}`} title={reference.name}>
+                            {reference.name}
+                          </span>
+                        )
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="turn-user-actions" aria-label="本轮操作">
+                    <button
+                      type="button"
+                      onClick={() => void regenerateFromTurn(turn)}
+                      title="再次生成"
+                      aria-label="再次生成"
+                      disabled={busy || turn.mode === "chat"}
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                    <button type="button" onClick={() => copyPrompt(turn.prompt)} title="复制提示词" aria-label="复制提示词">
+                      <Copy size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyReferencesFromTurn(turn)}
+                      title="复制参考图"
+                      aria-label="复制参考图"
+                      disabled={!turn.referenceSnapshots?.some((reference) => reference.src)}
+                    >
+                      <ImagePlus size={14} />
+                    </button>
+                  </div>
                 </div>
                 <div className={`studio-response ${turn.status}`}>
                   <div className="response-avatar"><Sparkles size={18} /></div>
                   <div className="response-body">
                     <div className="response-head">
-                      <strong>{turn.status === "running" ? "正在生成" : turn.status === "success" ? "生成完成" : "生成失败"}</strong>
+                      <strong>
+                        {turn.mode === "chat"
+                          ? turn.status === "running"
+                            ? "正在聊天"
+                            : turn.status === "success"
+                            ? "聊天已回复"
+                            : "聊天失败"
+                          : turn.status === "running"
+                          ? "正在生成"
+                          : turn.status === "success"
+                          ? "生成完成"
+                          : "生成失败"}
+                      </strong>
                       <div className="response-meta">
                         <span>{turn.meta?.model ? String(turn.meta.model) : engineLabel(turn.engine)}</span>
                         {turn.elapsedSeconds ? <span>{turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒</span> : null}
@@ -1557,10 +1869,15 @@ function App() {
                     </div>
                     {turn.status === "running" && (
                       <div className="loading-card">
-                        <Loader2 className="spin" size={20} /> 正在等待上游返回图片
+                        <Loader2 className="spin" size={20} /> {turn.mode === "chat" ? "正在等待上游回复" : "正在等待上游返回图片"}
                       </div>
                     )}
                     {turn.error && <div className="error-card">{turn.error}</div>}
+                    {turn.mode === "chat" && turn.reply && (
+                      <div className="chat-reply-card">
+                        <p>{turn.reply}</p>
+                      </div>
+                    )}
                     {turn.images.length > 0 && (
                       <div className={isTurnExpanded(turn) ? "turn-images expanded" : "turn-images collapsed"}>
                         <div className={turn.images.length === 1 ? "image-grid single" : "image-grid"}>
@@ -1646,6 +1963,26 @@ function App() {
             </div>
           )}
           <div className="composer-toolbar" ref={composerToolsRef}>
+            <div className="submit-mode-switch" role="tablist" aria-label="发送模式">
+              <button
+                type="button"
+                className={submitMode === "generate" ? "active" : ""}
+                onClick={() => setSubmitMode("generate")}
+                aria-selected={submitMode === "generate"}
+                title="调用当前图片模型生成结果"
+              >
+                生成
+              </button>
+              <button
+                type="button"
+                className={submitMode === "chat" ? "active" : ""}
+                onClick={() => setSubmitMode("chat")}
+                aria-selected={submitMode === "chat"}
+                title="只把文字和参考图记录到本地会话，不调用生图接口"
+              >
+                聊天
+              </button>
+            </div>
             <button type="button" onClick={() => fileInputRef.current?.click()} {...tooltipProps("添加参考图，也可以直接把图片拖到网页或输入框。")}>
               <ImagePlus size={16} /> {references.length > 0 ? `参考图 ${references.length}` : "参考图"}
             </button>
@@ -1897,10 +2234,16 @@ function App() {
               ref={promptRef}
               rows={3}
               value={activePrompt}
-              placeholder="描述主体、构图、风格、光线、材质和你想保留的细节"
+              placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
               onChange={(event) => setPrompt(activeEngine, event.target.value, setGptForm, gptForm, setBananaForm, bananaForm)}
             />
-            <button className="submit-button" disabled={busy} type="submit" title="开始生成" aria-label="开始生成">
+            <button
+              className="submit-button"
+              disabled={busy}
+              type="submit"
+              title={submitMode === "chat" ? "发送聊天" : "开始生成"}
+              aria-label={submitMode === "chat" ? "发送聊天" : "开始生成"}
+            >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
           </div>
@@ -1959,7 +2302,8 @@ function App() {
                 <>
                   <Field label="API Key"><input type="password" placeholder="sk-..." value={gptForm.api_key} onChange={(event) => setGptForm({ ...gptForm, api_key: event.target.value })} /></Field>
                   <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => setGptForm({ ...gptForm, base_url: event.target.value })} /></Field>
-                  <Field label="模型名"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
+                  <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
+                  <Field label="聊天模型"><input placeholder="gpt-5.4" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} /></Field>
                 </>
               ) : (
                 <>

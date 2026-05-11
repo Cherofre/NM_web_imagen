@@ -40,9 +40,10 @@ DEFAULT_BANANA_BASE_URL = "https://banana-api.example.com"
 DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_GPT_BASE_URL = "https://gpt-image-api.example.com"
 DEFAULT_GPT_MODEL = "gpt-image-2"
+DEFAULT_GPT_CHAT_MODEL = "gpt-5.4"
 CONFIG_CONNECTION_FIELDS = {
     "banana-form": {"api_key", "api_base_url", "model_type"},
-    "gpt-image-2-form": {"api_key", "base_url", "model"},
+    "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model"},
 }
 LOCAL_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 GPT_ENDPOINT_OPTIONS = {
@@ -458,6 +459,7 @@ def build_runtime_defaults() -> Dict[str, Any]:
             "api_key": pick_env_value("GPT_IMAGE_2_API_KEY", "OPENAI_API_KEY"),
             "base_url": pick_env_value("GPT_IMAGE_2_BASE_URL", "OPENAI_BASE_URL"),
             "model": pick_env_value("GPT_IMAGE_2_MODEL", "OPENAI_IMAGE_MODEL"),
+            "chat_model": pick_env_value("GPT_IMAGE_2_CHAT_MODEL", "OPENAI_CHAT_MODEL", "OPENAI_MODEL"),
         },
     }
 
@@ -1107,6 +1109,65 @@ def build_gpt_api_url(base_url: str, endpoint: str = "/v1/images/generations") -
     return f"{url}{endpoint}"
 
 
+def build_openai_chat_url(base_url: str) -> str:
+    return build_gpt_api_url(base_url, "/v1/chat/completions")
+
+
+def extract_openai_chat_reply(payload: Dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if isinstance(choices, list):
+        parts: List[str] = []
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str):
+                    parts.append(content.strip())
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            text = item.get("text") or item.get("content")
+                            if isinstance(text, str):
+                                parts.append(text.strip())
+            text = choice.get("text")
+            if isinstance(text, str):
+                parts.append(text.strip())
+        reply = "\n".join(part for part in parts if part)
+        if reply:
+            return reply
+
+    output_text = payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+    return ""
+
+
+def extract_banana_text_reply(payload: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    candidates = payload.get("candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content") or {}
+            candidate_parts = content.get("parts") if isinstance(content, dict) else []
+            if not isinstance(candidate_parts, list):
+                continue
+            for part in candidate_parts:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+
+    text = "\n".join(parts)
+    if text.strip():
+        return text.strip()
+    return ""
+
+
 def estimate_cost(total_tokens: int) -> str:
     if total_tokens <= 0:
         return "Unknown"
@@ -1339,6 +1400,140 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "path": str(OUTPUTS_DIR.relative_to(ROOT_DIR)).replace("\\", "/"),
+        }
+
+    @app.post("/api/chat/gpt-image-2")
+    async def chat_gpt_image_2(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        prompt = str(payload.get("prompt") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
+        model = str(payload.get("chat_model") or payload.get("model") or DEFAULT_GPT_CHAT_MODEL).strip()
+        timeout = int(payload.get("timeout") or 120)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="请先输入聊天内容")
+        if not model:
+            raise HTTPException(status_code=400, detail="请填写聊天模型名")
+
+        api_url = build_openai_chat_url(base_url)
+        started_at = time.time()
+        try:
+            response = requests.post(
+                api_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "你是一个中文生图工作台里的创作助手。回答要直接、实用，优先帮助用户改提示词、理解参考图和推进生成方案。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+                timeout=max(10, timeout),
+            )
+        except requests.Timeout as exc:
+            raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}") from exc
+
+        if not response.ok:
+            raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
+
+        response_data = response.json()
+        reply = extract_openai_chat_reply(response_data)
+        if not reply:
+            raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
+
+        usage = response_data.get("usage") if isinstance(response_data, dict) else {}
+        return {
+            "ok": True,
+            "engine": "gpt-image-2",
+            "reply": reply,
+            "meta": sanitize_history_meta(
+                {
+                    "model": model,
+                    "api_base_url": api_url,
+                    "elapsed_seconds": round(time.time() - started_at, 2),
+                    "usage": usage if isinstance(usage, dict) else {},
+                }
+            ),
+        }
+
+    @app.post("/api/chat/banana")
+    async def chat_banana(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        prompt = str(payload.get("prompt") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
+        model_type = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
+        top_p = float(payload.get("top_p") or 0.95)
+        timeout_seconds = int(payload.get("timeout_seconds") or 60)
+        bypass_proxy = bool(payload.get("bypass_proxy") or False)
+        disable_ssl = bool(payload.get("disable_ssl") or False)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请填写 Banana API Key")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="请先输入聊天内容")
+
+        api_url = build_banana_api_url(api_base_url, model_type)
+        started_at = time.time()
+        session = create_requests_session(bypass_proxy=bypass_proxy)
+        read_timeout = None if timeout_seconds <= 0 else max(10, timeout_seconds)
+        try:
+            response = session.post(
+                api_url,
+                json={
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{"text": prompt}],
+                        }
+                    ],
+                    "generationConfig": {
+                        "topP": top_p,
+                        "responseModalities": ["TEXT"],
+                    },
+                },
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "X-API-Key": api_key,
+                    "X-Banana-Client": "image-generate-web-tool",
+                },
+                timeout=(15, read_timeout),
+                verify=not disable_ssl,
+            )
+        except requests.Timeout as exc:
+            raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}") from exc
+
+        if not response.ok:
+            raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
+
+        response_data = response.json()
+        reply = extract_banana_text_reply(response_data)
+        if not reply:
+            raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
+
+        return {
+            "ok": True,
+            "engine": "banana",
+            "reply": reply,
+            "meta": sanitize_history_meta(
+                {
+                    "model_type": model_type,
+                    "api_base_url": api_url,
+                    "elapsed_seconds": round(time.time() - started_at, 2),
+                }
+            ),
         }
 
     @app.post("/api/generate/banana")
