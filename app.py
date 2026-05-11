@@ -1402,6 +1402,56 @@ def extract_banana_text_reply(payload: Dict[str, Any]) -> str:
     return ""
 
 
+def normalize_chat_history_messages(messages: Any, limit: int = 20) -> List[Dict[str, str]]:
+    if not isinstance(messages, list):
+        return []
+
+    normalized: List[Dict[str, str]] = []
+    for item in messages:
+        role = ""
+        content = ""
+        if isinstance(item, dict):
+            role = str(item.get("role") or "").strip().lower()
+            raw_content = item.get("content")
+            if isinstance(raw_content, str):
+                content = raw_content.strip()
+        elif isinstance(item, str):
+            role = "user"
+            content = item.strip()
+
+        if role not in {"user", "assistant", "model"} or not content:
+            continue
+        normalized.append(
+            {
+                "role": "assistant" if role == "model" else role,
+                "content": compact_text(content, 2000),
+            }
+        )
+
+    return normalized[-limit:]
+
+
+def build_openai_chat_messages(prompt: str, history_messages: Any) -> List[Dict[str, str]]:
+    messages: List[Dict[str, str]] = [
+        {
+            "role": "system",
+            "content": "你是一个中文生图工作台里的创作助手。回答要直接、实用，优先帮助用户改提示词、理解参考图和推进生成方案。",
+        }
+    ]
+    messages.extend(normalize_chat_history_messages(history_messages))
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def build_banana_chat_contents(prompt: str, history_messages: Any) -> List[Dict[str, Any]]:
+    contents: List[Dict[str, Any]] = []
+    for message in normalize_chat_history_messages(history_messages):
+        role = "model" if message["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": message["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    return contents
+
+
 def estimate_cost(total_tokens: int) -> str:
     if total_tokens <= 0:
         return "Unknown"
@@ -1675,13 +1725,7 @@ def create_app() -> FastAPI:
         api_url = build_openai_chat_url(base_url)
         chat_payload: Dict[str, Any] = {
             "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个中文生图工作台里的创作助手。回答要直接、实用，优先帮助用户改提示词、理解参考图和推进生成方案。",
-                },
-                {"role": "user", "content": prompt},
-            ],
+            "messages": build_openai_chat_messages(prompt, payload.get("messages")),
         }
         if reasoning_effort != "auto":
             chat_payload["reasoning_effort"] = reasoning_effort
@@ -1749,12 +1793,7 @@ def create_app() -> FastAPI:
             response = session.post(
                 api_url,
                 json={
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [{"text": prompt}],
-                        }
-                    ],
+                    "contents": build_banana_chat_contents(prompt, payload.get("messages")),
                     "generationConfig": {
                         "topP": top_p,
                         "responseModalities": ["TEXT"],

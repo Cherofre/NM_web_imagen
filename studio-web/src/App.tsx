@@ -94,6 +94,11 @@ type ConversationTurn = {
   meta?: Record<string, unknown>;
 };
 
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 type SubmitOverrides = {
   mode?: SubmitMode;
   engine?: Engine;
@@ -391,6 +396,36 @@ function sessionTitleFromTurns(turns: ConversationTurn[]) {
   return firstPrompt.length > 24 ? `${firstPrompt.slice(0, 24)}...` : firstPrompt;
 }
 
+function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: string, limit = 12): ChatMessage[] {
+  const context: ChatMessage[] = [];
+  for (const turn of turns) {
+    if (turn.id === currentTurnId) break;
+    const prompt = turn.prompt.trim();
+    if (prompt) {
+      context.push({ role: "user", content: prompt });
+    }
+
+    if (turn.reply?.trim()) {
+      context.push({ role: "assistant", content: turn.reply.trim() });
+      continue;
+    }
+
+    if (turn.mode !== "chat" && turn.status === "success") {
+      const count = turn.images.length;
+      const imageSummary = count > 0 ? `已根据上一轮提示生成 ${count} 张图片。` : "上一轮生成已完成，但没有记录到结果图。";
+      const metaMessages = Array.isArray(turn.meta?.messages) ? turn.meta.messages : [];
+      const textMessages = metaMessages.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 3);
+      context.push({
+        role: "assistant",
+        content: [imageSummary, ...textMessages].join("\n"),
+      });
+    } else if (turn.error?.trim()) {
+      context.push({ role: "assistant", content: `上一轮失败：${turn.error.trim()}` });
+    }
+  }
+  return context.slice(-limit);
+}
+
 function sessionTimestamp(session: WorkbenchSession) {
   const time = new Date(session.updatedAt || session.createdAt).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -567,10 +602,11 @@ function createFormData(engine: Engine, gpt: GptForm, banana: BananaForm, refere
   return data;
 }
 
-function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana: BananaForm) {
+function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana: BananaForm, messages: ChatMessage[] = []) {
   if (engine === "banana") {
     return {
       prompt,
+      messages,
       api_key: banana.api_key,
       api_base_url: banana.api_base_url,
       model_type: banana.model_type,
@@ -582,6 +618,7 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
   }
   return {
     prompt,
+    messages,
     api_key: gpt.api_key,
     base_url: gpt.base_url,
     model: gpt.chat_model || gpt.model,
@@ -1292,10 +1329,12 @@ function App() {
       setStatus(`${engineLabel(currentEngine)} 聊天中`);
       const startedAt = performance.now();
       try {
+        const targetSession = sessions.find((session) => session.id === targetSessionId);
+        const chatContextMessages = buildChatContextMessages([...(targetSession?.turns || []), turn], turnId);
         const response = await fetch(`/api/chat/${currentEngine}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(createChatPayload(currentEngine, prompt, currentGptForm, currentBananaForm)),
+          body: JSON.stringify(createChatPayload(currentEngine, prompt, currentGptForm, currentBananaForm, chatContextMessages)),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);

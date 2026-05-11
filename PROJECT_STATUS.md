@@ -1,11 +1,11 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 18:05 +08:00
-- Phase: Synced / Package Verified
+- Last Updated: 2026-05-11 18:28 +08:00
+- Phase: Chat Context Fix / Local Verified
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: The Studio frontend now always opens on GPT Image 2, ignores backend/config `active_engine: banana` during startup, and only validates Banana/Gemini configuration when the user selects that engine.
+- Current Focus: Chat requests now include recent current-session context instead of treating every user message as an isolated one-off request.
 
 ## Resume Here
 - Start with: `git status --short --branch`
@@ -30,6 +30,7 @@
 - [x] Added engine-selection validation so Banana/Gemini missing-config prompts appear when the user clicks Banana/Gemini, not during GPT startup.
 - [x] Synced the clean `NM_web_imagen/` package folder to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - [x] Updated only `NM_web_imagen.zip`; `web_imagen_tool/` and `web_imagen_tool.zip` remain in place for coexistence.
+- [x] Added chat context forwarding: frontend sends recent turn messages, backend forwards them to GPT chat messages and Banana/Gemini contents.
 
 ## Verification
 - Latest cleanup verification:
@@ -52,11 +53,18 @@
   - `NM_web_imagen.zip` contains root `NM_web_imagen\`, does not contain `web_imagen_tool\`, and has no excluded local artifacts.
   - G: `NM_web_imagen/` final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
   - Old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
+- Latest chat-context verification:
+  - `python -m unittest tests.test_studio_sessions`: passed, including GPT and Banana context forwarding tests.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `npm run build` from `studio-web`: passed.
+  - `npm run test:size` from `studio-web`: passed.
+  - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
 - `/classic` intentionally keeps old no-build static UI files; do not delete `static/index.html`, `static/app.js`, or `static/styles.css` unless the rollback path is intentionally retired.
 - No live paid image-generation request is required for packaging cleanup.
+- Browser payload smoke could not be completed because the in-app browser navigation timed out; code-level build and backend request-contract tests cover the fix.
 - `C:\Users\Cherofre\.codex\memories` from the project-local `AGENTS.md` could not be created on this machine due access denial; current global memory remains under `C:\Users\mumengfei\.codex\memories`.
 - User clarified the share target should keep new and old packages side by side: do not delete or update `web_imagen_tool/` or `web_imagen_tool.zip` while syncing this fix.
 

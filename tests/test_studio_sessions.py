@@ -128,3 +128,95 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual("gpt-5.5", captured["json"]["model"])
         self.assertEqual("high", captured["json"]["reasoning_effort"])
         self.assertEqual("high", response.json()["meta"]["reasoning_effort"])
+
+    def test_gpt_chat_forwards_conversation_context(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": "继续这个方向"}}]}
+
+        def fake_post(*_args, **kwargs):
+            captured["json"] = kwargs["json"]
+            return FakeResponse()
+
+        with patch.object(webapp.requests, "post", side_effect=fake_post):
+            response = self.client.post(
+                "/api/chat/gpt-image-2",
+                json={
+                    "prompt": "那第二版怎么改？",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "chat_model": "gpt-5.5",
+                    "messages": [
+                        {"role": "user", "content": "我要做蓝色闪电刀光。"},
+                        {"role": "assistant", "content": "可以强化方向性和边缘高光。"},
+                    ],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        messages = captured["json"]["messages"]
+        self.assertEqual("system", messages[0]["role"])
+        self.assertEqual(
+            [
+                ("user", "我要做蓝色闪电刀光。"),
+                ("assistant", "可以强化方向性和边缘高光。"),
+                ("user", "那第二版怎么改？"),
+            ],
+            [(item["role"], item["content"]) for item in messages[1:]],
+        )
+
+    def test_banana_chat_forwards_conversation_context(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [{"text": "可以继续加强剪影。"}],
+                            }
+                        }
+                    ]
+                }
+
+        class FakeSession:
+            def post(self, *_args, **kwargs):
+                captured["json"] = kwargs["json"]
+                return FakeResponse()
+
+        with patch.object(webapp, "create_requests_session", return_value=FakeSession()):
+            response = self.client.post(
+                "/api/chat/banana",
+                json={
+                    "prompt": "那下一轮呢？",
+                    "api_key": "sk-test",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                    "messages": [
+                        {"role": "user", "content": "做一个火焰冲击波。"},
+                        {"role": "assistant", "content": "重点放在圆形范围和中心亮点。"},
+                    ],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        contents = captured["json"]["contents"]
+        self.assertEqual(
+            [
+                ("user", "做一个火焰冲击波。"),
+                ("model", "重点放在圆形范围和中心亮点。"),
+                ("user", "那下一轮呢？"),
+            ],
+            [(item["role"], item["parts"][0]["text"]) for item in contents],
+        )

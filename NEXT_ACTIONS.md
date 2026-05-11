@@ -1,18 +1,18 @@
 # Next Actions
 
 ## Now
-- [x] Verify the startup regression locally: force backend defaults to Banana/Gemini, keep GPT config complete, leave Banana incomplete, and confirm startup stays on GPT.
-- [x] Confirm clicking Banana/Gemini opens its config warning only after user selection.
-- [x] Commit the GPT-default startup fix and rebuilt Studio assets.
-- [x] Sync only `NM_web_imagen/` to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
-- [x] Update only `NM_web_imagen.zip`.
-- [x] Leave `web_imagen_tool/` and `web_imagen_tool.zip` intact for new/old coexistence.
+- [x] Reproduce the chat context issue in tests: backend chat endpoints forwarded only the current prompt.
+- [x] Add backend request-contract tests for GPT and Banana/Gemini context forwarding.
+- [x] Add frontend context payload assembly from recent current-session turns.
+- [x] Verify Python tests, Python compile, Vite build, size tests, and whitespace check.
+- [x] Commit the chat-context fix.
+- [ ] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
 - Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
-- Verify next: for any future change, rerun `npm run build`, `npm run test:size`, `python -m py_compile .\app.py`, then package via `package_web_tool.ps1`.
+- Verify next: after sync, run `python -m py_compile .\NM_web_imagen\app.py`, inspect `NM_web_imagen.zip`, and confirm local-only artifacts are absent.
 - Do not claim: live upstream generation success for this cleanup; this task is packaging/repo hygiene only.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.
 - Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
