@@ -426,6 +426,35 @@ function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: stri
   return context.slice(-limit);
 }
 
+function buildGenerationContextPrompt(turns: ConversationTurn[], limit = 10) {
+  const messages = buildChatContextMessages(turns, "", limit);
+  if (!messages.length) return "";
+  return messages
+    .map((message) => {
+      const label = message.role === "assistant" ? "创作助手" : "用户";
+      return `${label}: ${message.content}`;
+    })
+    .join("\n\n");
+}
+
+function runningTurnSeconds(turn: ConversationTurn, nowMs: number) {
+  const startedAt = new Date(turn.createdAt).getTime();
+  if (!Number.isFinite(startedAt)) return 0;
+  return Math.max(0, Math.floor((nowMs - startedAt) / 1000));
+}
+
+function runningTurnMessage(turn: ConversationTurn, nowMs: number) {
+  const seconds = runningTurnSeconds(turn, nowMs);
+  if (turn.mode === "chat") {
+    if (seconds < 4) return `正在整理上下文... ${seconds}s`;
+    if (seconds < 12) return `思考中... ${seconds}s`;
+    return `上游还在处理，已等待 ${seconds}s`;
+  }
+  if (seconds < 6) return `正在提交生图请求... ${seconds}s`;
+  if (seconds < 20) return `等待上游返回图片... ${seconds}s`;
+  return `图片生成仍在进行，已等待 ${seconds}s`;
+}
+
 function sessionTimestamp(session: WorkbenchSession) {
   const time = new Date(session.updatedAt || session.createdAt).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -707,6 +736,8 @@ function App() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
+  const [promptEditorDraft, setPromptEditorDraft] = useState("");
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "edit" | "strength" | "count" | null>(null);
@@ -727,8 +758,11 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const conversationCanvasRef = useRef<HTMLElement | null>(null);
+  const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
   const customSizeDraftRef = useRef(customSizeDraft);
@@ -737,6 +771,7 @@ function App() {
   const tooltipTimerRef = useRef<number | null>(null);
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
+  const initialScrollKeyRef = useRef("");
 
   const activePrompt = getPrompt(activeEngine, gptForm, bananaForm);
   const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
@@ -747,6 +782,7 @@ function App() {
   const hasCompleteConfig = activeConfigIssues.length === 0;
   const configStatusText = hasCompleteConfig ? "配置已完成" : `缺少 ${activeConfigIssues.join("、")}`;
   const configButtonLabel = hasCompleteConfig ? activeModel || "模型名" : "检查配置";
+  const hasRunningTurn = turns.some((turn) => turn.status === "running");
 
   useEffect(() => {
     localStorage.setItem(gptStorageKey, JSON.stringify(gptForm));
@@ -840,6 +876,21 @@ function App() {
   useEffect(() => {
     localStorage.setItem(activeSessionStorageKey, activeSessionId);
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (turns.length === 0) return;
+    const scrollKey = `${activeSessionId}:${turns.length}`;
+    if (initialScrollKeyRef.current === scrollKey) return;
+    initialScrollKeyRef.current = scrollKey;
+    jumpToConversationEnd();
+  }, [activeSessionId, turns.length]);
+
+  useEffect(() => {
+    if (!hasRunningTurn) return undefined;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunningTurn]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -1186,6 +1237,7 @@ function App() {
     setAdvancedOpen(false);
     setConnectionOpen(false);
     setRenameOpen(false);
+    setPromptEditorOpen(false);
     setHistoryDetail(null);
     closePreviewImage();
     setComposerPopover(null);
@@ -1217,6 +1269,24 @@ function App() {
       setConnectionOpen(true);
       setNotice(`请先补全 ${engineLabel(engine)} 配置：${issues.join("、")}`);
     }
+  }
+
+  function jumpToConversationEnd() {
+    window.requestAnimationFrame(() => {
+      const container = conversationCanvasRef.current;
+      if (!container) return;
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+
+  function stickToConversationEndIfNearBottom(threshold = 180) {
+    const container = conversationCanvasRef.current;
+    if (!container) return;
+    const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distance > threshold) return;
+    window.requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
   }
 
   async function referenceSnapshotToFile(snapshot: ReferenceSnapshot, index: number) {
@@ -1323,6 +1393,7 @@ function App() {
             : session,
         ),
       );
+      jumpToConversationEnd();
       setPrompt(currentEngine, "", setGptForm, currentGptForm, setBananaForm, currentBananaForm);
       setTimeout(() => promptRef.current?.focus(), 0);
       setBusy(true);
@@ -1362,6 +1433,7 @@ function App() {
               : session,
           ),
         );
+        stickToConversationEndIfNearBottom();
         setStatus("聊天已回复");
         setNotice(referenceSnapshots.length ? `聊天已回复，包含 ${referenceSnapshots.length} 张参考图快照` : "聊天已回复");
       } catch (error) {
@@ -1387,6 +1459,7 @@ function App() {
               : session,
           ),
         );
+        stickToConversationEndIfNearBottom();
         setStatus("聊天失败");
         setNotice(message);
       } finally {
@@ -1430,6 +1503,7 @@ function App() {
           : session,
       ),
     );
+    jumpToConversationEnd();
     setBusy(true);
     setStatus(`${engineLabel(currentEngine)} 生成中`);
     const startedAt = performance.now();
@@ -1466,6 +1540,7 @@ function App() {
             : session,
         ),
       );
+      stickToConversationEndIfNearBottom();
       setStatus(payload.ok ? `返回 ${images.length} 张图片` : "请求完成但没有图片");
       setNotice(payload.ok ? "图片已保存到 outputs" : "请查看返回信息");
       if (payload.history_entry) {
@@ -1494,6 +1569,7 @@ function App() {
             : session,
         ),
       );
+      stickToConversationEndIfNearBottom();
       setStatus("生成失败");
       setNotice(message);
     } finally {
@@ -1571,6 +1647,44 @@ function App() {
     } else {
       setGptForm({ ...gptForm, prompt });
     }
+    setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function openPromptEditor() {
+    hideTooltip();
+    setPromptEditorDraft(activePrompt);
+    setPromptEditorOpen(true);
+  }
+
+  function applyPromptEditor() {
+    setPrompt(activeEngine, promptEditorDraft, setGptForm, gptForm, setBananaForm, bananaForm);
+    setPromptEditorOpen(false);
+    setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function draftGenerationFromContext(turn: ConversationTurn) {
+    const turnIndex = turns.findIndex((item) => item.id === turn.id);
+    const contextTurns = turnIndex >= 0 ? turns.slice(0, turnIndex + 1) : turns;
+    const contextPrompt = buildGenerationContextPrompt(contextTurns);
+    if (!contextPrompt.trim()) {
+      setNotice("当前还没有可用于生图的文字上下文。");
+      return;
+    }
+    const prompt = [
+      "请根据下面的当前会话上下文，生成一张新的图片。",
+      "",
+      contextPrompt,
+      "",
+      "请延续已经确认的方向，整合用户最后一次修改意见，输出完整画面。"
+    ].join("\n");
+    setActiveEngine(turn.engine);
+    setSubmitMode("generate");
+    if (turn.engine === "banana") {
+      setBananaForm({ ...bananaForm, prompt });
+    } else {
+      setGptForm({ ...gptForm, prompt });
+    }
+    setNotice("已根据聊天上下文整理成生图提示词，可以继续微调后生成。");
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
@@ -1912,7 +2026,7 @@ function App() {
           </div>
         </header>
 
-        <section className="conversation-canvas">
+        <section className="conversation-canvas" ref={conversationCanvasRef}>
           {turns.length === 0 ? (
             <div className="empty-state">
               <Sparkles size={32} />
@@ -2006,13 +2120,18 @@ function App() {
                     </div>
                     {turn.status === "running" && (
                       <div className="loading-card">
-                        <Loader2 className="spin" size={20} /> {turn.mode === "chat" ? "正在等待上游回复" : "正在等待上游返回图片"}
+                        <Loader2 className="spin" size={20} /> {runningTurnMessage(turn, nowMs)}
                       </div>
                     )}
                     {turn.error && <div className="error-card">{turn.error}</div>}
                     {turn.mode === "chat" && turn.reply && (
                       <div className="chat-reply-card">
                         <p>{turn.reply}</p>
+                        <div className="chat-reply-actions">
+                          <button type="button" onClick={() => draftGenerationFromContext(turn)}>
+                            <Sparkles size={14} /> 以上下文生图
+                          </button>
+                        </div>
                       </div>
                     )}
                     {turn.images.length > 0 && (
@@ -2051,6 +2170,7 @@ function App() {
               </article>
             ))
           )}
+          <div ref={conversationEndRef} className="conversation-end-anchor" aria-hidden="true" />
         </section>
 
         <form
@@ -2372,6 +2492,15 @@ function App() {
               onKeyDown={submitFromComposerKey}
             />
             <button
+              className="prompt-expand-button"
+              type="button"
+              onClick={openPromptEditor}
+              title="展开编辑提示词"
+              aria-label="展开编辑提示词"
+            >
+              展开编辑
+            </button>
+            <button
               className="submit-button"
               disabled={busy}
               type="submit"
@@ -2410,6 +2539,31 @@ function App() {
                 <button type="button" onClick={() => setRenameOpen(false)}>取消</button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+
+      {promptEditorOpen && (
+        <div className="drawer-shell prompt-editor-shell">
+          <button className="drawer-backdrop" type="button" aria-label="关闭提示词编辑" onClick={() => setPromptEditorOpen(false)} />
+          <section className="drawer prompt-editor-drawer" role="dialog" aria-modal="true" aria-label="编辑提示词" tabIndex={-1} onKeyDown={closeOnEscape}>
+            <div className="drawer-head">
+              <div>
+                <p>{submitMode === "chat" ? "聊天内容" : "生成提示词"}</p>
+                <h2>编辑提示词</h2>
+              </div>
+              <button type="button" onClick={() => setPromptEditorOpen(false)} aria-label="关闭提示词编辑" title="关闭"><X size={18} /></button>
+            </div>
+            <textarea
+              className="prompt-editor-textarea"
+              autoFocus
+              value={promptEditorDraft}
+              onChange={(event) => setPromptEditorDraft(event.target.value)}
+            />
+            <div className="drawer-actions">
+              <button type="button" onClick={applyPromptEditor}>应用</button>
+              <button type="button" onClick={() => setPromptEditorOpen(false)}>取消</button>
+            </div>
           </section>
         </div>
       )}

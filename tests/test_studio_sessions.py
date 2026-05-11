@@ -220,3 +220,38 @@ class StudioSessionTests(unittest.TestCase):
             ],
             [(item["role"], item["parts"][0]["text"]) for item in contents],
         )
+
+    def test_gpt_generation_prepends_context_prompt(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"data": [{"b64_json": PNG_1X1}]}
+
+        def fake_post(*_args, **kwargs):
+            captured["json"] = kwargs["json"]
+            return FakeResponse()
+
+        with patch.object(webapp.requests, "post", side_effect=fake_post):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "生成第二版",
+                    "context_prompt": "上一轮方向：蓝色闪电刀光，边缘高光更强。",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "quality": "auto",
+                    "n": "1",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn("当前会话上下文", captured["json"]["prompt"])
+        self.assertIn("蓝色闪电刀光", captured["json"]["prompt"])
+        self.assertTrue(captured["json"]["prompt"].rstrip().endswith("生成第二版"))

@@ -1452,6 +1452,19 @@ def build_banana_chat_contents(prompt: str, history_messages: Any) -> List[Dict[
     return contents
 
 
+def merge_generation_context_prompt(prompt: str, context_prompt: str) -> str:
+    prompt_text = prompt.strip()
+    context_text = compact_text(context_prompt.strip(), 1800)
+    if not context_text:
+        return prompt_text
+    return (
+        "当前会话上下文，仅作为延续本次创作方向的参考：\n"
+        f"{context_text}\n\n"
+        "本次生成要求：\n"
+        f"{prompt_text}"
+    )
+
+
 def estimate_cost(total_tokens: int) -> str:
     if total_tokens <= 0:
         return "Unknown"
@@ -1838,6 +1851,7 @@ def create_app() -> FastAPI:
     @app.post("/api/generate/banana")
     async def generate_banana(
         prompt: str = Form(""),
+        context_prompt: str = Form(""),
         api_key: str = Form(""),
         api_base_url: str = Form(DEFAULT_BANANA_BASE_URL),
         model_type: str = Form(DEFAULT_BANANA_MODEL),
@@ -1857,6 +1871,7 @@ def create_app() -> FastAPI:
         if batch_size < 1 or batch_size > 8:
             raise HTTPException(status_code=400, detail="Banana 的 batch_size 只能是 1 到 8")
 
+        effective_prompt = merge_generation_context_prompt(prompt, context_prompt)
         reference_assets = await read_upload_assets(reference_files, limit=14)
         effective_aspect_ratio = resolve_banana_aspect_ratio_from_reference(aspect_ratio, reference_assets)
         started_at = time.time()
@@ -1869,7 +1884,7 @@ def create_app() -> FastAPI:
             current_seed = seed + index if seed >= 0 else -1
             seeds.append(current_seed)
             payload = build_banana_request(
-                prompt=prompt,
+                prompt=effective_prompt,
                 seed=current_seed,
                 aspect_ratio=aspect_ratio,
                 top_p=top_p,
@@ -1937,6 +1952,7 @@ def create_app() -> FastAPI:
         }
         form_state = {
             "prompt": prompt,
+            "context_prompt": compact_text(context_prompt.strip(), 1800),
             "batch_size": batch_size,
             "aspect_ratio": aspect_ratio,
             "image_size": image_size,
@@ -1972,6 +1988,7 @@ def create_app() -> FastAPI:
         base_url: str = Form(DEFAULT_GPT_BASE_URL),
         model: str = Form(DEFAULT_GPT_MODEL),
         prompt: str = Form(""),
+        context_prompt: str = Form(""),
         negative_prompt: str = Form(""),
         poster_text: str = Form(""),
         size: str = Form("auto"),
@@ -2012,7 +2029,7 @@ def create_app() -> FastAPI:
             )
 
         poster_text_clean = poster_text.strip()
-        effective_prompt = prompt.strip()
+        effective_prompt = merge_generation_context_prompt(prompt, context_prompt)
         if poster_text_clean:
             effective_prompt = (
                 f"{effective_prompt}\n\n"
@@ -2196,6 +2213,7 @@ def create_app() -> FastAPI:
         }
         form_state = {
             "prompt": prompt,
+            "context_prompt": compact_text(context_prompt.strip(), 1800),
             "negative_prompt": negative_prompt,
             "poster_text": poster_text_clean,
             "size": size,
