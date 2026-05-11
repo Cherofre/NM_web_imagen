@@ -30,6 +30,13 @@ OUTPUTS_DIR = ROOT_DIR / "outputs"
 OUTPUTS_URL_PREFIX = "/outputs"
 HISTORY_FILE = OUTPUTS_DIR / "history.json"
 HISTORY_MAX_ENTRIES = 300
+STUDIO_SESSIONS_FILE = OUTPUTS_DIR / "studio_sessions.json"
+SESSION_REFS_DIR = OUTPUTS_DIR / "session_refs"
+STUDIO_MAX_SESSIONS = 80
+STUDIO_MAX_TURNS = 80
+STUDIO_MAX_REFS_PER_TURN = 8
+STUDIO_MAX_REF_FILES = 240
+STUDIO_MAX_REF_BYTES = 256 * 1024 * 1024
 CONFIG_FILE_CANDIDATES = [
     ROOT_DIR / "config.local.json",
     ROOT_DIR / "config.defaults.json",
@@ -41,9 +48,10 @@ DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_GPT_BASE_URL = "https://gpt-image-api.example.com"
 DEFAULT_GPT_MODEL = "gpt-image-2"
 DEFAULT_GPT_CHAT_MODEL = "gpt-5.4"
+GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh"}
 CONFIG_CONNECTION_FIELDS = {
     "banana-form": {"api_key", "api_base_url", "model_type"},
-    "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model"},
+    "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model", "reasoning_effort"},
 }
 LOCAL_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 GPT_ENDPOINT_OPTIONS = {
@@ -460,6 +468,7 @@ def build_runtime_defaults() -> Dict[str, Any]:
             "base_url": pick_env_value("GPT_IMAGE_2_BASE_URL", "OPENAI_BASE_URL"),
             "model": pick_env_value("GPT_IMAGE_2_MODEL", "OPENAI_IMAGE_MODEL"),
             "chat_model": pick_env_value("GPT_IMAGE_2_CHAT_MODEL", "OPENAI_CHAT_MODEL", "OPENAI_MODEL"),
+            "reasoning_effort": pick_env_value("GPT_REASONING_EFFORT", "OPENAI_REASONING_EFFORT"),
         },
     }
 
@@ -519,6 +528,24 @@ def normalize_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def safe_filename_part(value: str, fallback: str = "image") -> str:
     text = re.sub(r"[^a-zA-Z0-9._-]+", "-", value or "").strip(".-")
     return text[:80] or fallback
+
+
+def output_url_for_path(path: Path) -> str:
+    relative = str(path.relative_to(OUTPUTS_DIR)).replace("\\", "/")
+    return f"{OUTPUTS_URL_PREFIX}/{quote(relative)}"
+
+
+def path_from_output_url(value: str) -> Optional[Path]:
+    source = str(value or "").strip()
+    if not source.startswith(f"{OUTPUTS_URL_PREFIX}/"):
+        return None
+    relative = source[len(OUTPUTS_URL_PREFIX):].lstrip("/")
+    candidate = (OUTPUTS_DIR / relative).resolve()
+    try:
+        candidate.relative_to(OUTPUTS_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate
 
 
 def extract_image_bytes(src: str, fallback_mime_type: str = "image/png") -> Optional[Tuple[bytes, str]]:
@@ -631,6 +658,213 @@ def write_history_entries(entries: List[Dict[str, Any]]) -> None:
     temp_path = HISTORY_FILE.with_suffix(".tmp")
     temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(HISTORY_FILE)
+
+
+def read_studio_session_state() -> Dict[str, Any]:
+    if not STUDIO_SESSIONS_FILE.exists():
+        return {"version": 1, "sessions": [], "active_session_id": ""}
+    try:
+        payload = json.loads(STUDIO_SESSIONS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "sessions": [], "active_session_id": ""}
+    if not isinstance(payload, dict):
+        return {"version": 1, "sessions": [], "active_session_id": ""}
+    sessions = payload.get("sessions")
+    return {
+        "version": int(payload.get("version") or 1),
+        "updated_at": payload.get("updated_at"),
+        "active_session_id": str(payload.get("active_session_id") or ""),
+        "sessions": sessions if isinstance(sessions, list) else [],
+    }
+
+
+def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, index: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(snapshot, dict):
+        return None
+    name = str(snapshot.get("name") or f"reference-{index + 1}.png").strip()[:180]
+    ref_id = str(snapshot.get("id") or f"{turn_id}-ref-{index + 1}").strip()[:160]
+    mime_type = str(snapshot.get("mime_type") or snapshot.get("mimeType") or "image/png").strip()
+    src = str(snapshot.get("src") or "").strip()
+    normalized: Dict[str, Any] = {
+        "id": ref_id,
+        "name": name,
+        "mime_type": mime_type if mime_type.startswith("image/") else "image/png",
+    }
+    try:
+        size = int(snapshot.get("size") or 0)
+        if size > 0:
+            normalized["size"] = size
+    except (TypeError, ValueError):
+        pass
+
+    if src:
+        existing_path = path_from_output_url(src)
+        if existing_path and existing_path.is_file():
+            normalized["src"] = src
+            return normalized
+
+        extracted = extract_image_bytes(src, normalized["mime_type"])
+        if extracted:
+            raw_bytes, detected_mime_type = extracted
+            extension = guess_extension(detected_mime_type)
+            filename = (
+                f"{safe_filename_part(session_id, 'session')}-"
+                f"{safe_filename_part(turn_id, 'turn')}-"
+                f"{index + 1:02d}-{safe_filename_part(name, 'reference')}{extension}"
+            )
+            SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
+            target_path = SESSION_REFS_DIR / filename
+            target_path.write_bytes(raw_bytes)
+            normalized["src"] = output_url_for_path(target_path)
+            normalized["mime_type"] = detected_mime_type
+            normalized["size"] = len(raw_bytes)
+            dimensions = detect_image_dimensions(raw_bytes, detected_mime_type)
+            if dimensions:
+                normalized["dimensions"] = dimensions
+    return normalized
+
+
+def compact_studio_turn(turn: Any, session_id: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(turn, dict):
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    turn_id = str(turn.get("id") or f"turn-{int(time.time() * 1000)}").strip()
+    compact: Dict[str, Any] = {
+        "id": turn_id,
+        "engine": str(turn.get("engine") or "gpt-image-2"),
+        "mode": str(turn.get("mode") or "generate"),
+        "prompt": str(turn.get("prompt") or ""),
+        "createdAt": str(turn.get("createdAt") or now),
+        "status": str(turn.get("status") or "success"),
+        "images": [image for image in turn.get("images", []) if isinstance(image, dict)][:20],
+    }
+    for key in ("negativePrompt", "finishedAt", "reply", "error"):
+        value = turn.get(key)
+        if isinstance(value, str) and value:
+            compact[key] = value
+    if isinstance(turn.get("elapsedSeconds"), (int, float)):
+        compact["elapsedSeconds"] = turn["elapsedSeconds"]
+    if isinstance(turn.get("meta"), dict):
+        compact["meta"] = sanitize_history_meta(turn["meta"])
+
+    snapshots = turn.get("referenceSnapshots")
+    if isinstance(snapshots, list):
+        refs = [
+            normalized
+            for index, snapshot in enumerate(snapshots[:STUDIO_MAX_REFS_PER_TURN])
+            if (normalized := normalize_studio_reference(snapshot, session_id, turn_id, index))
+        ]
+        if refs:
+            compact["referenceSnapshots"] = refs
+    return compact
+
+
+def session_timestamp_value(session: Dict[str, Any]) -> float:
+    for key in ("updatedAt", "createdAt"):
+        value = str(session.get(key) or "")
+        if not value:
+            continue
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+    return 0.0
+
+
+def compact_studio_session(session: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(session, dict):
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    session_id = str(session.get("id") or f"session-{int(time.time() * 1000)}").strip()
+    raw_turns = session.get("turns") if isinstance(session.get("turns"), list) else []
+    turns = [
+        compact_turn
+        for turn in raw_turns[-STUDIO_MAX_TURNS:]
+        if (compact_turn := compact_studio_turn(turn, session_id))
+    ]
+    return {
+        "id": session_id,
+        "title": str(session.get("title") or "新对话").strip()[:120] or "新对话",
+        "createdAt": str(session.get("createdAt") or now),
+        "updatedAt": str(session.get("updatedAt") or now),
+        "turns": turns,
+    }
+
+
+def collect_referenced_output_paths(sessions: List[Dict[str, Any]]) -> set[Path]:
+    paths: set[Path] = set()
+    for session in sessions:
+        for turn in session.get("turns", []):
+            refs = turn.get("referenceSnapshots", [])
+            if not isinstance(refs, list):
+                continue
+            for ref in refs:
+                if not isinstance(ref, dict):
+                    continue
+                path = path_from_output_url(str(ref.get("src") or ""))
+                if path:
+                    paths.add(path.resolve())
+    return paths
+
+
+def prune_session_reference_files(sessions: List[Dict[str, Any]]) -> None:
+    if not SESSION_REFS_DIR.exists():
+        return
+    referenced = collect_referenced_output_paths(sessions)
+    files = [path for path in SESSION_REFS_DIR.iterdir() if path.is_file()]
+    for path in files:
+        if path.resolve() not in referenced:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    remaining = sorted(
+        [path for path in SESSION_REFS_DIR.iterdir() if path.is_file()],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    total = 0
+    for index, path in enumerate(remaining):
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        total += size
+        if index >= STUDIO_MAX_REF_FILES or total > STUDIO_MAX_REF_BYTES:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def normalize_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    sessions_value = payload.get("sessions") if isinstance(payload, dict) else []
+    sessions = [
+        compact_session
+        for session in (sessions_value if isinstance(sessions_value, list) else [])
+        if (compact_session := compact_studio_session(session))
+    ]
+    sessions = sorted(sessions, key=session_timestamp_value, reverse=True)[:STUDIO_MAX_SESSIONS]
+    active_session_id = str(payload.get("active_session_id") or payload.get("activeSessionId") or "").strip()
+    if active_session_id and not any(session["id"] == active_session_id for session in sessions):
+        active_session_id = sessions[0]["id"] if sessions else ""
+    return {
+        "version": 1,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "active_session_id": active_session_id or (sessions[0]["id"] if sessions else ""),
+        "sessions": sessions,
+    }
+
+
+def write_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    normalized = normalize_studio_session_state(payload)
+    prune_session_reference_files(normalized["sessions"])
+    temp_path = STUDIO_SESSIONS_FILE.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(STUDIO_SESSIONS_FILE)
+    return normalized
 
 
 def normalize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -1317,7 +1551,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "app": "image-generate-web-tool",
             "engines": ["banana", "gpt-image-2"],
-            "features": {},
+            "features": {"studio_sessions": True, "session_reference_files": True},
         }
 
     @app.get("/api/config/defaults")
@@ -1350,6 +1584,25 @@ def create_app() -> FastAPI:
             "ok": True,
             "path": str(HISTORY_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
             "entries": get_history_payload(limit),
+        }
+
+    @app.get("/api/studio/sessions")
+    async def studio_sessions() -> Dict[str, Any]:
+        state = read_studio_session_state()
+        return {
+            "ok": True,
+            "path": str(STUDIO_SESSIONS_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            **state,
+        }
+
+    @app.put("/api/studio/sessions")
+    async def write_studio_sessions(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        state = write_studio_session_state(payload)
+        return {
+            "ok": True,
+            "path": str(STUDIO_SESSIONS_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "reference_dir": str(SESSION_REFS_DIR.relative_to(ROOT_DIR)).replace("\\", "/"),
+            **state,
         }
 
     @app.patch("/api/history/{entry_id}")
@@ -1408,6 +1661,7 @@ def create_app() -> FastAPI:
         api_key = str(payload.get("api_key") or "").strip()
         base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
         model = str(payload.get("chat_model") or payload.get("model") or DEFAULT_GPT_CHAT_MODEL).strip()
+        reasoning_effort = str(payload.get("reasoning_effort") or "auto").strip().lower()
         timeout = int(payload.get("timeout") or 120)
         if not api_key:
             raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
@@ -1415,8 +1669,22 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="请先输入聊天内容")
         if not model:
             raise HTTPException(status_code=400, detail="请填写聊天模型名")
+        if reasoning_effort not in GPT_REASONING_EFFORTS:
+            reasoning_effort = "auto"
 
         api_url = build_openai_chat_url(base_url)
+        chat_payload: Dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你是一个中文生图工作台里的创作助手。回答要直接、实用，优先帮助用户改提示词、理解参考图和推进生成方案。",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if reasoning_effort != "auto":
+            chat_payload["reasoning_effort"] = reasoning_effort
         started_at = time.time()
         try:
             response = requests.post(
@@ -1426,16 +1694,7 @@ def create_app() -> FastAPI:
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "你是一个中文生图工作台里的创作助手。回答要直接、实用，优先帮助用户改提示词、理解参考图和推进生成方案。",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                },
+                json=chat_payload,
                 timeout=max(10, timeout),
             )
         except requests.Timeout as exc:
@@ -1460,6 +1719,7 @@ def create_app() -> FastAPI:
                 {
                     "model": model,
                     "api_base_url": api_url,
+                    "reasoning_effort": reasoning_effort,
                     "elapsed_seconds": round(time.time() - started_at, 2),
                     "usage": usage if isinstance(usage, dict) else {},
                 }
