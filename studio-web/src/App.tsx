@@ -1574,6 +1574,12 @@ function App() {
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
+  function submitFromComposerKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || busy) return;
+    event.preventDefault();
+    void submit();
+  }
+
   function currentSizeLabel() {
     if (activeEngine === "banana") return `${bananaForm.aspect_ratio} · ${bananaForm.image_size}`;
     return gptForm.size === "custom" ? `${customSizeDraftRef.current.width || "?"}x${customSizeDraftRef.current.height || "?"}` : gptForm.size;
@@ -2363,6 +2369,7 @@ function App() {
               value={activePrompt}
               placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
               onChange={(event) => setPrompt(activeEngine, event.target.value, setGptForm, gptForm, setBananaForm, bananaForm)}
+              onKeyDown={submitFromComposerKey}
             />
             <button
               className="submit-button"

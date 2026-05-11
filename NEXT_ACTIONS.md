@@ -1,12 +1,11 @@
 # Next Actions
 
 ## Now
-- [x] Reproduce the chat context issue in tests: backend chat endpoints forwarded only the current prompt.
-- [x] Add backend request-contract tests for GPT and Banana/Gemini context forwarding.
-- [x] Add frontend context payload assembly from recent current-session turns.
-- [x] Verify Python tests, Python compile, Vite build, size tests, and whitespace check.
-- [x] Commit the chat-context fix.
-- [x] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
+- [x] Add Enter-to-submit handling to the main composer textarea.
+- [x] Preserve Shift+Enter newline behavior and ignore IME composition Enter.
+- [x] Rebuild Studio assets and run Python/backend checks.
+- [x] Commit the composer shortcut fix.
+- [ ] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.

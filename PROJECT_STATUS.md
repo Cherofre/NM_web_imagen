@@ -1,11 +1,11 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 18:31 +08:00
-- Phase: Chat Context Fix / Synced
+- Last Updated: 2026-05-11 19:44 +08:00
+- Phase: Composer Shortcut / Local Verified
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: Chat requests now include recent current-session context instead of treating every user message as an isolated one-off request.
+- Current Focus: The main composer supports Enter to submit and Shift+Enter to insert a newline.
 
 ## Resume Here
 - Start with: `git status --short --branch`
@@ -32,6 +32,7 @@
 - [x] Updated only `NM_web_imagen.zip`; `web_imagen_tool/` and `web_imagen_tool.zip` remain in place for coexistence.
 - [x] Added chat context forwarding: frontend sends recent turn messages, backend forwards them to GPT chat messages and Banana/Gemini contents.
 - [x] Synced the chat-context fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
+- [x] Added composer keyboard shortcut: Enter submits the current chat/generation request; Shift+Enter keeps textarea newline behavior; IME composition is ignored.
 
 ## Verification
 - Latest cleanup verification:
@@ -63,6 +64,12 @@
   - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed.
   - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `.git`, `.svn`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
   - New `NM_web_imagen.zip` contains `static/studio/assets/index-DMFT1-Y0.js`; old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
+- Latest composer shortcut verification:
+  - `npm run build` from `studio-web`: passed.
+  - `npm run test:size` from `studio-web`: passed.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `python -m unittest tests.test_studio_sessions`: passed.
+  - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
