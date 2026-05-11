@@ -5,7 +5,7 @@
 - [x] Preserve Shift+Enter newline behavior and ignore IME composition Enter.
 - [x] Rebuild Studio assets and run Python/backend checks.
 - [x] Commit the composer shortcut fix.
-- [ ] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
+- [x] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.

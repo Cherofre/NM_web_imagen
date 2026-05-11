@@ -1,8 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 19:44 +08:00
-- Phase: Composer Shortcut / Local Verified
+- Last Updated: 2026-05-11 19:47 +08:00
+- Phase: Composer Shortcut / Synced
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
 - Current Focus: The main composer supports Enter to submit and Shift+Enter to insert a newline.
@@ -33,6 +33,7 @@
 - [x] Added chat context forwarding: frontend sends recent turn messages, backend forwards them to GPT chat messages and Banana/Gemini contents.
 - [x] Synced the chat-context fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 - [x] Added composer keyboard shortcut: Enter submits the current chat/generation request; Shift+Enter keeps textarea newline behavior; IME composition is ignored.
+- [x] Synced the composer shortcut fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 
 ## Verification
 - Latest cleanup verification:
@@ -70,6 +71,9 @@
   - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
   - `python -m unittest tests.test_studio_sessions`: passed.
   - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed.
+  - `NM_web_imagen.zip` contains `static/studio/assets/index-60ZvdiML.js`; old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
+  - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `.git`, `.svn`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
