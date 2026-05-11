@@ -5,12 +5,13 @@
 - [x] Rename default packaging from `web_imagen_tool` to `NM_web_imagen`.
 - [x] Refresh README, launcher error text, `/classic` strings, and ledger current state.
 - [x] Run local verification: Python compile, Studio build, size tests, package dry run, and package-content inspection.
-- [ ] Commit the naming/docs cleanup as a second staged commit.
-- [ ] Sync committed project files to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` without local config, outputs, logs, runtime caches, node modules, screenshots, or temporary zips.
-- [ ] Run the same essential verification in the G: copy.
+- [x] Commit the naming/docs cleanup as a second staged commit.
+- [x] Sync committed project files to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` without local config, outputs, logs, runtime caches, node modules, screenshots, temporary zips, or internal ledger files.
+- [x] Run the same essential verification in the G: copy.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
+- Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`, branch `main`, commit `9d66a70`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
 - Verify next: after cleanup edits, run `python -m py_compile .\app.py`, `npm run build`, `npm run test:size`, and a package dry run.
 - Do not claim: live upstream generation success for this cleanup; this task is packaging/repo hygiene only.

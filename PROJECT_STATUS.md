@@ -24,6 +24,8 @@
 - [x] Removed obsolete tracked `GwenImageGen.exe` in commit `c37f909`.
 - [x] Renamed the default package zip and extracted folder from `web_imagen_tool` to `NM_web_imagen`.
 - [x] Updated README, launcher error text, and `/classic` UI wording away from `web_tool` / `web_imagen_tool`.
+- [x] Synced a package-clean copy to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+- [x] Initialized the G: sync copy as a git repo on `main` with commit `9d66a70`.
 
 ## Verification
 - Latest cleanup verification:
@@ -33,6 +35,9 @@
   - `powershell -ExecutionPolicy Bypass -File .\package_web_tool.ps1 -OutputPath <temp zip>`: passed.
   - Package dry run produced root folder `NM_web_imagen/` and excluded `node_modules/`, `tsconfig.tsbuildinfo`, `config.local.json`, `outputs/`, `logs/`, and the removed `GwenImageGen.exe`.
   - `python C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py I:\AI\Vibe Coding\NM_web_imagen`: passed with 0 fail / 0 warn.
+  - `python -m unittest tests.test_studio_sessions` in I: repo: passed.
+  - `npm ci`, `npm run build`, `npm run test:size`, and `python -m unittest tests.test_studio_sessions` in the G: sync copy: passed before cleanup of temporary `node_modules/`.
+  - After G: verification cleanup, excluded local/sync artifacts were absent: `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `GwenImageGen.exe`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, and internal ledger files.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
