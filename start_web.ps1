@@ -167,7 +167,7 @@ function Ensure-PortablePythonZip {
     return
   }
 
-  throw "Bundled Python is missing: vendor\python\python-3.12.10-embed-amd64.zip. Please use the complete web_imagen_tool.zip package."
+  throw "Bundled Python is missing: vendor\python\python-3.12.10-embed-amd64.zip. Please use the complete NM_web_imagen.zip package."
 }
 
 function Ensure-PortablePython {
@@ -203,7 +203,7 @@ function Install-PortableDependencies {
   param([hashtable]$Python)
 
   if (-not (Test-Path -LiteralPath $WheelDir)) {
-    throw "Bundled wheels were not found. Please use the full web_imagen_tool.zip package."
+    throw "Bundled wheels were not found. Please use the full NM_web_imagen.zip package."
   }
 
   $WheelFiles = @(Get-ChildItem -LiteralPath $WheelDir -Filter "*.whl" -File -ErrorAction SilentlyContinue)
@@ -302,7 +302,7 @@ if (-not (Test-PythonDependencies -Python $Python)) {
 
 if (-not (Test-PythonDependencies -Python $Python)) {
   Show-PythonDependencyError -Python $Python
-  throw "Bundled runtime setup failed. Please make sure vendor\wheels is complete and extract the complete web_imagen_tool.zip package again."
+  throw "Bundled runtime setup failed. Please make sure vendor\wheels is complete and extract the complete NM_web_imagen.zip package again."
 }
 
 Write-Host "Opening:"

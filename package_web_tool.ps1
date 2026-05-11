@@ -7,12 +7,12 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ParentDir = Split-Path -Parent $ScriptDir
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-  $OutputPath = Join-Path $ParentDir "web_imagen_tool.zip"
+  $OutputPath = Join-Path $ParentDir "NM_web_imagen.zip"
 }
 
 $OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
-$TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("web_tool_package_" + [System.Guid]::NewGuid().ToString("N"))
-$TempWebTool = Join-Path $TempRoot "web_imagen_tool"
+$TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_web_imagen_package_" + [System.Guid]::NewGuid().ToString("N"))
+$TempAppDir = Join-Path $TempRoot "NM_web_imagen"
 
 $ExcludedDirs = @(
   ".chrome-debug",
@@ -23,6 +23,7 @@ $ExcludedDirs = @(
   ".svn",
   "__pycache__",
   "dist",
+  "node_modules",
   "logs",
   "outputs",
   "saved_images"
@@ -38,6 +39,7 @@ $ExcludedFiles = @(
   "NEXT_ACTIONS.md",
   "DECISIONS.md",
   "config.local.json",
+  "tsconfig.tsbuildinfo",
   "page-check*.png",
   "release-check*.png",
   "ui-*.png",
@@ -86,7 +88,7 @@ function Test-IsExcludedFile {
 if (Test-Path -LiteralPath $TempRoot) {
   Remove-Item -LiteralPath $TempRoot -Recurse -Force
 }
-New-Item -ItemType Directory -Path $TempWebTool -Force | Out-Null
+New-Item -ItemType Directory -Path $TempAppDir -Force | Out-Null
 
 try {
   Get-ChildItem -LiteralPath $ScriptDir -Recurse -Force -File | ForEach-Object {
@@ -95,7 +97,7 @@ try {
       return
     }
 
-    $TargetPath = Join-Path $TempWebTool $RelativePath
+    $TargetPath = Join-Path $TempAppDir $RelativePath
     $TargetDir = Split-Path -Parent $TargetPath
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
     Copy-Item -LiteralPath $_.FullName -Destination $TargetPath -Force
@@ -110,7 +112,7 @@ try {
     Remove-Item -LiteralPath $OutputPath -Force
   }
 
-  Compress-Archive -Path $TempWebTool -DestinationPath $OutputPath -Force
+  Compress-Archive -Path $TempAppDir -DestinationPath $OutputPath -Force
   Write-Host "Package created: $OutputPath"
   Write-Host "Win64 offline package: kept portable Python 3.12 and compatible wheels only."
   Write-Host "Excluded local config, outputs, logs, saved images, local .venv/.runtime, browser cache and Python cache."

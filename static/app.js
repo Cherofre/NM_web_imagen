@@ -1752,7 +1752,7 @@ function renderHistoryList() {
     ? `显示 ${filteredHistoryEntries.length} / ${historyEntries.length} 条历史，点击记录查看详情。`
     : "还没有历史记录。";
   historySummary.textContent = historyEntries.length
-    ? "历史记录会保存在 web_tool/outputs/history.json。"
+    ? "历史记录会保存在 NM_web_imagen/outputs/history.json。"
     : "生成成功后会自动写入 outputs/history.json。";
 
   if (!historyEntries.length) {
@@ -3557,7 +3557,7 @@ async function saveConfigFile(triggerButton = saveConfigFileButton) {
       button.disabled = true;
       button.textContent = "保存中...";
     }
-    setConfigFeedback("loading", "正在写入 web_tool/config.local.json...");
+    setConfigFeedback("loading", "正在写入 NM_web_imagen/config.local.json...");
     const response = await fetch("/api/config/local-file", {
       method: "POST",
       headers: {
