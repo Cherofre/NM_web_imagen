@@ -6,7 +6,7 @@
 - [x] Add frontend context payload assembly from recent current-session turns.
 - [x] Verify Python tests, Python compile, Vite build, size tests, and whitespace check.
 - [x] Commit the chat-context fix.
-- [ ] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
+- [x] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.

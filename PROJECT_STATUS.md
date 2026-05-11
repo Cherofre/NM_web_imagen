@@ -1,8 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 18:28 +08:00
-- Phase: Chat Context Fix / Local Verified
+- Last Updated: 2026-05-11 18:31 +08:00
+- Phase: Chat Context Fix / Synced
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
 - Current Focus: Chat requests now include recent current-session context instead of treating every user message as an isolated one-off request.
@@ -31,6 +31,7 @@
 - [x] Synced the clean `NM_web_imagen/` package folder to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - [x] Updated only `NM_web_imagen.zip`; `web_imagen_tool/` and `web_imagen_tool.zip` remain in place for coexistence.
 - [x] Added chat context forwarding: frontend sends recent turn messages, backend forwards them to GPT chat messages and Banana/Gemini contents.
+- [x] Synced the chat-context fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 
 ## Verification
 - Latest cleanup verification:
@@ -59,6 +60,9 @@
   - `npm run build` from `studio-web`: passed.
   - `npm run test:size` from `studio-web`: passed.
   - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed.
+  - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `.git`, `.svn`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
+  - New `NM_web_imagen.zip` contains `static/studio/assets/index-DMFT1-Y0.js`; old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
