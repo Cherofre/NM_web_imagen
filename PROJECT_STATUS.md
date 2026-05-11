@@ -1,8 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 17:54 +08:00
-- Phase: GPT Default Startup / New Package Sync
+- Last Updated: 2026-05-11 18:05 +08:00
+- Phase: Synced / Package Verified
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
 - Current Focus: The Studio frontend now always opens on GPT Image 2, ignores backend/config `active_engine: banana` during startup, and only validates Banana/Gemini configuration when the user selects that engine.
@@ -28,6 +28,8 @@
 - [x] Initialized the G: sync copy as a git repo on `main` with commit `9d66a70`.
 - [x] Changed startup engine handling so the app defaults to GPT Image 2 even if backend defaults or browser storage previously selected Banana/Gemini.
 - [x] Added engine-selection validation so Banana/Gemini missing-config prompts appear when the user clicks Banana/Gemini, not during GPT startup.
+- [x] Synced the clean `NM_web_imagen/` package folder to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+- [x] Updated only `NM_web_imagen.zip`; `web_imagen_tool/` and `web_imagen_tool.zip` remain in place for coexistence.
 
 ## Verification
 - Latest cleanup verification:
@@ -46,6 +48,10 @@
   - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
   - `python -m unittest tests.test_studio_sessions`: passed.
   - Browser smoke on `http://127.0.0.1:7862/` with temporary `active_engine: banana`, complete GPT config, and incomplete Banana config: opened with GPT Image 2 active, no connection drawer on startup, and Banana/Gemini click opened the drawer with missing API Key warning.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed.
+  - `NM_web_imagen.zip` contains root `NM_web_imagen\`, does not contain `web_imagen_tool\`, and has no excluded local artifacts.
+  - G: `NM_web_imagen/` final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
+  - Old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
