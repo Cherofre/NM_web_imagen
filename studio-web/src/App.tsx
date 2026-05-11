@@ -982,11 +982,6 @@ function App() {
     setNotice(`参考图已移动到第 ${toIndex + 1} 位`);
   }
 
-  function nudgeReference(index: number, direction: -1 | 1) {
-    const nextIndex = index + direction;
-    moveReference(index, nextIndex);
-  }
-
   function onReferenceDragStart(event: DragEvent<HTMLElement>, index: number) {
     event.stopPropagation();
     setDraggedReferenceIndex(index);
@@ -1950,10 +1945,6 @@ function App() {
                       <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
                     </button>
                     <span>{file.name}</span>
-                    <div className="reference-order">
-                      <button type="button" onClick={() => nudgeReference(index, -1)} disabled={index === 0} title="前移参考图">←</button>
-                      <button type="button" onClick={() => nudgeReference(index, 1)} disabled={index === references.length - 1} title="后移参考图">→</button>
-                    </div>
                     <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title="移除参考图">
                       <X size={13} />
                     </button>
