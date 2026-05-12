@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import base64
 from datetime import datetime
 import math
@@ -1992,7 +1993,7 @@ def create_app() -> FastAPI:
         negative_prompt: str = Form(""),
         poster_text: str = Form(""),
         size: str = Form("auto"),
-        quality: str = Form("high"),
+        quality: str = Form("auto"),
         n: int = Form(1),
         seed: int = Form(-1),
         style_preset: str = Form("none"),
@@ -2121,7 +2122,8 @@ def create_app() -> FastAPI:
 
         for _ in range(max(8, len(payload) + 1)):
             try:
-                response = requests.post(
+                response = await asyncio.to_thread(
+                    requests.post,
                     api_url,
                     headers=headers,
                     timeout=None if timeout_value is None else timeout_value,
@@ -2162,7 +2164,7 @@ def create_app() -> FastAPI:
 
             if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
                 retryable_count += 1
-                time.sleep(retry_delay)
+                await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 1.5, 8.0)
                 continue
 

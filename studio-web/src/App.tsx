@@ -246,7 +246,7 @@ const defaultGptForm: GptForm = {
   poster_text: "",
   size: "auto",
   custom_size: "1536x864",
-  quality: "high",
+  quality: "auto",
   n: 1,
   seed: -1,
   style_preset: "none",

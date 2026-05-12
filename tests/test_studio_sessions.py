@@ -255,3 +255,34 @@ class StudioSessionTests(unittest.TestCase):
         self.assertIn("当前会话上下文", captured["json"]["prompt"])
         self.assertIn("蓝色闪电刀光", captured["json"]["prompt"])
         self.assertTrue(captured["json"]["prompt"].rstrip().endswith("生成第二版"))
+
+    def test_gpt_generation_defaults_quality_to_auto(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"data": [{"b64_json": PNG_1X1}]}
+
+        def fake_post(*_args, **kwargs):
+            captured["json"] = kwargs["json"]
+            return FakeResponse()
+
+        with patch.object(webapp.requests, "post", side_effect=fake_post):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "默认质量生成",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "n": "1",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertNotIn("quality", captured["json"])
