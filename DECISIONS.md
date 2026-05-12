@@ -1,6 +1,7 @@
 # Decisions
 
 ## Active Decisions
+- 2026-05-12: For GPT Image 2 edits multipart uploads, keep original reference image names for local display/metadata but send ASCII-safe request filenames to avoid `requests/urllib3` header encoding failures on non-English Windows filenames.
 - 2026-05-11: Keep new and old share packages side by side; update only `NM_web_imagen/` and `NM_web_imagen.zip`, leaving `web_imagen_tool/` and `web_imagen_tool.zip` intact.
 - 2026-05-11: Always start the Studio UI on GPT Image 2 and defer Banana/Gemini config validation until the user selects Banana/Gemini.
 - 2026-05-10: Keep the Studio-inspired conversation stream browser-local only and do not write it into `outputs/history.json`.
@@ -36,6 +37,13 @@
 - Reason: Starting on Banana/Gemini caused an immediate missing-config prompt even when the desired default workflow is GPT.
 - Alternatives considered: Preserve the last selected engine from browser storage; keep backend `active_engine` authoritative; delay all startup validation.
 - Consequences / follow-up: Browser storage still records user selections after startup, but a fresh reload returns to GPT Image 2 by design.
+
+## 2026-05-12 - Multipart Reference Filename Encoding
+- Status: active
+- Decision: Preserve uploaded reference image names in local metadata, but use an ASCII-safe `request_filename` when constructing GPT Image 2 `/v1/images/edits` multipart requests.
+- Reason: Some machines upload Chinese or otherwise non-latin filenames, and `requests/urllib3` can raise `UnicodeEncodeError` while encoding the multipart `Content-Disposition` header before the upstream service receives the request.
+- Alternatives considered: Ask users to rename files manually; percent-encode the filename; strip filenames entirely.
+- Consequences / follow-up: The upstream receives stable names such as `reference-01.png`, while UI/history display can still keep the user's original filename.
 
 ## 2026-05-10 - Header Config vs Advanced Parameters
 - Status: active

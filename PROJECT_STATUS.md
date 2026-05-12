@@ -1,11 +1,11 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-11 19:47 +08:00
-- Phase: Composer Shortcut / Synced
+- Last Updated: 2026-05-12 19:38 +08:00
+- Phase: GPT Reference Upload Encoding / Verifying
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: The main composer supports Enter to submit and Shift+Enter to insert a newline.
+- Current Focus: Fix GPT Image 2 reference-image uploads so non-ASCII filenames from other Windows machines do not trigger `UnicodeEncodeError` before the upstream request is sent.
 
 ## Resume Here
 - Start with: `git status --short --branch`
@@ -34,6 +34,8 @@
 - [x] Synced the chat-context fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 - [x] Added composer keyboard shortcut: Enter submits the current chat/generation request; Shift+Enter keeps textarea newline behavior; IME composition is ignored.
 - [x] Synced the composer shortcut fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
+- [x] Added a regression test for GPT Image 2 edits requests with a Chinese reference filename.
+- [x] Changed GPT Image 2 multipart upload requests to use an ASCII-safe request filename while preserving the original display filename in local asset metadata.
 
 ## Verification
 - Latest cleanup verification:
@@ -74,6 +76,11 @@
   - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed.
   - `NM_web_imagen.zip` contains `static/studio/assets/index-60ZvdiML.js`; old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
   - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `.git`, `.svn`, `__pycache__/`, `studio-web/node_modules/`, or `studio-web/tsconfig.tsbuildinfo`.
+- Latest GPT reference upload encoding verification:
+  - `python -m unittest tests.test_studio_sessions.StudioSessionTests.test_gpt_generation_uses_ascii_multipart_filename_for_reference_upload`: initially reproduced the failure with `UnicodeEncodeError` on `参考图.png`, then passed after the fix.
+  - `python -m unittest tests.test_studio_sessions`: passed, 7 tests.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
@@ -82,6 +89,7 @@
 - Browser payload smoke could not be completed because the in-app browser navigation timed out; code-level build and backend request-contract tests cover the fix.
 - `C:\Users\Cherofre\.codex\memories` from the project-local `AGENTS.md` could not be created on this machine due access denial; current global memory remains under `C:\Users\mumengfei\.codex\memories`.
 - User clarified the share target should keep new and old packages side by side: do not delete or update `web_imagen_tool/` or `web_imagen_tool.zip` while syncing this fix.
+- The screenshot that triggered this fix was from another machine, so no local live upstream generation was reproduced; the covered root cause is request construction with non-ASCII multipart filenames.
 
 ## History
 - 2026-05-03: Created ledger after the user explicitly asked about `project-ledger-loop`.

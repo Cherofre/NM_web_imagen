@@ -531,6 +531,12 @@ def safe_filename_part(value: str, fallback: str = "image") -> str:
     return text[:80] or fallback
 
 
+def safe_multipart_filename(filename: str, index: int, mime_type: str) -> str:
+    stem = Path(filename or "").stem
+    safe_stem = safe_filename_part(stem, f"reference-{index:02d}")
+    return f"{safe_stem}{guess_extension(mime_type)}"
+
+
 def output_url_for_path(path: Path) -> str:
     relative = str(path.relative_to(OUTPUTS_DIR)).replace("\\", "/")
     return f"{OUTPUTS_URL_PREFIX}/{quote(relative)}"
@@ -1254,6 +1260,7 @@ async def read_upload_assets(
         filename = upload.filename or f"reference-{index}{guess_extension(mime_type)}"
         asset = {
             "filename": filename,
+            "request_filename": safe_multipart_filename(filename, index, mime_type),
             "mime_type": mime_type,
             "base64_data": encoded,
             "data_url": data_url_from_base64(encoded, mime_type),
@@ -2096,7 +2103,7 @@ def create_app() -> FastAPI:
                 (
                     "image[]",
                     (
-                        asset["filename"],
+                        asset["request_filename"],
                         asset["bytes"],
                         asset["mime_type"],
                     ),

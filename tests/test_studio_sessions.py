@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import tempfile
 import unittest
@@ -286,3 +287,43 @@ class StudioSessionTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertNotIn("quality", captured["json"])
+
+    def test_gpt_generation_uses_ascii_multipart_filename_for_reference_upload(self) -> None:
+        captured = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"data": [{"b64_json": PNG_1X1}]}
+
+        def fake_post(*_args, **kwargs):
+            captured["files"] = kwargs["files"]
+            return FakeResponse()
+
+        with patch.object(webapp.requests, "post", side_effect=fake_post):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "用参考图生成一版",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "n": "1",
+                },
+                files={
+                    "reference_files": (
+                        "参考图.png",
+                        io.BytesIO(base64.b64decode(PNG_1X1)),
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        request_filename = captured["files"][0][1][0]
+        request_filename.encode("ascii")
+        self.assertNotIn("参考图", request_filename)

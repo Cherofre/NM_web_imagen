@@ -1,18 +1,19 @@
 # Next Actions
 
 ## Now
-- [x] Add Enter-to-submit handling to the main composer textarea.
-- [x] Preserve Shift+Enter newline behavior and ignore IME composition Enter.
-- [x] Rebuild Studio assets and run Python/backend checks.
-- [x] Commit the composer shortcut fix.
-- [x] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
+- [x] Diagnose the screenshot error as a backend request-construction issue, not a single-machine config problem.
+- [x] Add and pass a regression test for Chinese reference-image filenames in GPT Image 2 edits requests.
+- [x] Compile and run backend session tests.
+- [ ] Commit and push the upload filename fix.
+- [ ] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
+- [ ] Verify the G: copy and zip still exclude local-only artifacts.
 
 ## Handoff Notes
-- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
+- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`, current task is GPT reference upload filename encoding.
 - Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
 - Verify next: after sync, run `python -m py_compile .\NM_web_imagen\app.py`, inspect `NM_web_imagen.zip`, and confirm local-only artifacts are absent.
-- Do not claim: live upstream generation success for this cleanup; this task is packaging/repo hygiene only.
+- Do not claim: live upstream generation success on the user's coworker's machine; this fix verifies the backend no longer passes non-ASCII upload names into multipart requests.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.
 - Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
 - AGENTS note: `AGENTS.md` has stale snapshot wording, but it explicitly says not to edit it unless the user asks.
