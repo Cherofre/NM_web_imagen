@@ -1,8 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-12 19:38 +08:00
-- Phase: GPT Reference Upload Encoding / Verifying
+- Last Updated: 2026-05-12 19:55 +08:00
+- Phase: GPT Reference Upload Encoding / Synced
 - Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
 - Current Focus: Fix GPT Image 2 reference-image uploads so non-ASCII filenames from other Windows machines do not trigger `UnicodeEncodeError` before the upstream request is sent.
@@ -36,6 +36,7 @@
 - [x] Synced the composer shortcut fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 - [x] Added a regression test for GPT Image 2 edits requests with a Chinese reference filename.
 - [x] Changed GPT Image 2 multipart upload requests to use an ASCII-safe request filename while preserving the original display filename in local asset metadata.
+- [x] Synced the upload filename fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
 
 ## Verification
 - Latest cleanup verification:
@@ -81,6 +82,12 @@
   - `python -m unittest tests.test_studio_sessions`: passed, 7 tests.
   - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
   - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
+  - `npm run build` from `studio-web`: passed.
+  - `npm run test:size` from `studio-web`: passed.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile .\NM_web_imagen\app.py`: passed; the generated `__pycache__` verification residue was removed afterward.
+  - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime`, `.venv`, `.playwright-mcp`, `.git`, `.svn`, `__pycache__`, `node_modules`, or `tsconfig.tsbuildinfo`.
+  - `NM_web_imagen.zip` root is `NM_web_imagen/`, has no excluded local artifacts, and was updated at `2026-05-12 19:43:50`.
+  - Old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.
@@ -90,6 +97,7 @@
 - `C:\Users\Cherofre\.codex\memories` from the project-local `AGENTS.md` could not be created on this machine due access denial; current global memory remains under `C:\Users\mumengfei\.codex\memories`.
 - User clarified the share target should keep new and old packages side by side: do not delete or update `web_imagen_tool/` or `web_imagen_tool.zip` while syncing this fix.
 - The screenshot that triggered this fix was from another machine, so no local live upstream generation was reproduced; the covered root cause is request construction with non-ASCII multipart filenames.
+- Updating the G: folder required stopping its running `start_web.ps1` / portable `python.exe` processes because `.runtime` DLLs were locked.
 
 ## History
 - 2026-05-03: Created ledger after the user explicitly asked about `project-ledger-loop`.
