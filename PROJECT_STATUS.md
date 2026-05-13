@@ -41,6 +41,7 @@
 - [x] Created `codex/v1.0.2` from updated `main` for the next release slice.
 - [x] Added clearer Chinese error text for upstream 524 gateway timeout responses.
 - [x] Added a regression test for GPT Image 2 524 timeout messaging.
+- [x] Committed the v1.0.2 branch slice as `8a42a6a Improve GPT upstream timeout messaging`.
 
 ## Verification
 - Latest v1.0.2 branch verification:

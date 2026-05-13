@@ -7,14 +7,14 @@
 - [x] Add and pass a regression test for 524 timeout messaging.
 - [x] Run frontend/package verification for the branch.
 - [x] Sync the clean package copy to the G: target, excluding local artifacts and internal ledger files.
-- [ ] Commit the v1.0.2 branch changes.
+- [x] Commit the v1.0.2 branch changes.
 - [ ] Wait for user approval before merging `codex/v1.0.2` back to `main`.
 
 ## Handoff Notes
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.2`; v1.0.2 is intentionally not merged to `main` yet.
 - Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
-- Verify next: review the branch commit, then wait for user approval before merge.
+- Verify next: review branch commit `8a42a6a`, then wait for user approval before merge.
 - Do not claim: v1.0.2 is merged or released until the user approves merging `codex/v1.0.2` into `main`.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.
 - Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
