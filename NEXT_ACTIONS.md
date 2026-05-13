@@ -1,21 +1,23 @@
 # Next Actions
 
 ## Now
-- [x] Diagnose the screenshot error as a backend request-construction issue, not a single-machine config problem.
-- [x] Add and pass a regression test for Chinese reference-image filenames in GPT Image 2 edits requests.
-- [x] Compile and run backend session tests.
-- [x] Commit and push the upload filename fix.
-- [x] Sync only `NM_web_imagen/` and `NM_web_imagen.zip` to the G: share target.
-- [x] Verify the G: copy and zip still exclude local-only artifacts.
+- [x] Start v1.0.2 work on branch `codex/v1.0.2`, not directly on `main`.
+- [x] Record the current-project sync rule: after every update, sync a clean copy to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+- [x] Improve GPT Image 2 upstream 524 timeout messaging.
+- [x] Add and pass a regression test for 524 timeout messaging.
+- [x] Run frontend/package verification for the branch.
+- [x] Sync the clean package copy to the G: target, excluding local artifacts and internal ledger files.
+- [ ] Commit the v1.0.2 branch changes.
+- [ ] Wait for user approval before merging `codex/v1.0.2` back to `main`.
 
 ## Handoff Notes
-- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`; GPT reference upload filename encoding fix is synced.
+- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.2`; v1.0.2 is intentionally not merged to `main` yet.
 - Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
-- Verify next: if this bug reappears on another machine, collect the full backend error and uploaded reference filename; the current regression covers non-ASCII multipart filenames.
-- Do not claim: live upstream generation success on the user's coworker's machine; this fix verifies the backend no longer passes non-ASCII upload names into multipart requests.
+- Verify next: review the branch commit, then wait for user approval before merge.
+- Do not claim: v1.0.2 is merged or released until the user approves merging `codex/v1.0.2` into `main`.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.
-- Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
+- Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
 - AGENTS note: `AGENTS.md` has stale snapshot wording, but it explicitly says not to edit it unless the user asks.
 
 ## Later

@@ -358,6 +358,34 @@ class StudioSessionTests(unittest.TestCase):
         )
         self.assertEqual("https://yuzapi.fun/v1/images/generations", response.json()["meta"]["api_url"])
 
+    def test_gpt_generation_reports_upstream_524_timeout_clearly(self) -> None:
+        class FakeResponse:
+            ok = False
+            status_code = 524
+            text = "<html><body>Cloudflare timeout</body></html>"
+
+            def json(self):
+                raise ValueError("not json")
+
+        with patch.object(webapp.requests, "post", return_value=FakeResponse()):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "测试上游超时",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "n": "1",
+                },
+            )
+
+        self.assertEqual(502, response.status_code)
+        detail = response.json()["detail"]
+        self.assertIn("524", detail)
+        self.assertIn("上游网关超时", detail)
+        self.assertIn("稍后重试", detail)
+
     def test_gpt_generation_uses_ascii_multipart_filename_for_reference_upload(self) -> None:
         captured = {}
 

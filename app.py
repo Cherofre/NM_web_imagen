@@ -62,6 +62,7 @@ GPT_ENDPOINT_OPTIONS = {
     "/v1/responses",
 }
 GPT_RETRYABLE_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
+UPSTREAM_TIMEOUT_STATUSES = {524}
 
 BANANA_ASPECT_RATIO_ALIASES = {
     "1:1": "1:1",
@@ -383,6 +384,13 @@ def build_banana_request(
 
 
 def extract_error_message(response: requests.Response) -> str:
+    if response.status_code in UPSTREAM_TIMEOUT_STATUSES:
+        return (
+            f"上游接口返回 {response.status_code}: 上游网关超时。"
+            "这通常是模型排队、服务繁忙或图片生成耗时过长导致的；可以稍后重试，"
+            "或调低质量、尺寸、数量后再试。"
+        )
+
     try:
         payload = response.json()
     except Exception:

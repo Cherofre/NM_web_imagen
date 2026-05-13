@@ -1,17 +1,18 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-12 19:55 +08:00
-- Phase: GPT Reference Upload Encoding / Synced
-- Branch: main
+- Last Updated: 2026-05-13 00:00 +08:00
+- Phase: v1.0.2 Branch / Upstream Timeout Messaging
+- Branch: codex/v1.0.2
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: Fix GPT Image 2 reference-image uploads so non-ASCII filenames from other Windows machines do not trigger `UnicodeEncodeError` before the upstream request is sent.
+- Current Focus: Prepare v1.0.2 on a feature branch first, then merge to `main` only after verification and user approval.
 
 ## Resume Here
 - Start with: `git status --short --branch`
-- Main changed files in the current cleanup: `package_web_tool.ps1`, `start_web.ps1`, `README.md`, `static/index.html`, `static/app.js`, `PROJECT_STATUS.md`, and `NEXT_ACTIONS.md`.
+- Main changed files in the current v1.0.2 slice: `app.py`, `tests/test_studio_sessions.py`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, and `DECISIONS.md`.
 - Sync target after local commits: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
+- Current-project rule: after every update, sync a clean copy to the G: target above, but do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`.
 
 ## Progress Summary
 - [x] Implemented the React/Vite Studio frontend in `studio-web/`, built to `static/studio/`, and kept `/classic` as the rollback path for the old static UI.
@@ -37,8 +38,20 @@
 - [x] Added a regression test for GPT Image 2 edits requests with a Chinese reference filename.
 - [x] Changed GPT Image 2 multipart upload requests to use an ASCII-safe request filename while preserving the original display filename in local asset metadata.
 - [x] Synced the upload filename fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
+- [x] Created `codex/v1.0.2` from updated `main` for the next release slice.
+- [x] Added clearer Chinese error text for upstream 524 gateway timeout responses.
+- [x] Added a regression test for GPT Image 2 524 timeout messaging.
 
 ## Verification
+- Latest v1.0.2 branch verification:
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions`: passed, 12 tests.
+  - `npm run test:size` from `studio-web`: passed.
+  - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\package_web_tool.ps1 -OutputPath <temp zip>`: passed.
+  - Synced temp package contents to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile <G target>\app.py`: passed; generated `__pycache__` verification residue was removed afterward.
+  - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime`, `.venv`, `.playwright-mcp`, `.git`, `__pycache__`, `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, `DECISIONS.md`, `studio-web/node_modules`, or `studio-web/tsconfig.tsbuildinfo`.
 - Latest cleanup verification:
   - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
   - `npm run build` from `studio-web`: passed.
