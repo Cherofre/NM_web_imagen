@@ -288,6 +288,76 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertNotIn("quality", captured["json"])
 
+    def test_yuzapi_image_requests_use_image_host(self) -> None:
+        self.assertEqual(
+            "https://image.yuzapi.fun/v1/images/generations",
+            webapp.build_gpt_api_url("https://yuzapi.fun", "/v1/images/generations"),
+        )
+        self.assertEqual(
+            "https://image.yuzapi.fun/v1/responses",
+            webapp.build_gpt_api_url("https://yuzapi.fun/v1", "/v1/responses"),
+        )
+
+    def test_yuzapi_chat_requests_use_main_host(self) -> None:
+        self.assertEqual(
+            "https://yuzapi.fun/v1/chat/completions",
+            webapp.build_openai_chat_url("https://yuzapi.fun"),
+        )
+        self.assertEqual(
+            "https://yuzapi.fun/v1/chat/completions",
+            webapp.build_openai_chat_url("https://image.yuzapi.fun"),
+        )
+
+    def test_non_yuzapi_urls_keep_existing_host(self) -> None:
+        self.assertEqual(
+            "https://example.com/v1/images/generations",
+            webapp.build_gpt_api_url("https://example.com/v1", "/v1/images/generations"),
+        )
+        self.assertEqual(
+            "https://image.example.com/v1/chat/completions",
+            webapp.build_openai_chat_url("https://image.example.com/v1"),
+        )
+
+    def test_yuzapi_generation_falls_back_to_main_host_on_network_error(self) -> None:
+        urls = []
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"data": [{"b64_json": PNG_1X1}]}
+
+        def fake_post(url, *_args, **_kwargs):
+            urls.append(url)
+            if url.startswith("https://image.yuzapi.fun/"):
+                raise webapp.requests.ConnectionError("image host unavailable")
+            return FakeResponse()
+
+        with patch.object(webapp.requests, "post", side_effect=fake_post):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "带回退生成",
+                    "api_key": "sk-test",
+                    "base_url": "https://yuzapi.fun",
+                    "model": "gpt-image-2",
+                    "size": "auto",
+                    "n": "1",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            [
+                "https://image.yuzapi.fun/v1/images/generations",
+                "https://yuzapi.fun/v1/images/generations",
+            ],
+            urls,
+        )
+        self.assertEqual("https://yuzapi.fun/v1/images/generations", response.json()["meta"]["api_url"])
+
     def test_gpt_generation_uses_ascii_multipart_filename_for_reference_upload(self) -> None:
         captured = {}
 

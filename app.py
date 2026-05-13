@@ -1336,23 +1336,51 @@ def build_gpt_api_url(base_url: str, endpoint: str = "/v1/images/generations") -
     for known_endpoint in known_endpoints:
         if re.search(re.escape(known_endpoint) + r"/?$", url):
             root = re.sub(re.escape(known_endpoint) + r"/?$", "", url).rstrip("/")
+            root = route_yuzapi_base_url(root, endpoint)
             return f"{root}{endpoint}"
 
     if re.search(r"/v1/images/?$", url):
         if endpoint.startswith("/v1/images/"):
+            url = route_yuzapi_base_url(url, endpoint)
             return f"{url}{endpoint[len('/v1/images'):]}"
         root = re.sub(r"/v1/images/?$", "", url).rstrip("/")
+        root = route_yuzapi_base_url(root, endpoint)
         return f"{root}{endpoint}"
 
     if re.search(r"/v1/?$", url):
+        url = route_yuzapi_base_url(url, endpoint)
         if endpoint.startswith("/v1/"):
             return f"{url}{endpoint[len('/v1'):]}"
         return f"{url}{endpoint}"
+    url = route_yuzapi_base_url(url, endpoint)
     return f"{url}{endpoint}"
 
 
 def build_openai_chat_url(base_url: str) -> str:
     return build_gpt_api_url(base_url, "/v1/chat/completions")
+
+
+def route_yuzapi_base_url(base_url: str, endpoint: str) -> str:
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    if host not in {"yuzapi.fun", "image.yuzapi.fun"}:
+        return base_url
+
+    target_host = "yuzapi.fun" if endpoint == "/v1/chat/completions" else "image.yuzapi.fun"
+    netloc = target_host
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return parsed._replace(netloc=netloc).geturl().rstrip("/")
+
+
+def fallback_yuzapi_image_url(api_url: str) -> str:
+    parsed = urlparse(api_url)
+    if (parsed.hostname or "").lower() != "image.yuzapi.fun":
+        return ""
+    netloc = "yuzapi.fun"
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return parsed._replace(netloc=netloc).geturl()
 
 
 def extract_openai_chat_reply(payload: Dict[str, Any]) -> str:
@@ -2126,6 +2154,8 @@ def create_app() -> FastAPI:
         )
         retry_delay = 1.0
         retryable_count = 0
+        fallback_api_url = fallback_yuzapi_image_url(api_url)
+        used_yuzapi_fallback = False
 
         for _ in range(max(8, len(payload) + 1)):
             try:
@@ -2137,11 +2167,19 @@ def create_app() -> FastAPI:
                     **request_kwargs,
                 )
             except requests.Timeout as exc:
+                if fallback_api_url and not used_yuzapi_fallback:
+                    api_url = fallback_api_url
+                    used_yuzapi_fallback = True
+                    continue
                 raise HTTPException(
                     status_code=504,
                     detail="GPT Image 2 请求超时：上游接口长时间没有返回。可以稍后重试，或调低质量/尺寸/数量。",
                 ) from exc
             except requests.RequestException as exc:
+                if fallback_api_url and not used_yuzapi_fallback:
+                    api_url = fallback_api_url
+                    used_yuzapi_fallback = True
+                    continue
                 raise HTTPException(
                     status_code=502,
                     detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}",
