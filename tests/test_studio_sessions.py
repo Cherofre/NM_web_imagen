@@ -286,6 +286,38 @@ class StudioSessionTests(unittest.TestCase):
             [(item["role"], item["content"]) for item in messages[1:]],
         )
 
+    def test_gpt_chat_decodes_utf8_json_even_when_upstream_charset_is_wrong(self) -> None:
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            headers = {"Content-Type": "application/json; charset=latin-1"}
+            content = json.dumps(
+                {"choices": [{"message": {"content": "中文回复：可以继续加强剪影。"}}]},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            encoding = "latin-1"
+
+            @property
+            def text(self):
+                return self.content.decode(self.encoding)
+
+            def json(self):
+                return json.loads(self.text)
+
+        with patch.object(webapp.requests, "post", return_value=FakeResponse()):
+            response = self.client.post(
+                "/api/chat/gpt-image-2",
+                json={
+                    "prompt": "聊一下提示词",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "chat_model": "gpt-5.5",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("中文回复：可以继续加强剪影。", response.json()["reply"])
+
     def test_banana_chat_forwards_conversation_context(self) -> None:
         captured = {}
 

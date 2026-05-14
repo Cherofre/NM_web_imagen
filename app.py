@@ -147,6 +147,26 @@ def html_error_to_text(value: str) -> str:
     return title or body or "上游返回了 HTML 错误页"
 
 
+def response_text_utf8_first(response: requests.Response) -> str:
+    content = getattr(response, "content", b"")
+    if isinstance(content, bytes) and content:
+        try:
+            return content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            pass
+    return getattr(response, "text", "") or ""
+
+
+def response_json_utf8_first(response: requests.Response) -> Any:
+    text = response_text_utf8_first(response)
+    if text:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    return response.json()
+
+
 def guess_extension(mime_type: str) -> str:
     extension = mimetypes.guess_extension(mime_type or "")
     if extension:
@@ -392,9 +412,9 @@ def extract_error_message(response: requests.Response) -> str:
         )
 
     try:
-        payload = response.json()
+        payload = response_json_utf8_first(response)
     except Exception:
-        raw_text = response.text or "未知错误"
+        raw_text = response_text_utf8_first(response) or "未知错误"
         if raw_text.lstrip().startswith("<"):
             message = html_error_to_text(raw_text)
         else:
@@ -411,7 +431,7 @@ def extract_error_message(response: requests.Response) -> str:
         if isinstance(message, str) and message.strip():
             return message.strip()[:400]
 
-    return (response.text or "未知错误").strip()[:400]
+    return (response_text_utf8_first(response) or "未知错误").strip()[:400]
 
 
 def create_requests_session(bypass_proxy: bool = False) -> requests.Session:
@@ -1830,7 +1850,7 @@ def create_app() -> FastAPI:
         if not response.ok:
             raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
 
-        response_data = response.json()
+        response_data = response_json_utf8_first(response)
         reply = extract_openai_chat_reply(response_data)
         if not reply:
             raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
@@ -1898,7 +1918,7 @@ def create_app() -> FastAPI:
         if not response.ok:
             raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
 
-        response_data = response.json()
+        response_data = response_json_utf8_first(response)
         reply = extract_banana_text_reply(response_data)
         if not reply:
             raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
@@ -1982,7 +2002,7 @@ def create_app() -> FastAPI:
                     messages.append(f"第 {index + 1} 批请求失败: {detail}")
                     continue
 
-                parsed = extract_banana_images(response.json())
+                parsed = extract_banana_images(response_json_utf8_first(response))
                 batch_images = parsed["images"]
                 batch_messages = parsed["messages"]
                 if batch_images:
@@ -2219,7 +2239,7 @@ def create_app() -> FastAPI:
 
             if response.status_code == 400:
                 try:
-                    error_payload = response.json()
+                    error_payload = response_json_utf8_first(response)
                 except Exception:
                     error_payload = {}
                 error_message = (
@@ -2254,7 +2274,7 @@ def create_app() -> FastAPI:
                 )
 
             try:
-                response_data = response.json()
+                response_data = response_json_utf8_first(response)
             except ValueError as exc:
                 raise HTTPException(
                     status_code=502,
