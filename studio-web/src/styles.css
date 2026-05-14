@@ -1470,6 +1470,55 @@ img {
   color: var(--muted);
 }
 
+.text-settings-strip {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fafaf9;
+}
+
+.text-settings-toggle {
+  display: grid;
+  gap: 3px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.text-settings-toggle span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.text-settings-toggle small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-settings-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.text-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.text-settings-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
 .asset-panel {
   display: grid;
   align-content: start;
@@ -1588,7 +1637,8 @@ img {
 }
 
 .connection-drawer,
-.rename-drawer {
+.rename-drawer,
+.reference-switch-drawer {
   grid-template-rows: auto minmax(0, auto) auto;
   width: min(540px, calc(100vw - 36px));
 }

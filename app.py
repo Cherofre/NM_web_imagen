@@ -753,7 +753,7 @@ def compact_studio_turn(turn: Any, session_id: str) -> Optional[Dict[str, Any]]:
         "status": str(turn.get("status") or "success"),
         "images": [image for image in turn.get("images", []) if isinstance(image, dict)][:20],
     }
-    for key in ("negativePrompt", "finishedAt", "reply", "error"):
+    for key in ("negativePrompt", "posterText", "finishedAt", "reply", "error"):
         value = turn.get(key)
         if isinstance(value, str) and value:
             compact[key] = value
@@ -797,13 +797,32 @@ def compact_studio_session(session: Any) -> Optional[Dict[str, Any]]:
         for turn in raw_turns[-STUDIO_MAX_TURNS:]
         if (compact_turn := compact_studio_turn(turn, session_id))
     ]
-    return {
+    compact_session = {
         "id": session_id,
         "title": str(session.get("title") or "新对话").strip()[:120] or "新对话",
         "createdAt": str(session.get("createdAt") or now),
         "updatedAt": str(session.get("updatedAt") or now),
         "turns": turns,
     }
+    drafts = session.get("drafts")
+    if isinstance(drafts, dict):
+        compact_drafts: Dict[str, Any] = {}
+        gpt_draft = drafts.get("gpt")
+        if isinstance(gpt_draft, dict):
+            compact_gpt = {
+                "prompt": str(gpt_draft.get("prompt") or ""),
+                "negative_prompt": str(gpt_draft.get("negative_prompt") or ""),
+                "poster_text": str(gpt_draft.get("poster_text") or ""),
+            }
+            compact_drafts["gpt"] = compact_gpt
+        banana_draft = drafts.get("banana")
+        if isinstance(banana_draft, dict):
+            compact_drafts["banana"] = {
+                "prompt": str(banana_draft.get("prompt") or ""),
+            }
+        if compact_drafts:
+            compact_session["drafts"] = compact_drafts
+    return compact_session
 
 
 def collect_referenced_output_paths(sessions: List[Dict[str, Any]]) -> set[Path]:

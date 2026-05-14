@@ -98,6 +98,116 @@ class StudioSessionTests(unittest.TestCase):
         get_response = self.client.get("/api/studio/sessions")
         self.assertEqual(body["sessions"], get_response.json()["sessions"])
 
+    def test_studio_sessions_prune_deleted_session_reference_files(self) -> None:
+        first_payload = {
+            "active_session_id": "session-1",
+            "sessions": [
+                {
+                    "id": "session-1",
+                    "title": "会话一",
+                    "createdAt": "2026-05-14T00:00:00",
+                    "updatedAt": "2026-05-14T00:00:01",
+                    "turns": [
+                        {
+                            "id": "turn-1",
+                            "engine": "gpt-image-2",
+                            "mode": "generate",
+                            "prompt": "第一轮",
+                            "createdAt": "2026-05-14T00:00:01",
+                            "status": "success",
+                            "images": [],
+                            "referenceSnapshots": [
+                                {
+                                    "id": "ref-1",
+                                    "name": "参考图.png",
+                                    "mime_type": "image/png",
+                                    "src": f"data:image/png;base64,{PNG_1X1}",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        first_response = self.client.put("/api/studio/sessions", json=first_payload)
+        self.assertEqual(200, first_response.status_code)
+        saved_ref = first_response.json()["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        saved_path = self.root / saved_ref.lstrip("/").replace("/", "\\")
+        self.assertTrue(saved_path.exists())
+
+        second_response = self.client.put(
+            "/api/studio/sessions",
+            json={"active_session_id": "", "sessions": []},
+        )
+
+        self.assertEqual(200, second_response.status_code)
+        self.assertFalse(saved_path.exists())
+
+    def test_studio_sessions_preserve_drafts_payload(self) -> None:
+        payload = {
+            "active_session_id": "session-1",
+            "sessions": [
+                {
+                    "id": "session-1",
+                    "title": "测试草稿",
+                    "createdAt": "2026-05-14T00:00:00",
+                    "updatedAt": "2026-05-14T00:00:01",
+                    "drafts": {
+                        "gpt": {
+                            "prompt": "蓝色闪电斩击",
+                            "negative_prompt": "blurry, low quality",
+                            "poster_text": "雷光",
+                        },
+                        "banana": {
+                            "prompt": "橙色爆炸波",
+                        },
+                    },
+                    "turns": [],
+                }
+            ],
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        session = response.json()["sessions"][0]
+        self.assertEqual("蓝色闪电斩击", session["drafts"]["gpt"]["prompt"])
+        self.assertEqual("blurry, low quality", session["drafts"]["gpt"]["negative_prompt"])
+        self.assertEqual("雷光", session["drafts"]["gpt"]["poster_text"])
+        self.assertEqual("橙色爆炸波", session["drafts"]["banana"]["prompt"])
+
+    def test_studio_sessions_preserve_turn_poster_text(self) -> None:
+        payload = {
+            "active_session_id": "session-1",
+            "sessions": [
+                {
+                    "id": "session-1",
+                    "title": "测试文本",
+                    "createdAt": "2026-05-14T00:00:00",
+                    "updatedAt": "2026-05-14T00:00:01",
+                    "turns": [
+                        {
+                            "id": "turn-1",
+                            "engine": "gpt-image-2",
+                            "mode": "generate",
+                            "prompt": "测试海报",
+                            "posterText": "雷光",
+                            "createdAt": "2026-05-14T00:00:01",
+                            "status": "success",
+                            "images": [],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        session = response.json()["sessions"][0]
+        self.assertEqual("雷光", session["turns"][0]["posterText"])
+
     def test_gpt_chat_forwards_reasoning_effort(self) -> None:
         captured = {}
 

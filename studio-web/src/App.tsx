@@ -38,6 +38,20 @@ import {
   gptComposerSizeTiers,
   resolveGptComposerPresetSize,
 } from "./sizePresets";
+import {
+  applyPromptToDrafts,
+  emptySessionDrafts,
+  getDraftPrompt,
+  normalizeSessionWithDrafts,
+  resolveReferenceSwitch,
+  resolveSessionDeletion,
+  resolveSubmissionDrafts,
+  shouldPromptReferenceSwitch,
+  type ReferenceSwitchChoice,
+  type SubmissionDraftOverride,
+  type SessionDrafts,
+} from "./sessionDrafts";
+import { buildSubmissionFields } from "./submissionPayload";
 
 type Engine = "gpt-image-2" | "banana";
 type TurnStatus = "running" | "success" | "error";
@@ -83,6 +97,7 @@ type ConversationTurn = {
   mode?: SubmitMode;
   prompt: string;
   negativePrompt?: string;
+  posterText?: string;
   createdAt: string;
   finishedAt?: string;
   status: TurnStatus;
@@ -103,6 +118,7 @@ type SubmitOverrides = {
   mode?: SubmitMode;
   engine?: Engine;
   prompt?: string;
+  draftOverride?: SubmissionDraftOverride;
   references?: File[];
   referenceSnapshots?: ReferenceSnapshot[];
 };
@@ -120,6 +136,7 @@ type WorkbenchSession = {
   createdAt: string;
   updatedAt: string;
   turns: ConversationTurn[];
+  drafts: SessionDrafts;
 };
 
 type GptForm = {
@@ -128,9 +145,6 @@ type GptForm = {
   model: string;
   chat_model: string;
   reasoning_effort: string;
-  prompt: string;
-  negative_prompt: string;
-  poster_text: string;
   size: string;
   custom_size: string;
   quality: string;
@@ -151,7 +165,6 @@ type BananaForm = {
   api_key: string;
   api_base_url: string;
   model_type: string;
-  prompt: string;
   batch_size: number;
   aspect_ratio: string;
   image_size: string;
@@ -215,6 +228,11 @@ type PreviewImage = {
   objectUrl?: boolean;
 };
 
+type PendingSessionSwitch = {
+  nextSessionId: string;
+  nextSessionTitle: string;
+};
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -232,6 +250,7 @@ function createEmptySession(title = "新对话"): WorkbenchSession {
     createdAt: now,
     updatedAt: now,
     turns: [],
+    drafts: emptySessionDrafts(),
   };
 }
 
@@ -241,9 +260,6 @@ const defaultGptForm: GptForm = {
   model: "gpt-image-2",
   chat_model: "gpt-5.5",
   reasoning_effort: "medium",
-  prompt: "",
-  negative_prompt: "",
-  poster_text: "",
   size: "auto",
   custom_size: "1536x864",
   quality: "auto",
@@ -264,7 +280,6 @@ const defaultBananaForm: BananaForm = {
   api_key: "",
   api_base_url: "https://banana-api.example.com",
   model_type: "gemini-3-pro-image-preview",
-  prompt: "",
   batch_size: 1,
   aspect_ratio: "Auto",
   image_size: "2K",
@@ -356,16 +371,30 @@ function compactReferenceSnapshot(snapshot: ReferenceSnapshot, keepSrc = true): 
 }
 
 function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): ConversationTurn {
-  return {
+  const compact: ConversationTurn = {
     ...turn,
     images: turn.images.map(compactGeneratedImage),
     referenceSnapshots: turn.referenceSnapshots?.map((snapshot) => compactReferenceSnapshot(snapshot, keepReferenceSrc)),
   };
+  if (!compact.posterText) {
+    delete compact.posterText;
+  }
+  return compact;
 }
 
 function compactSessionsForStorage(sessions: WorkbenchSession[], keepReferenceSrc = true) {
   return sortSessionsNewestFirst(sessions).slice(0, 80).map((session) => ({
     ...session,
+    drafts: {
+      gpt: {
+        prompt: session.drafts.gpt.prompt,
+        negative_prompt: session.drafts.gpt.negative_prompt,
+        poster_text: session.drafts.gpt.poster_text,
+      },
+      banana: {
+        prompt: session.drafts.banana.prompt,
+      },
+    },
     turns: session.turns.slice(-maxTurns).map((turn) => compactTurn(turn, keepReferenceSrc)),
   }));
 }
@@ -487,16 +516,17 @@ function normalizeSessions(value: unknown): WorkbenchSession[] {
   return value
     .map((item) => {
       if (!item || typeof item !== "object") return null;
-      const source = item as Partial<WorkbenchSession>;
+      const source = item as Partial<WorkbenchSession> & { drafts?: Partial<SessionDrafts> };
       const turns = Array.isArray(source.turns) ? source.turns.slice(-maxTurns).map((turn) => compactTurn(turn)) : [];
       const now = new Date().toISOString();
-      return {
+      return normalizeSessionWithDrafts({
         id: typeof source.id === "string" && source.id ? source.id : makeId("session"),
         title: typeof source.title === "string" && source.title ? source.title : sessionTitleFromTurns(turns),
         createdAt: typeof source.createdAt === "string" ? source.createdAt : now,
         updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : now,
         turns,
-      } satisfies WorkbenchSession;
+        drafts: source.drafts,
+      });
     })
     .filter((item): item is WorkbenchSession => Boolean(item));
 }
@@ -514,13 +544,13 @@ function loadWorkbenchSessionState() {
       const legacyTurns = JSON.parse(localStorage.getItem(sessionStorageKey) || "[]");
       if (Array.isArray(legacyTurns) && legacyTurns.length > 0) {
         const now = new Date().toISOString();
-        sessions = [{
+        sessions = [normalizeSessionWithDrafts({
           id: makeId("session"),
           title: sessionTitleFromTurns(legacyTurns),
           createdAt: legacyTurns[0]?.createdAt || now,
           updatedAt: legacyTurns[legacyTurns.length - 1]?.finishedAt || legacyTurns[legacyTurns.length - 1]?.createdAt || now,
           turns: legacyTurns.slice(-maxTurns),
-        }];
+        })];
       }
     } catch {
       sessions = [];
@@ -588,18 +618,6 @@ function normalizeBananaForm(value: Partial<BananaForm> = {}): BananaForm {
   };
 }
 
-function getPrompt(engine: Engine, gpt: GptForm, banana: BananaForm) {
-  return engine === "banana" ? banana.prompt : gpt.prompt;
-}
-
-function setPrompt(engine: Engine, value: string, setGpt: (value: GptForm) => void, gpt: GptForm, setBanana: (value: BananaForm) => void, banana: BananaForm) {
-  if (engine === "banana") {
-    setBanana({ ...banana, prompt: value });
-  } else {
-    setGpt({ ...gpt, prompt: value });
-  }
-}
-
 function buildConfigPayload(activeEngine: Engine, gpt: GptForm, banana: BananaForm) {
   return {
     version: 1,
@@ -621,10 +639,17 @@ function buildConfigPayload(activeEngine: Engine, gpt: GptForm, banana: BananaFo
   };
 }
 
-function createFormData(engine: Engine, gpt: GptForm, banana: BananaForm, references: File[]) {
+function createFormData(
+  engine: Engine,
+  prompt: string,
+  gpt: GptForm,
+  banana: BananaForm,
+  references: File[],
+  gptTextDraft?: { negative_prompt?: string; poster_text?: string },
+) {
   const data = new FormData();
   const source = engine === "banana" ? banana : { ...gpt, custom_size: normalizeCustomImageSize(gpt.custom_size).value };
-  Object.entries(source).forEach(([key, value]) => {
+  buildSubmissionFields(engine, prompt, source, banana, gptTextDraft).forEach(([key, value]) => {
     data.append(key, String(value));
   });
   references.forEach((file) => data.append("reference_files", file));
@@ -658,11 +683,8 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
 }
 
 const gptHistoryKeys: Array<keyof GptForm> = [
-  "prompt",
-  "negative_prompt",
   "chat_model",
   "reasoning_effort",
-  "poster_text",
   "size",
   "custom_size",
   "quality",
@@ -680,7 +702,6 @@ const gptHistoryKeys: Array<keyof GptForm> = [
 ];
 
 const bananaHistoryKeys: Array<keyof BananaForm> = [
-  "prompt",
   "batch_size",
   "aspect_ratio",
   "image_size",
@@ -748,6 +769,8 @@ function App() {
   const [referenceDropIndex, setReferenceDropIndex] = useState<number | null>(null);
   const [sizeAdjustmentNotice, setSizeAdjustmentNotice] = useState("");
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [textSettingsOpen, setTextSettingsOpen] = useState(false);
+  const [pendingSessionSwitch, setPendingSessionSwitch] = useState<PendingSessionSwitch | null>(null);
   const [customSizeDraft, setCustomSizeDraft] = useState<{ width: string; height: string }>(() => {
     const parsed = parseCustomImageSize(loadJson<GptForm>(gptStorageKey, defaultGptForm).custom_size);
     return { width: String(parsed.width), height: String(parsed.height) };
@@ -772,10 +795,10 @@ function App() {
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
   const initialScrollKeyRef = useRef("");
-
-  const activePrompt = getPrompt(activeEngine, gptForm, bananaForm);
-  const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession();
+  const activeDrafts = activeSession.drafts;
+  const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
+  const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm);
@@ -783,6 +806,11 @@ function App() {
   const configStatusText = hasCompleteConfig ? "配置已完成" : `缺少 ${activeConfigIssues.join("、")}`;
   const configButtonLabel = hasCompleteConfig ? activeModel || "模型名" : "检查配置";
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
+  const gptNegativeDraft = activeDrafts.gpt.negative_prompt;
+  const gptPosterDraft = activeDrafts.gpt.poster_text;
+  const textDraftSummary = [gptNegativeDraft ? `负面：${gptNegativeDraft}` : "", gptPosterDraft ? `文字：${gptPosterDraft}` : ""]
+    .filter(Boolean)
+    .join(" | ");
 
   useEffect(() => {
     localStorage.setItem(gptStorageKey, JSON.stringify(gptForm));
@@ -1042,6 +1070,55 @@ function App() {
     });
   }
 
+  function updateActiveSessionDrafts(updater: (drafts: SessionDrafts) => SessionDrafts) {
+    updateActiveSession((session) => ({
+      ...session,
+      updatedAt: new Date().toISOString(),
+      drafts: updater(session.drafts),
+    }));
+  }
+
+  function applyPrompt(prompt: string, engine = activeEngine) {
+    updateActiveSessionDrafts((drafts) => applyPromptToDrafts(engine, drafts, prompt));
+    setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function updateGptTextDraft(key: "prompt" | "negative_prompt" | "poster_text", value: string) {
+    updateActiveSessionDrafts((drafts) => ({
+      ...drafts,
+      gpt: {
+        ...drafts.gpt,
+        [key]: value,
+      },
+    }));
+  }
+
+  function switchToSession(sessionId: string, choice: ReferenceSwitchChoice = "preserve") {
+    const resolution = resolveReferenceSwitch(choice, references.map((file) => file.name));
+    if (resolution.keepActiveSession) {
+      return;
+    }
+    if (choice === "clear") {
+      setReferences([]);
+    }
+    setPendingSessionSwitch(null);
+    setActiveSessionId(sessionId);
+    setSidebarMode("sessions");
+  }
+
+  function requestSessionSwitch(nextSessionId: string) {
+    if (nextSessionId === activeSessionId) return;
+    if (shouldPromptReferenceSwitch(references.length, nextSessionId, activeSessionId)) {
+      const nextSession = sessions.find((session) => session.id === nextSessionId);
+      setPendingSessionSwitch({
+        nextSessionId,
+        nextSessionTitle: nextSession?.title || "新对话",
+      });
+      return;
+    }
+    switchToSession(nextSessionId, "preserve");
+  }
+
   function createSessionFromPrompt(prompt = "") {
     const session = createEmptySession(prompt ? sessionTitleFromTurns([{ id: "draft", engine: activeEngine, prompt, createdAt: new Date().toISOString(), status: "success", images: [] }]) : `新对话 ${sessions.length + 1}`);
     setSessions((current) => sortSessionsNewestFirst([session, ...current]).slice(0, 80));
@@ -1051,16 +1128,17 @@ function App() {
 
   function deleteSession(sessionId: string) {
     setSessions((current) => {
-      if (current.length <= 1) {
-        const replacement = createEmptySession();
-        setActiveSessionId(replacement.id);
-        return [replacement];
+      const resolution = resolveSessionDeletion(current, activeSessionId, sessionId, () => createEmptySession());
+      if (resolution.clearReferences) {
+        setReferences([]);
       }
-      const next = current.filter((session) => session.id !== sessionId);
-      if (activeSessionId === sessionId) {
-        setActiveSessionId(next[0].id);
+      if (pendingSessionSwitch?.nextSessionId === sessionId) {
+        setPendingSessionSwitch(null);
       }
-      return sortSessionsNewestFirst(next);
+      if (resolution.nextActiveSessionId !== activeSessionId) {
+        setActiveSessionId(resolution.nextActiveSessionId);
+      }
+      return sortSessionsNewestFirst(resolution.sessions);
     });
   }
 
@@ -1069,9 +1147,29 @@ function App() {
     if (entry.engine === "banana") {
       setActiveEngine("banana");
       setBananaForm((current) => normalizeBananaForm({ ...current, ...pickHistoryState<BananaForm>(formState, bananaHistoryKeys) }));
+      updateActiveSessionDrafts((drafts) => ({
+        ...drafts,
+        banana: {
+          ...drafts.banana,
+          prompt: String(formState.prompt || entry.prompt || ""),
+        },
+      }));
     } else {
       setActiveEngine("gpt-image-2");
-      setGptForm((current) => normalizeGptForm({ ...current, ...pickHistoryState<GptForm>(formState, gptHistoryKeys) }));
+      setGptForm((current) =>
+        normalizeGptForm({
+          ...current,
+          ...pickHistoryState<GptForm>(formState, gptHistoryKeys.filter((key) => !["prompt", "negative_prompt", "poster_text"].includes(String(key)))),
+        }),
+      );
+      updateActiveSessionDrafts((drafts) => ({
+        ...drafts,
+        gpt: {
+          prompt: String(formState.prompt || entry.prompt || ""),
+          negative_prompt: String(formState.negative_prompt || entry.negative_prompt || ""),
+          poster_text: String(formState.poster_text || ""),
+        },
+      }));
     }
     setNotice("已套用历史参数，连接配置保持当前值");
     setTimeout(() => promptRef.current?.focus(), 0);
@@ -1323,11 +1421,23 @@ function App() {
   async function regenerateFromTurn(turn: ConversationTurn) {
     setActiveEngine(turn.engine);
     setSubmitMode("generate");
-    if (turn.engine === "banana") {
-      setBananaForm((current) => ({ ...current, prompt: turn.prompt }));
-    } else {
-      setGptForm((current) => ({ ...current, prompt: turn.prompt }));
-    }
+    updateActiveSessionDrafts((drafts) => {
+      if (turn.engine === "banana") {
+        return {
+          ...drafts,
+          banana: { ...drafts.banana, prompt: turn.prompt },
+        };
+      }
+      return {
+        ...drafts,
+        gpt: {
+          ...drafts.gpt,
+          prompt: turn.prompt,
+          negative_prompt: turn.negativePrompt || "",
+          poster_text: turn.posterText || "",
+        },
+      };
+    });
     const turnReferences = (
       await Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile))
     ).filter((file): file is File => Boolean(file));
@@ -1335,6 +1445,14 @@ function App() {
       mode: "generate",
       engine: turn.engine,
       prompt: turn.prompt,
+      draftOverride: turn.engine === "gpt-image-2"
+        ? {
+            gpt: {
+              negative_prompt: turn.negativePrompt || "",
+              poster_text: turn.posterText || "",
+            },
+          }
+        : undefined,
       references: turnReferences,
       referenceSnapshots: turn.referenceSnapshots || [],
     });
@@ -1344,12 +1462,18 @@ function App() {
     event?.preventDefault();
     const currentMode = overrides.mode || submitMode;
     const currentEngine = overrides.engine || activeEngine;
-    const currentGptForm = currentEngine === "gpt-image-2" && overrides.prompt !== undefined ? { ...gptForm, prompt: overrides.prompt } : gptForm;
-    const currentBananaForm = currentEngine === "banana" && overrides.prompt !== undefined ? { ...bananaForm, prompt: overrides.prompt } : bananaForm;
+    const currentDrafts = activeSession.drafts;
+    const currentGptForm = gptForm;
+    const currentBananaForm = bananaForm;
     const currentReferences = overrides.references || references;
     const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
-    const prompt = (overrides.prompt ?? getPrompt(currentEngine, currentGptForm, currentBananaForm)).trim();
+    const draftOverride = overrides.draftOverride || {};
+    const submissionDrafts = resolveSubmissionDrafts(currentEngine, currentDrafts, {
+      ...draftOverride,
+      prompt: overrides.prompt ?? draftOverride.prompt,
+    });
+    const prompt = submissionDrafts.prompt.trim();
     if (!prompt) {
       setNotice(currentMode === "chat" ? "请先输入要记录的聊天内容" : "请先填写提示词");
       promptRef.current?.focus();
@@ -1394,7 +1518,7 @@ function App() {
         ),
       );
       jumpToConversationEnd();
-      setPrompt(currentEngine, "", setGptForm, currentGptForm, setBananaForm, currentBananaForm);
+      applyPrompt("", currentEngine);
       setTimeout(() => promptRef.current?.focus(), 0);
       setBusy(true);
       setStatus(`${engineLabel(currentEngine)} 聊天中`);
@@ -1479,12 +1603,15 @@ function App() {
       if (normalized?.notice) setNotice(normalized.notice);
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
     }
+    const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
+    const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
     const turn: ConversationTurn = {
       id: turnId,
       engine: currentEngine,
       mode: "generate",
       prompt,
-      negativePrompt: submitGptForm.negative_prompt,
+      negativePrompt: submitNegativePrompt,
+      posterText: submitPosterText,
       createdAt,
       status: "running",
       images: [],
@@ -1511,7 +1638,14 @@ function App() {
     try {
       const response = await fetch(`/api/generate/${currentEngine}`, {
         method: "POST",
-        body: createFormData(currentEngine, submitGptForm, currentBananaForm, currentReferences),
+        body: createFormData(
+          currentEngine,
+          prompt,
+          submitGptForm,
+          currentBananaForm,
+          currentReferences,
+          { negative_prompt: submitNegativePrompt, poster_text: submitPosterText },
+        ),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
@@ -1598,6 +1732,7 @@ function App() {
       title: "新对话",
       updatedAt: new Date().toISOString(),
       turns: [],
+      drafts: emptySessionDrafts(),
     }));
     setReferences([]);
     setStatus("就绪");
@@ -1612,11 +1747,6 @@ function App() {
     setReferences([]);
     setStatus("就绪");
     setSidebarMode("sessions");
-    if (activeEngine === "banana") {
-      setBananaForm({ ...bananaForm, prompt: "" });
-    } else {
-      setGptForm({ ...gptForm, prompt: "" });
-    }
     setNotice("已新建对话");
     setTimeout(() => promptRef.current?.focus(), 0);
   }
@@ -1641,15 +1771,6 @@ function App() {
     setNotice("已修改会话名");
   }
 
-  function applyPrompt(prompt: string) {
-    if (activeEngine === "banana") {
-      setBananaForm({ ...bananaForm, prompt });
-    } else {
-      setGptForm({ ...gptForm, prompt });
-    }
-    setTimeout(() => promptRef.current?.focus(), 0);
-  }
-
   function openPromptEditor() {
     hideTooltip();
     setPromptEditorDraft(activePrompt);
@@ -1657,7 +1778,7 @@ function App() {
   }
 
   function applyPromptEditor() {
-    setPrompt(activeEngine, promptEditorDraft, setGptForm, gptForm, setBananaForm, bananaForm);
+    applyPrompt(promptEditorDraft, activeEngine);
     setPromptEditorOpen(false);
     setTimeout(() => promptRef.current?.focus(), 0);
   }
@@ -1679,11 +1800,7 @@ function App() {
     ].join("\n");
     setActiveEngine(turn.engine);
     setSubmitMode("generate");
-    if (turn.engine === "banana") {
-      setBananaForm({ ...bananaForm, prompt });
-    } else {
-      setGptForm({ ...gptForm, prompt });
-    }
+    applyPrompt(prompt, turn.engine);
     setNotice("已根据聊天上下文整理成生图提示词，可以继续微调后生成。");
     setTimeout(() => promptRef.current?.focus(), 0);
   }
@@ -1924,7 +2041,7 @@ function App() {
               <div className="session-list">
                 {sortedSessions.map((session) => (
                   <article className={session.id === activeSessionId ? "session-card active" : "session-card"} key={session.id}>
-                    <button type="button" className="session-open" onClick={() => setActiveSessionId(session.id)}>
+                    <button type="button" className="session-open" onClick={() => requestSessionSwitch(session.id)}>
                       <span>{session.title || "新对话"}</span>
                       <small>{formatTime(session.updatedAt)} · {session.turns.length} 轮</small>
                     </button>
@@ -2488,7 +2605,7 @@ function App() {
               rows={3}
               value={activePrompt}
               placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
-              onChange={(event) => setPrompt(activeEngine, event.target.value, setGptForm, gptForm, setBananaForm, bananaForm)}
+              onChange={(event) => applyPrompt(event.target.value, activeEngine)}
               onKeyDown={submitFromComposerKey}
             />
             <button
@@ -2510,8 +2627,66 @@ function App() {
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
           </div>
+          {activeEngine === "gpt-image-2" && (
+            <div className={`text-settings-strip ${textSettingsOpen ? "is-open" : ""}`}>
+              <button
+                type="button"
+                className="text-settings-toggle"
+                onClick={() => setTextSettingsOpen((current) => !current)}
+                aria-expanded={textSettingsOpen}
+              >
+                <span>文本约束</span>
+                <small>{textDraftSummary || "未设置负面提示词和画面文字"}</small>
+              </button>
+              {textSettingsOpen && (
+                <div className="text-settings-panel">
+                  <Field label="负面提示词" help="用于描述不希望出现在画面里的元素或风格，留空则不附加负面约束。">
+                    <textarea rows={2} value={gptNegativeDraft} onChange={(event) => updateGptTextDraft("negative_prompt", event.target.value)} />
+                  </Field>
+                  <Field label="画面文字" help="给模型的文字排版提示，适合海报、标题、中文标注等需要保留文字的场景。">
+                    <input value={gptPosterDraft} onChange={(event) => updateGptTextDraft("poster_text", event.target.value)} />
+                  </Field>
+                  <div className="text-settings-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateGptTextDraft("negative_prompt", "");
+                        updateGptTextDraft("poster_text", "");
+                      }}
+                    >
+                      清空文本约束
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </form>
       </section>
+
+      {pendingSessionSwitch && (
+        <div className="drawer-shell reference-switch-shell">
+          <button className="drawer-backdrop" type="button" aria-label="关闭切换会话确认" onClick={() => setPendingSessionSwitch(null)} />
+          <section className="drawer reference-switch-drawer" role="dialog" aria-modal="true" aria-label="切换会话前确认参考图" tabIndex={-1} onKeyDown={closeOnEscape}>
+            <div className="drawer-head">
+              <div>
+                <p>当前参考图不会按会话保存</p>
+                <h2>切换到 {pendingSessionSwitch.nextSessionTitle}</h2>
+              </div>
+              <button type="button" onClick={() => setPendingSessionSwitch(null)} aria-label="关闭切换会话确认" title="关闭"><X size={18} /></button>
+            </div>
+            <div className="config-warning" role="alert">
+              <AlertCircle size={16} />
+              <span>当前工作区还有 {references.length} 张参考图。请选择切换时保留还是清空。</span>
+            </div>
+            <div className="drawer-actions">
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "preserve")}>保留参考图并切换</button>
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "clear")}>清空参考图并切换</button>
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "cancel")}>取消</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {renameOpen && (
         <div className="drawer-shell rename-shell">
@@ -2800,8 +2975,6 @@ function GptSettings({ form, onChange }: { form: GptForm; onChange: (value: GptF
   };
   return (
     <div className="settings-grid">
-      <Field label="负面提示词" help="用于描述不希望出现在画面里的元素或风格，留空则不附加负面约束。"><textarea rows={2} value={form.negative_prompt} onChange={(event) => update("negative_prompt", event.target.value)} /></Field>
-      <Field label="画面文字" help="给模型的文字排版提示，适合海报、标题、中文标注等需要保留文字的场景。"><input value={form.poster_text} onChange={(event) => update("poster_text", event.target.value)} /></Field>
       <Field label="尺寸" help={`选择预设尺寸；自定义尺寸会按官方规则校正：单边不超过 ${GPT_CUSTOM_SIZE_MAX}px，比例不超过 ${GPT_CUSTOM_SIZE_MAX_RATIO}:1，总像素不超过 2880 x 2880。`}>
         <select value={form.size} onChange={(event) => update("size", event.target.value)}>
           {gptSizeOptions.map((item) => <option key={item}>{item}</option>)}

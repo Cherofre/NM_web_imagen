@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-05-14: Prompt-like draft text is session-scoped. In this slice GPT keeps `prompt / negative_prompt / poster_text` per session, Banana keeps `prompt` per session, while non-text generation parameters remain global form settings.
+- 2026-05-14: GPT `负面提示词` and `画面文字` belong near the main composer as an expandable `文本约束` strip instead of living only inside `高级参数`.
+- 2026-05-14: Unsubmitted composer reference images still remain global for now, so switching sessions must confirm whether to preserve or clear them, and deleting the active session should clear them.
 - 2026-05-13: Build v1.0.2 on `codex/v1.0.2` first; merge to `main` only after verification and user approval.
 - 2026-05-13: After every update, sync a clean package copy to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`, excluding local artifacts and internal ledger files.
 - 2026-05-13: For GPT Image 2 upstream 524 responses, show a specific Chinese gateway-timeout explanation instead of surfacing only raw HTML or generic upstream text.
@@ -110,3 +113,24 @@
 - Reason: Generic wording such as "need some text" often produces no readable text, especially when negative prompts penalize bad text.
 - Alternatives considered: Only update user documentation or rely on stronger prompt examples.
 - Consequences / follow-up: History stores `poster_text`; users should put exact desired words in this field.
+
+## 2026-05-14 - Session-Scoped Text Drafts
+- Status: active
+- Decision: Store text drafts with the workbench session instead of the global engine form. GPT sessions keep `prompt`, `negative_prompt`, and `poster_text`; Banana sessions keep `prompt`.
+- Reason: Users were accidentally reusing old negative prompts or poster text because those values behaved like sticky global presets rather than per-conversation context.
+- Alternatives considered: Keep them in `高级参数`; only move negative prompt; make all generation parameters session-scoped.
+- Consequences / follow-up: History apply and regenerate flows must write back into session drafts, and deleting a session should remove its drafts along with any session-owned reference snapshots.
+
+## 2026-05-14 - Composer-Adjacent Text Constraints
+- Status: active
+- Decision: Surface GPT `负面提示词` and `画面文字` in a dedicated expandable `文本约束` strip directly under the main composer.
+- Reason: These fields meaningfully affect nearly every generation, so hiding them deep in `高级参数` made accidental stale injection too easy.
+- Alternatives considered: Keep them in advanced settings only; make them always expanded; add a separate modal.
+- Consequences / follow-up: The strip should summarize current values compactly, and advanced settings should stop duplicating these fields.
+
+## 2026-05-14 - Global Composer References For Now
+- Status: active
+- Decision: Keep unsubmitted composer reference images global for this v1.0.2 slice, but require an explicit preserve/clear choice when switching sessions and clear them when deleting the active session.
+- Reason: Session-scoping reference files is a larger behavior change; the current goal was to remove prompt-text leakage first without reopening the reference upload lifecycle.
+- Alternatives considered: Make reference files fully session-scoped now; silently preserve them on switch; silently clear them on every switch.
+- Consequences / follow-up: The UI must warn that current reference images are not session-bound yet, and future queue/multi-chat work can revisit deeper reference scoping.
