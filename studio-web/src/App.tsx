@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   FolderOpen,
+  FoldVertical,
   Heart,
   ImagePlus,
   Loader2,
@@ -21,7 +22,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { ChangeEvent, DragEvent, FocusEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, useEffect, useId, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
   GPT_CUSTOM_SIZE_MAX_PIXELS,
@@ -38,6 +39,7 @@ import {
   gptComposerSizeTiers,
   resolveGptComposerPresetSize,
 } from "./sizePresets";
+import { deriveGptSizeSelection } from "./gptSizeSelection";
 import {
   applyPromptToDrafts,
   emptySessionDrafts,
@@ -125,6 +127,12 @@ type SubmitOverrides = {
 
 type TooltipState = {
   text: string;
+  left: number;
+  top: number;
+  placement: "top" | "bottom";
+};
+
+type InlineTooltipState = {
   left: number;
   top: number;
   placement: "top" | "bottom";
@@ -231,6 +239,16 @@ type PreviewImage = {
 type PendingSessionSwitch = {
   nextSessionId: string;
   nextSessionTitle: string;
+};
+
+const COMPOSER_PROMPT_DEFAULT_HEIGHT = 148;
+const COMPOSER_PROMPT_MIN_HEIGHT = 118;
+const COMPOSER_PROMPT_MAX_HEIGHT = 360;
+
+type SessionPromptEditorDraft = {
+  fixed_prompt: string;
+  negative_prompt: string;
+  poster_text: string;
 };
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -382,10 +400,43 @@ function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): Conversat
   return compact;
 }
 
+function compactInlineText(value: string, limit = 26) {
+  const compact = value.trim().replace(/\s+/g, " ");
+  if (!compact) return "";
+  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+}
+
+function clampComposerPromptHeight(value: number) {
+  const viewportMax = typeof window === "undefined" ? COMPOSER_PROMPT_MAX_HEIGHT : Math.floor(window.innerHeight * 0.44);
+  const max = Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.min(COMPOSER_PROMPT_MAX_HEIGHT, viewportMax));
+  return Math.min(max, Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.round(value)));
+}
+
+function summarizeSessionPromptDrafts(drafts: SessionDrafts) {
+  return [
+    drafts.shared.fixed_prompt ? `固定：${compactInlineText(drafts.shared.fixed_prompt)}` : "",
+    drafts.gpt.negative_prompt ? `负面：${compactInlineText(drafts.gpt.negative_prompt)}` : "",
+    drafts.gpt.poster_text ? `文字：${compactInlineText(drafts.gpt.poster_text)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function createSessionPromptEditorDraft(drafts: SessionDrafts): SessionPromptEditorDraft {
+  return {
+    fixed_prompt: drafts.shared.fixed_prompt,
+    negative_prompt: drafts.gpt.negative_prompt,
+    poster_text: drafts.gpt.poster_text,
+  };
+}
+
 function compactSessionsForStorage(sessions: WorkbenchSession[], keepReferenceSrc = true) {
   return sortSessionsNewestFirst(sessions).slice(0, 80).map((session) => ({
     ...session,
     drafts: {
+      shared: {
+        fixed_prompt: session.drafts.shared.fixed_prompt,
+      },
       gpt: {
         prompt: session.drafts.gpt.prompt,
         negative_prompt: session.drafts.gpt.negative_prompt,
@@ -645,7 +696,7 @@ function createFormData(
   gpt: GptForm,
   banana: BananaForm,
   references: File[],
-  gptTextDraft?: { negative_prompt?: string; poster_text?: string },
+  gptTextDraft?: { context_prompt?: string; negative_prompt?: string; poster_text?: string },
 ) {
   const data = new FormData();
   const source = engine === "banana" ? banana : { ...gpt, custom_size: normalizeCustomImageSize(gpt.custom_size).value };
@@ -759,6 +810,9 @@ function App() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorDraft, setPromptEditorDraft] = useState("");
+  const [sessionPromptOpen, setSessionPromptOpen] = useState(false);
+  const [sessionPromptDraft, setSessionPromptDraft] = useState<SessionPromptEditorDraft>(() => createSessionPromptEditorDraft(initialSessionState.current.sessions[0]?.drafts || emptySessionDrafts()));
+  const [composerPromptHeight, setComposerPromptHeight] = useState(COMPOSER_PROMPT_DEFAULT_HEIGHT);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "edit" | "strength" | "count" | null>(null);
@@ -769,14 +823,11 @@ function App() {
   const [referenceDropIndex, setReferenceDropIndex] = useState<number | null>(null);
   const [sizeAdjustmentNotice, setSizeAdjustmentNotice] = useState("");
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const [textSettingsOpen, setTextSettingsOpen] = useState(false);
   const [pendingSessionSwitch, setPendingSessionSwitch] = useState<PendingSessionSwitch | null>(null);
   const [customSizeDraft, setCustomSizeDraft] = useState<{ width: string; height: string }>(() => {
     const parsed = parseCustomImageSize(loadJson<GptForm>(gptStorageKey, defaultGptForm).custom_size);
     return { width: String(parsed.width), height: String(parsed.height) };
   });
-  const [gptComposerSizeTier, setGptComposerSizeTier] = useState<GptComposerSizeTier>("auto");
-  const [gptComposerAspect, setGptComposerAspect] = useState<GptComposerAspect>("1:1");
   const [hasPromptedForConfig, setHasPromptedForConfig] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -784,13 +835,13 @@ function App() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const promptWrapRef = useRef<HTMLDivElement | null>(null);
+  const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
   const customSizeDraftRef = useRef(customSizeDraft);
-  const gptComposerSizeTierRef = useRef<GptComposerSizeTier>(gptComposerSizeTier);
-  const gptComposerAspectRef = useRef<GptComposerAspect>(gptComposerAspect);
   const tooltipTimerRef = useRef<number | null>(null);
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
@@ -806,11 +857,12 @@ function App() {
   const configStatusText = hasCompleteConfig ? "配置已完成" : `缺少 ${activeConfigIssues.join("、")}`;
   const configButtonLabel = hasCompleteConfig ? activeModel || "模型名" : "检查配置";
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
-  const gptNegativeDraft = activeDrafts.gpt.negative_prompt;
-  const gptPosterDraft = activeDrafts.gpt.poster_text;
-  const textDraftSummary = [gptNegativeDraft ? `负面：${gptNegativeDraft}` : "", gptPosterDraft ? `文字：${gptPosterDraft}` : ""]
-    .filter(Boolean)
-    .join(" | ");
+  const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts);
+  const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
+  const gptSizeSelection = deriveGptSizeSelection({
+    size: gptForm.size,
+    custom_size: normalizeCustomImageSize(gptForm.custom_size).value,
+  });
 
   useEffect(() => {
     localStorage.setItem(gptStorageKey, JSON.stringify(gptForm));
@@ -833,12 +885,8 @@ function App() {
   }, [composerPopover, gptForm.custom_size]);
 
   useEffect(() => {
-    gptComposerSizeTierRef.current = gptComposerSizeTier;
-  }, [gptComposerSizeTier]);
-
-  useEffect(() => {
-    gptComposerAspectRef.current = gptComposerAspect;
-  }, [gptComposerAspect]);
+    setSessionPromptDraft(createSessionPromptEditorDraft(activeDrafts));
+  }, [activeDrafts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -938,6 +986,7 @@ function App() {
       setAdvancedOpen(false);
       setConnectionOpen(false);
       setRenameOpen(false);
+      setSessionPromptOpen(false);
       setHistoryDetail(null);
       closePreviewImage();
       setComposerPopover(null);
@@ -1083,14 +1132,60 @@ function App() {
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
-  function updateGptTextDraft(key: "prompt" | "negative_prompt" | "poster_text", value: string) {
+  function openSessionPromptEditor() {
+    hideTooltip();
+    setSessionPromptDraft(createSessionPromptEditorDraft(activeDrafts));
+    setSessionPromptOpen(true);
+  }
+
+  function applySessionPromptEditor() {
     updateActiveSessionDrafts((drafts) => ({
       ...drafts,
+      shared: {
+        ...drafts.shared,
+        fixed_prompt: sessionPromptDraft.fixed_prompt,
+      },
       gpt: {
         ...drafts.gpt,
-        [key]: value,
+        negative_prompt: sessionPromptDraft.negative_prompt,
+        poster_text: sessionPromptDraft.poster_text,
       },
     }));
+    setSessionPromptOpen(false);
+    setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function resetPromptHeight() {
+    composerResizeRef.current = null;
+    setComposerPromptHeight(COMPOSER_PROMPT_DEFAULT_HEIGHT);
+    setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function startComposerResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    hideTooltip();
+    composerResizeRef.current = {
+      startY: event.clientY,
+      startHeight: promptWrapRef.current?.getBoundingClientRect().height || composerPromptHeight,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function dragComposerResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = composerResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setComposerPromptHeight(clampComposerPromptHeight(drag.startHeight + drag.startY - event.clientY));
+  }
+
+  function endComposerResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = composerResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    composerResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   }
 
   function switchToSession(sessionId: string, choice: ReferenceSwitchChoice = "preserve") {
@@ -1149,6 +1244,10 @@ function App() {
       setBananaForm((current) => normalizeBananaForm({ ...current, ...pickHistoryState<BananaForm>(formState, bananaHistoryKeys) }));
       updateActiveSessionDrafts((drafts) => ({
         ...drafts,
+        shared: {
+          ...drafts.shared,
+          fixed_prompt: String(formState.context_prompt || ""),
+        },
         banana: {
           ...drafts.banana,
           prompt: String(formState.prompt || entry.prompt || ""),
@@ -1164,6 +1263,10 @@ function App() {
       );
       updateActiveSessionDrafts((drafts) => ({
         ...drafts,
+        shared: {
+          ...drafts.shared,
+          fixed_prompt: String(formState.context_prompt || ""),
+        },
         gpt: {
           prompt: String(formState.prompt || entry.prompt || ""),
           negative_prompt: String(formState.negative_prompt || entry.negative_prompt || ""),
@@ -1422,14 +1525,23 @@ function App() {
     setActiveEngine(turn.engine);
     setSubmitMode("generate");
     updateActiveSessionDrafts((drafts) => {
+      const contextPrompt = String(turn.meta?.context_prompt || "");
       if (turn.engine === "banana") {
         return {
           ...drafts,
+          shared: {
+            ...drafts.shared,
+            fixed_prompt: contextPrompt,
+          },
           banana: { ...drafts.banana, prompt: turn.prompt },
         };
       }
       return {
         ...drafts,
+        shared: {
+          ...drafts.shared,
+          fixed_prompt: contextPrompt,
+        },
         gpt: {
           ...drafts.gpt,
           prompt: turn.prompt,
@@ -1445,14 +1557,19 @@ function App() {
       mode: "generate",
       engine: turn.engine,
       prompt: turn.prompt,
-      draftOverride: turn.engine === "gpt-image-2"
-        ? {
-            gpt: {
-              negative_prompt: turn.negativePrompt || "",
-              poster_text: turn.posterText || "",
-            },
-          }
-        : undefined,
+      draftOverride: {
+        shared: {
+          fixed_prompt: String(turn.meta?.context_prompt || ""),
+        },
+        ...(turn.engine === "gpt-image-2"
+          ? {
+              gpt: {
+                negative_prompt: turn.negativePrompt || "",
+                poster_text: turn.posterText || "",
+              },
+            }
+          : {}),
+      },
       references: turnReferences,
       referenceSnapshots: turn.referenceSnapshots || [],
     });
@@ -1605,6 +1722,7 @@ function App() {
     }
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
+    const submitContextPrompt = submissionDrafts.context_prompt;
     const turn: ConversationTurn = {
       id: turnId,
       engine: currentEngine,
@@ -1616,7 +1734,11 @@ function App() {
       status: "running",
       images: [],
       referenceSnapshots,
-      meta: { model: currentModel, reference_count: currentReferences.length },
+      meta: {
+        model: currentModel,
+        reference_count: currentReferences.length,
+        context_prompt: submitContextPrompt,
+      },
     };
     setSessions((current) =>
       current.map((session) =>
@@ -1644,7 +1766,11 @@ function App() {
           submitGptForm,
           currentBananaForm,
           currentReferences,
-          { negative_prompt: submitNegativePrompt, poster_text: submitPosterText },
+          {
+            context_prompt: submitContextPrompt,
+            negative_prompt: submitNegativePrompt,
+            poster_text: submitPosterText,
+          },
         ),
       });
       const payload = await response.json().catch(() => ({}));
@@ -1666,7 +1792,11 @@ function App() {
                         elapsedSeconds: elapsed,
                         images,
                         error: payload.ok ? "" : "接口返回了结果，但没有拿到图片",
-                        meta: payload.meta || item.meta,
+                        meta: {
+                          ...(item.meta || {}),
+                          ...(payload.meta || {}),
+                          context_prompt: submitContextPrompt,
+                        },
                       }
                     : item,
                 ),
@@ -1813,7 +1943,11 @@ function App() {
 
   function currentSizeLabel() {
     if (activeEngine === "banana") return `${bananaForm.aspect_ratio} · ${bananaForm.image_size}`;
-    return gptForm.size === "custom" ? `${customSizeDraftRef.current.width || "?"}x${customSizeDraftRef.current.height || "?"}` : gptForm.size;
+    if (gptSizeSelection.mode === "auto") return "自动";
+    if (gptSizeSelection.mode === "preset" && gptSizeSelection.tier && gptSizeSelection.aspect) {
+      return `${gptSizeSelection.tier} · ${gptSizeSelection.aspect}`;
+    }
+    return `自定义 ${gptSizeSelection.value}`;
   }
 
   function currentQualityLabel() {
@@ -1832,15 +1966,7 @@ function App() {
     return `${Math.round(gptForm.reference_strength * 100)}%`;
   }
 
-  function gptComposerPresetValue(tier = gptComposerSizeTier, aspect = gptComposerAspect) {
-    return resolveGptComposerPresetSize(tier, aspect);
-  }
-
-  function applyGptComposerSize(tier: GptComposerSizeTier, aspect = gptComposerAspect) {
-    gptComposerSizeTierRef.current = tier;
-    gptComposerAspectRef.current = aspect;
-    setGptComposerSizeTier(tier);
-    setGptComposerAspect(aspect);
+  function applyGptComposerSize(tier: GptComposerSizeTier, aspect: GptComposerAspect = "1:1") {
     if (tier === "auto") {
       setGptForm({ ...gptForm, size: "auto" });
       setSizeAdjustmentNotice("");
@@ -1868,8 +1994,6 @@ function App() {
     const nextDraft = { ...customSizeDraftRef.current, [dimension]: cleaned };
     customSizeDraftRef.current = nextDraft;
     setCustomSizeDraft(nextDraft);
-    gptComposerSizeTierRef.current = "auto";
-    setGptComposerSizeTier("auto");
     setGptForm({ ...gptForm, size: "custom" });
     setSizeAdjustmentNotice("");
   }
@@ -2137,7 +2261,7 @@ function App() {
                 <Settings2 size={16} />
                 <span>{configButtonLabel}</span>
               </button>
-              <button type="button" onClick={() => void saveConfig()}>保存配置</button>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
               <button type="button" onClick={clearCurrentSession} disabled={turns.length === 0 && references.length === 0}>清空</button>
             </div>
           </div>
@@ -2292,6 +2416,7 @@ function App() {
 
         <form
           className={dragActive ? "composer is-drop-target" : "composer"}
+          style={composerPromptStyle}
           onSubmit={(event) => void submit(event)}
         >
           {references.length > 0 && (
@@ -2397,7 +2522,7 @@ function App() {
                             <button
                               type="button"
                               key={tier}
-                              className={gptComposerSizeTier === tier ? "selected" : ""}
+                              className={gptSizeSelection.tier === tier ? "selected" : ""}
                               onClick={() => applyGptComposerSize(tier)}
                             >
                               {tier === "auto" ? "自动" : tier}
@@ -2409,15 +2534,15 @@ function App() {
                             <button
                               type="button"
                               key={aspect}
-                              className={gptComposerSizeTier !== "auto" && gptComposerAspect === aspect ? "selected" : ""}
-                              onClick={() => applyGptComposerSize(gptComposerSizeTierRef.current === "auto" ? "1K" : gptComposerSizeTierRef.current, aspect)}
+                              className={gptSizeSelection.aspect === aspect ? "selected" : ""}
+                              onClick={() => applyGptComposerSize(gptSizeSelection.tier === "auto" || !gptSizeSelection.tier ? "1K" : gptSizeSelection.tier, aspect)}
                             >
                               {aspect}
                             </button>
                           ))}
                         </div>
                         <div className="preset-summary">
-                          {gptComposerSizeTier === "auto" ? "自动尺寸由上游决定" : `${gptComposerSizeTier} · ${gptComposerAspect} · ${gptComposerPresetValue()}`}
+                          {gptSizeSelection.summary}
                         </div>
                       </div>
                       <div className="custom-size-row">
@@ -2444,7 +2569,11 @@ function App() {
                             onBlur={handleCustomSizeBlur}
                           />
                         </label>
-                        <button type="button" className={gptForm.size === "custom" ? "selected" : ""} onClick={() => normalizeCustomSize()}>
+                        <button
+                          type="button"
+                          className={`${gptSizeSelection.mode === "custom" ? "selected " : ""}primary-action`}
+                          onClick={() => normalizeCustomSize()}
+                        >
                           应用
                         </button>
                       </div>
@@ -2599,24 +2728,59 @@ function App() {
               高级参数
             </button>
           </div>
+          <button
+            type="button"
+            className="composer-resize-handle"
+            onPointerDown={startComposerResize}
+            onPointerMove={dragComposerResize}
+            onPointerUp={endComposerResize}
+            onPointerCancel={endComposerResize}
+            title="拖拽调整输入区高度"
+            aria-label="拖拽调整输入区高度"
+          >
+            <span />
+          </button>
+          <button
+            type="button"
+            className="composer-reset-button"
+            onClick={resetPromptHeight}
+            title="恢复输入区高度"
+            aria-label="恢复输入区高度"
+          >
+            <FoldVertical size={15} />
+          </button>
           <div className="composer-input">
-            <textarea
-              ref={promptRef}
-              rows={3}
-              value={activePrompt}
-              placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
-              onChange={(event) => applyPrompt(event.target.value, activeEngine)}
-              onKeyDown={submitFromComposerKey}
-            />
-            <button
-              className="prompt-expand-button"
-              type="button"
-              onClick={openPromptEditor}
-              title="展开编辑提示词"
-              aria-label="展开编辑提示词"
-            >
-              展开编辑
-            </button>
+            <div className="composer-textarea-wrap" ref={promptWrapRef}>
+              <textarea
+                ref={promptRef}
+                rows={3}
+                value={activePrompt}
+                placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
+                onChange={(event) => applyPrompt(event.target.value, activeEngine)}
+                onKeyDown={submitFromComposerKey}
+              />
+              <div className="composer-prompt-actions">
+                <button
+                  type="button"
+                  className={sessionPromptSummary ? "session-prompt-button has-content" : "session-prompt-button"}
+                  onClick={openSessionPromptEditor}
+                  aria-label="打开会话提示"
+                  title={sessionPromptSummary || "固定、负面、画面文字都还没设置"}
+                >
+                  <span className="session-prompt-button-title">会话提示</span>
+                  <span className="session-prompt-button-summary">{sessionPromptSummary || "未设置"}</span>
+                </button>
+                <button
+                  className="prompt-expand-button"
+                  type="button"
+                  onClick={openPromptEditor}
+                  title="展开编辑提示词"
+                  aria-label="展开编辑提示词"
+                >
+                  展开编辑
+                </button>
+              </div>
+            </div>
             <button
               className="submit-button"
               disabled={busy}
@@ -2627,40 +2791,6 @@ function App() {
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
           </div>
-          {activeEngine === "gpt-image-2" && (
-            <div className={`text-settings-strip ${textSettingsOpen ? "is-open" : ""}`}>
-              <button
-                type="button"
-                className="text-settings-toggle"
-                onClick={() => setTextSettingsOpen((current) => !current)}
-                aria-expanded={textSettingsOpen}
-              >
-                <span>文本约束</span>
-                <small>{textDraftSummary || "未设置负面提示词和画面文字"}</small>
-              </button>
-              {textSettingsOpen && (
-                <div className="text-settings-panel">
-                  <Field label="负面提示词" help="用于描述不希望出现在画面里的元素或风格，留空则不附加负面约束。">
-                    <textarea rows={2} value={gptNegativeDraft} onChange={(event) => updateGptTextDraft("negative_prompt", event.target.value)} />
-                  </Field>
-                  <Field label="画面文字" help="给模型的文字排版提示，适合海报、标题、中文标注等需要保留文字的场景。">
-                    <input value={gptPosterDraft} onChange={(event) => updateGptTextDraft("poster_text", event.target.value)} />
-                  </Field>
-                  <div className="text-settings-actions">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        updateGptTextDraft("negative_prompt", "");
-                        updateGptTextDraft("poster_text", "");
-                      }}
-                    >
-                      清空文本约束
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </form>
       </section>
 
@@ -2710,7 +2840,7 @@ function App() {
                 <input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} />
               </Field>
               <div className="drawer-actions">
-                <button type="submit">保存</button>
+                <button type="submit" className="primary-action">保存</button>
                 <button type="button" onClick={() => setRenameOpen(false)}>取消</button>
               </div>
             </form>
@@ -2736,8 +2866,53 @@ function App() {
               onChange={(event) => setPromptEditorDraft(event.target.value)}
             />
             <div className="drawer-actions">
-              <button type="button" onClick={applyPromptEditor}>应用</button>
+              <button type="button" className="primary-action" onClick={applyPromptEditor}>应用</button>
               <button type="button" onClick={() => setPromptEditorOpen(false)}>取消</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {sessionPromptOpen && (
+        <div className="drawer-shell prompt-editor-shell">
+          <button className="drawer-backdrop" type="button" aria-label="关闭会话提示" onClick={() => setSessionPromptOpen(false)} />
+          <section className="drawer session-prompt-drawer" role="dialog" aria-modal="true" aria-label="会话提示" tabIndex={-1} onKeyDown={closeOnEscape}>
+            <div className="drawer-head">
+              <div>
+                <p>当前会话专用，不跟其他会话串值</p>
+                <h2>会话提示</h2>
+              </div>
+              <button type="button" onClick={() => setSessionPromptOpen(false)} aria-label="关闭会话提示" title="关闭"><X size={18} /></button>
+            </div>
+            <div className="session-prompt-drawer-note">
+              把不想每次重写、但又不适合塞进主提示词的内容放在这里。固定提示词只在生成时附加，不影响聊天。
+            </div>
+            <div className="session-prompt-fields">
+              <Field label="固定提示词" help="会话级，仅生成。会通过 context_prompt 提交，不会直接拼进主提示词文本。">
+                <textarea value={sessionPromptDraft.fixed_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: event.target.value }))} />
+              </Field>
+              <Field label="负面提示词" help="会话级，仅 GPT 生效。用于描述不希望出现在画面里的元素或风格。">
+                <textarea value={sessionPromptDraft.negative_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, negative_prompt: event.target.value }))} />
+              </Field>
+              <Field label="画面文字" help="会话级，仅 GPT 生效。适合海报标题、技能名、画面内中文标注等场景。">
+                <input value={sessionPromptDraft.poster_text} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, poster_text: event.target.value }))} />
+              </Field>
+            </div>
+            <div className="drawer-actions session-prompt-actions">
+              <button
+                type="button"
+                onClick={() => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: "" }))}
+              >
+                清空固定提示词
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionPromptDraft((current) => ({ ...current, negative_prompt: "", poster_text: "" }))}
+              >
+                清空负面和画面文字
+              </button>
+              <button type="button" className="primary-action" onClick={applySessionPromptEditor}>应用</button>
+              <button type="button" onClick={() => setSessionPromptOpen(false)}>取消</button>
             </div>
           </section>
         </div>
@@ -2799,7 +2974,7 @@ function App() {
             </div>
             <div className="drawer-actions">
               <button type="button" onClick={() => void loadDefaults()}>读取默认值</button>
-              <button type="button" onClick={() => void saveConfig()}>保存配置</button>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
               <button type="button" onClick={() => setConnectionOpen(false)}>关闭</button>
             </div>
           </section>
@@ -2819,7 +2994,7 @@ function App() {
             </div>
             <div className="drawer-actions">
               <button type="button" onClick={() => void loadDefaults()}>读取默认值</button>
-              <button type="button" onClick={() => void saveConfig()}>保存到 config.local.json</button>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存到 config.local.json</button>
             </div>
             {activeEngine === "gpt-image-2" ? (
               <GptSettings form={gptForm} onChange={setGptForm} />
@@ -2845,6 +3020,12 @@ function App() {
               <section className="detail-section">
                 <h3>提示词</h3>
                 <p className="detail-prompt">{historyDetail.prompt || "没有提示词"}</p>
+                {String(historyDetail.form_state?.context_prompt || "") && (
+                  <>
+                    <h3>固定提示词</h3>
+                    <p className="detail-prompt muted">{String(historyDetail.form_state?.context_prompt || "")}</p>
+                  </>
+                )}
                 {historyDetail.negative_prompt && (
                   <>
                     <h3>负面提示词</h3>
@@ -2930,23 +3111,81 @@ function App() {
 }
 
 function Field({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
-  const [tooltip, setTooltip] = useState(false);
+  const tooltipId = useId();
+  const [tooltip, setTooltip] = useState<InlineTooltipState | null>(null);
+  const showTooltip = (event: ReactPointerEvent<HTMLElement> | SyntheticEvent<HTMLElement>) => {
+    if (!help) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const showBelow = rect.top < 86;
+    setTooltip({
+      left: Math.min(window.innerWidth - 18, Math.max(18, rect.left + rect.width / 2)),
+      top: showBelow ? rect.bottom + 8 : rect.top - 8,
+      placement: showBelow ? "bottom" : "top",
+    });
+  };
+  const hideInlineTooltip = () => setTooltip(null);
   return (
-    <label className="field" data-tooltip={help} onPointerEnter={() => help && setTooltip(true)} onPointerLeave={() => setTooltip(false)} onFocus={() => help && setTooltip(true)} onBlur={() => setTooltip(false)}>
+    <label
+      className="field"
+      data-tooltip={help}
+      aria-describedby={help && tooltip ? tooltipId : undefined}
+      onPointerEnter={showTooltip}
+      onPointerLeave={hideInlineTooltip}
+      onFocus={showTooltip}
+      onBlur={hideInlineTooltip}
+    >
       <span>{label}</span>
       {children}
-      {help && tooltip && <span className="inline-tooltip" role="tooltip">{help}</span>}
+      {help && tooltip && (
+        <span
+          id={tooltipId}
+          className={`inline-tooltip ${tooltip.placement}`}
+          role="tooltip"
+          style={{ left: tooltip.left, top: tooltip.top }}
+        >
+          {help}
+        </span>
+      )}
     </label>
   );
 }
 
 function Toggle({ label, help, checked, onChange }: { label: string; help?: string; checked: boolean; onChange: (value: boolean) => void }) {
-  const [tooltip, setTooltip] = useState(false);
+  const tooltipId = useId();
+  const [tooltip, setTooltip] = useState<InlineTooltipState | null>(null);
+  const showTooltip = (event: ReactPointerEvent<HTMLElement> | SyntheticEvent<HTMLElement>) => {
+    if (!help) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const showBelow = rect.top < 86;
+    setTooltip({
+      left: Math.min(window.innerWidth - 18, Math.max(18, rect.left + rect.width / 2)),
+      top: showBelow ? rect.bottom + 8 : rect.top - 8,
+      placement: showBelow ? "bottom" : "top",
+    });
+  };
+  const hideInlineTooltip = () => setTooltip(null);
   return (
-    <label className="toggle" data-tooltip={help} onPointerEnter={() => help && setTooltip(true)} onPointerLeave={() => setTooltip(false)} onFocus={() => help && setTooltip(true)} onBlur={() => setTooltip(false)}>
+    <label
+      className="toggle"
+      data-tooltip={help}
+      aria-describedby={help && tooltip ? tooltipId : undefined}
+      onPointerEnter={showTooltip}
+      onPointerLeave={hideInlineTooltip}
+      onFocus={showTooltip}
+      onBlur={hideInlineTooltip}
+    >
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <span>{label}</span>
-      {help && tooltip && <span className="inline-tooltip" role="tooltip">{help}</span>}
+      {help && tooltip && (
+        <span
+          id={tooltipId}
+          className={`inline-tooltip ${tooltip.placement}`}
+          role="tooltip"
+          style={{ left: tooltip.left, top: tooltip.top }}
+        >
+          {help}
+        </span>
+      )}
     </label>
   );
 }

@@ -8,7 +8,7 @@ export function buildSubmissionFields(
   prompt: string,
   gpt: GptSubmissionConfig,
   banana: BananaSubmissionConfig,
-  gptTextDraft?: { negative_prompt?: string; poster_text?: string },
+  gptTextDraft?: { context_prompt?: string; negative_prompt?: string; poster_text?: string },
 ): SubmissionFields {
   const fields: SubmissionFields = [];
   if (engine === "banana") {
@@ -16,6 +16,9 @@ export function buildSubmissionFields(
       fields.push([key, String(value)]);
     });
     fields.push(["prompt", prompt]);
+    if (gptTextDraft?.context_prompt) {
+      fields.push(["context_prompt", gptTextDraft.context_prompt]);
+    }
     return fields;
   }
 
@@ -23,6 +26,9 @@ export function buildSubmissionFields(
     fields.push([key, String(value)]);
   });
   fields.push(["prompt", prompt]);
+  if (gptTextDraft?.context_prompt) {
+    fields.push(["context_prompt", gptTextDraft.context_prompt]);
+  }
   if (gptTextDraft?.negative_prompt) {
     fields.push(["negative_prompt", gptTextDraft.negative_prompt]);
   }

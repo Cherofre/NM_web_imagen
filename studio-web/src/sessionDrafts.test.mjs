@@ -16,6 +16,9 @@ test("normalizeSessionWithDrafts adds empty gpt and banana drafts", () => {
   });
 
   assert.deepEqual(normalized.drafts, {
+    shared: {
+      fixed_prompt: "",
+    },
     gpt: {
       prompt: "",
       negative_prompt: "",
@@ -33,6 +36,7 @@ test("applyPromptToDrafts updates only the selected engine prompt", () => {
 
   assert.equal(next.gpt.prompt, "蓝色火花");
   assert.equal(next.gpt.negative_prompt, "");
+  assert.equal(next.shared.fixed_prompt, "");
   assert.equal(next.banana.prompt, "");
 });
 
@@ -61,6 +65,9 @@ test("resolveReferenceSwitch clears references only when choice is clear", () =>
 
 test("resolveSubmissionDrafts prefers explicit gpt text overrides for regenerate flows", () => {
   const base = {
+    shared: {
+      fixed_prompt: "偏二次元技能海报，高完成度",
+    },
     gpt: {
       prompt: "当前草稿提示词",
       negative_prompt: "旧负面",
@@ -81,8 +88,34 @@ test("resolveSubmissionDrafts prefers explicit gpt text overrides for regenerate
 
   assert.deepEqual(resolved, {
     prompt: "这轮重新生成",
+    context_prompt: "偏二次元技能海报，高完成度",
     negative_prompt: "新负面",
     poster_text: "新文字",
+  });
+});
+
+test("resolveSubmissionDrafts reuses shared fixed prompt for banana generate payloads", () => {
+  const base = {
+    shared: {
+      fixed_prompt: "延续上一轮光效方向",
+    },
+    gpt: {
+      prompt: "蓝色火花",
+      negative_prompt: "",
+      poster_text: "",
+    },
+    banana: {
+      prompt: "橙色爆炸波",
+    },
+  };
+
+  const resolved = drafts.resolveSubmissionDrafts("banana", base);
+
+  assert.deepEqual(resolved, {
+    prompt: "橙色爆炸波",
+    context_prompt: "延续上一轮光效方向",
+    negative_prompt: "",
+    poster_text: "",
   });
 });
 

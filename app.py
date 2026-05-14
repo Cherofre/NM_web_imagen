@@ -807,6 +807,11 @@ def compact_studio_session(session: Any) -> Optional[Dict[str, Any]]:
     drafts = session.get("drafts")
     if isinstance(drafts, dict):
         compact_drafts: Dict[str, Any] = {}
+        shared_draft = drafts.get("shared")
+        if isinstance(shared_draft, dict):
+            compact_drafts["shared"] = {
+                "fixed_prompt": str(shared_draft.get("fixed_prompt") or ""),
+            }
         gpt_draft = drafts.get("gpt")
         if isinstance(gpt_draft, dict):
             compact_gpt = {

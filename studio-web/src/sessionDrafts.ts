@@ -6,17 +6,23 @@ export type SessionGptDraft = {
   poster_text: string;
 };
 
+export type SessionSharedDraft = {
+  fixed_prompt: string;
+};
+
 export type SessionBananaDraft = {
   prompt: string;
 };
 
 export type SessionDrafts = {
+  shared: SessionSharedDraft;
   gpt: SessionGptDraft;
   banana: SessionBananaDraft;
 };
 
 export type SubmissionDraftOverride = {
   prompt?: string;
+  shared?: Partial<SessionSharedDraft>;
   gpt?: Partial<SessionGptDraft>;
 };
 
@@ -39,6 +45,9 @@ export type ReferenceSwitchChoice = "preserve" | "clear" | "cancel";
 
 export function emptySessionDrafts(): SessionDrafts {
   return {
+    shared: {
+      fixed_prompt: "",
+    },
     gpt: {
       prompt: "",
       negative_prompt: "",
@@ -55,6 +64,10 @@ export function normalizeSessionWithDrafts(session: SessionLike & { drafts?: Par
   return {
     ...session,
     drafts: {
+      shared: {
+        ...defaults.shared,
+        ...(session.drafts?.shared || {}),
+      },
       gpt: {
         ...defaults.gpt,
         ...(session.drafts?.gpt || {}),
@@ -108,11 +121,16 @@ export function resolveSubmissionDrafts(engine: Engine, drafts: SessionDrafts, o
   if (engine === "banana") {
     return {
       prompt: overrides.prompt ?? drafts.banana.prompt,
+      context_prompt: overrides.shared?.fixed_prompt ?? drafts.shared.fixed_prompt,
       negative_prompt: "",
       poster_text: "",
     };
   }
 
+  const sharedDraft = {
+    ...drafts.shared,
+    ...(overrides.shared || {}),
+  };
   const gptDraft = {
     ...drafts.gpt,
     ...(overrides.gpt || {}),
@@ -120,6 +138,7 @@ export function resolveSubmissionDrafts(engine: Engine, drafts: SessionDrafts, o
 
   return {
     prompt: overrides.prompt ?? gptDraft.prompt,
+    context_prompt: sharedDraft.fixed_prompt,
     negative_prompt: gptDraft.negative_prompt,
     poster_text: gptDraft.poster_text,
   };

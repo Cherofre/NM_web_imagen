@@ -154,6 +154,9 @@ class StudioSessionTests(unittest.TestCase):
                     "createdAt": "2026-05-14T00:00:00",
                     "updatedAt": "2026-05-14T00:00:01",
                     "drafts": {
+                        "shared": {
+                            "fixed_prompt": "偏二次元技能海报，高完成度",
+                        },
                         "gpt": {
                             "prompt": "蓝色闪电斩击",
                             "negative_prompt": "blurry, low quality",
@@ -172,6 +175,7 @@ class StudioSessionTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         session = response.json()["sessions"][0]
+        self.assertEqual("偏二次元技能海报，高完成度", session["drafts"]["shared"]["fixed_prompt"])
         self.assertEqual("蓝色闪电斩击", session["drafts"]["gpt"]["prompt"])
         self.assertEqual("blurry, low quality", session["drafts"]["gpt"]["negative_prompt"])
         self.assertEqual("雷光", session["drafts"]["gpt"]["poster_text"])
