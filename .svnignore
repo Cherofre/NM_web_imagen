@@ -1,4 +1,6 @@
 config.local.json
+.codex
+_release
 outputs
 logs
 saved_images

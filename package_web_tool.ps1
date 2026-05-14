@@ -15,12 +15,14 @@ $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_web_imagen_package_
 $TempAppDir = Join-Path $TempRoot "NM_web_imagen"
 
 $ExcludedDirs = @(
+  ".codex",
   ".chrome-debug",
   ".venv",
   ".runtime",
   ".playwright-mcp",
   ".git",
   ".svn",
+  "_release",
   "__pycache__",
   "dist",
   "node_modules",
@@ -57,6 +59,12 @@ function Test-IsExcludedFile {
   $NormalizedRelativePath = $RelativePath -replace "\\", "/"
   if ($NormalizedRelativePath -like "vendor/python/python-*-embed-amd64.zip") {
     return $false
+  }
+
+  if ($NormalizedRelativePath -notlike "*/*") {
+    if ($File.Extension -in @(".png", ".jpg", ".jpeg", ".webp")) {
+      return $true
+    }
   }
 
   if ($NormalizedRelativePath -like "vendor/wheels/*.whl") {
