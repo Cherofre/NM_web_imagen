@@ -2,11 +2,11 @@
 
 ## Self-Improvement
 
-Use the global memory directory at `C:\Users\Cherofre\.codex\memories`.
+Use the project memory directory at `.codex/memories` relative to this repository root.
 
 Before starting any new task:
-1. Read `C:\Users\Cherofre\.codex\memories\PROFILE.md`
-2. Read `C:\Users\Cherofre\.codex\memories\ACTIVE.md`
+1. Read `.codex/memories/PROFILE.md`
+2. Read `.codex/memories/ACTIVE.md`
 3. Apply them as global memory before analyzing the user request
 
 If any of the memory files are missing, create minimal templates first instead of skipping the loop.
@@ -21,12 +21,12 @@ Evaluate whether to log a memory entry when any of the following happens:
 5. A non-obvious workaround, debugging insight, or better recurring approach is discovered
 
 Write entries by type:
-- `C:\Users\Cherofre\.codex\memories\LEARNINGS.md` for reusable learnings, corrections, knowledge gaps, and best practices
-- `C:\Users\Cherofre\.codex\memories\ERRORS.md` for unexpected errors, environment-specific failures, and debugging notes
-- `C:\Users\Cherofre\.codex\memories\FEATURE_REQUESTS.md` for missing capabilities the user wants to keep track of
+- `.codex/memories/LEARNINGS.md` for reusable learnings, corrections, knowledge gaps, and best practices
+- `.codex/memories/ERRORS.md` for unexpected errors, environment-specific failures, and debugging notes
+- `.codex/memories/FEATURE_REQUESTS.md` for missing capabilities the user wants to keep track of
 
 Promotion rules:
-1. If a pattern recurs or is broadly useful across tasks, promote it into `C:\Users\Cherofre\.codex\memories\ACTIVE.md`
+1. If a pattern recurs or is broadly useful across tasks, promote it into `.codex/memories/ACTIVE.md`
 2. Keep `ACTIVE.md` concise, current, and deduplicated
 3. Only promote something into this `AGENTS.md` when it becomes a stable top-level rule, or when the user explicitly asks
 

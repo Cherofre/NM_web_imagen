@@ -1,17 +1,18 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-12 19:55 +08:00
-- Phase: GPT Reference Upload Encoding / Synced
-- Branch: main
+- Last Updated: 2026-05-14 15:45 +08:00
+- Phase: v1.0.2 Branch / Session Drafts And Text Constraints
+- Branch: codex/v1.0.2
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: Fix GPT Image 2 reference-image uploads so non-ASCII filenames from other Windows machines do not trigger `UnicodeEncodeError` before the upstream request is sent.
+- Current Focus: Finish the v1.0.2 slice that moves prompt-related drafts to session scope, surfaces GPT text constraints under the main composer, and keeps sync/package handoff clean.
 
 ## Resume Here
 - Start with: `git status --short --branch`
-- Main changed files in the current cleanup: `package_web_tool.ps1`, `start_web.ps1`, `README.md`, `static/index.html`, `static/app.js`, `PROJECT_STATUS.md`, and `NEXT_ACTIONS.md`.
+- Main changed files in the current v1.0.2 slice: `app.py`, `studio-web/src/App.tsx`, `studio-web/src/styles.css`, `studio-web/src/sessionDrafts.ts`, `studio-web/src/submissionPayload.ts`, `tests/test_studio_sessions.py`, and built `static/studio/*`.
 - Sync target after local commits: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
+- Current-project rule: after every update, sync a clean copy to the G: target above, but do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`.
 
 ## Progress Summary
 - [x] Implemented the React/Vite Studio frontend in `studio-web/`, built to `static/studio/`, and kept `/classic` as the rollback path for the old static UI.
@@ -37,8 +38,37 @@
 - [x] Added a regression test for GPT Image 2 edits requests with a Chinese reference filename.
 - [x] Changed GPT Image 2 multipart upload requests to use an ASCII-safe request filename while preserving the original display filename in local asset metadata.
 - [x] Synced the upload filename fix to the G: `NM_web_imagen/` folder and updated only `NM_web_imagen.zip`.
+- [x] Created `codex/v1.0.2` from updated `main` for the next release slice.
+- [x] Added clearer Chinese error text for upstream 524 gateway timeout responses.
+- [x] Added a regression test for GPT Image 2 524 timeout messaging.
+- [x] Committed the v1.0.2 branch slice as `8a42a6a Improve GPT upstream timeout messaging`.
+- [x] Moved GPT `prompt / negative_prompt / poster_text` and Banana `prompt` to session-scoped drafts instead of global form presets.
+- [x] Moved GPT text constraints out of `高级参数` into a composer-adjacent expandable `文本约束` strip.
+- [x] Restored history apply and regenerate flows so they write back to the active session drafts instead of stale global prompt fields.
+- [x] Added session-switch confirmation when unsubmitted reference images exist because references are still composer-global in this slice.
+- [x] Added backend session persistence coverage for draft payloads, turn `posterText`, and cleanup of deleted session reference snapshots.
+- [x] Fixed a regenerate edge case so explicit turn `negativePrompt / posterText` override the previously rendered active draft during submission.
+- [x] Fixed active-session deletion so the current composer reference images are cleared instead of leaking into the next session.
 
 ## Verification
+- Latest session-draft verification:
+  - `node --test .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs` from `studio-web`: passed, 8 tests.
+  - `npm run build` from `studio-web`: passed; updated assets `static/studio/assets/index-Dp26rfuO.js` and `static/studio/assets/index-acPErJzx.css`.
+  - `npm run test:size` from `studio-web`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions`: passed, 15 tests.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `git diff --check`: passed with only expected LF/CRLF warnings after normalizing `static/studio/index.html`.
+  - `Invoke-WebRequest http://127.0.0.1:7861/api/health`: passed, health payload confirmed `studio_sessions` and `session_reference_files`.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: WARN only; `NEXT_ACTIONS.md ## Now` needed compaction.
+- Latest v1.0.2 branch verification:
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions`: passed, 12 tests.
+  - `npm run test:size` from `studio-web`: passed.
+  - `git diff --check`: no whitespace errors, only expected LF/CRLF warnings.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\package_web_tool.ps1 -OutputPath <temp zip>`: passed.
+  - Synced temp package contents to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile <G target>\app.py`: passed; generated `__pycache__` verification residue was removed afterward.
+  - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime`, `.venv`, `.playwright-mcp`, `.git`, `__pycache__`, `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, `DECISIONS.md`, `studio-web/node_modules`, or `studio-web/tsconfig.tsbuildinfo`.
 - Latest cleanup verification:
   - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
   - `npm run build` from `studio-web`: passed.
