@@ -1,6 +1,7 @@
 # Decisions
 
 ## Active Decisions
+- 2026-05-15: Defer the latest v1.0.2 review findings to the next version. Do not republish v1.0.2 solely for: history apply preserving session prompt drafts, chat-mode helper wording, or broader `.svnignore` cleanup.
 - 2026-05-14: Prompt-like draft text is session-scoped. In this slice GPT keeps `prompt / negative_prompt / poster_text` per session, Banana keeps `prompt` per session, while non-text generation parameters remain global form settings.
 - 2026-05-14: GPT `负面提示词` and `画面文字` belong near the main composer as an expandable `文本约束` strip instead of living only inside `高级参数`.
 - 2026-05-14: Unsubmitted composer reference images still remain global for now, so switching sessions must confirm whether to preserve or clear them, and deleting the active session should clear them.

@@ -1,24 +1,24 @@
 # Next Actions
 
 ## Now
-- [x] Keep v1.0.2 work on branch `codex/v1.0.2`, not directly on `main`.
-- [x] Move prompt-related drafts to session scope and surface GPT text constraints under the main composer.
-- [x] Fix regenerate and delete-session edge cases around stale drafts and leaked composer references.
-- [ ] Sync the latest clean package copy to `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`, excluding local artifacts and internal ledger files.
-- [ ] Commit the current v1.0.2 session-draft slice after sync verification.
-- [ ] Wait for user approval before merging `codex/v1.0.2` back to `main`.
+- [x] v1.0.2 is merged to `main`, tagged, released, and synced to the G: clean package target.
+- [x] Keep the latest review findings out of v1.0.2; user chose to discuss them in the next version instead.
+- [ ] Before starting the next version branch, review the deferred planning items under `Later`.
 
 ## Handoff Notes
-- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.2`; v1.0.2 is intentionally not merged to `main` yet.
+- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`; v1.0.2 is released at tag `v1.0.2` / commit `b15b3ab`.
 - Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
-- Verify next: sync the clean package copy, run `python -m py_compile .\app.py` in the G: copy, and optionally smoke-check the new `文本约束` strip plus session deletion behavior in the browser.
-- Do not claim: v1.0.2 is merged or released until the user approves merging `codex/v1.0.2` into `main`.
+- Verify next: when opening the next version branch, run the normal frontend/backend baseline before making changes.
+- Do not claim: the deferred review findings are fixed; they are only recorded for next-version discussion.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.
 - Sync note: the G: destination should receive source, built static assets, launcher scripts, docs, tests, and vendor runtime files, but not local-only runtime/config/output data. Do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`. Old `web_imagen_tool/` and `web_imagen_tool.zip` should remain untouched.
 - AGENTS note: `AGENTS.md` has stale snapshot wording, but it explicitly says not to edit it unless the user asks.
 
 ## Later
+- [ ] Next version: change history "套用参数" so missing `context_prompt / negative_prompt / poster_text` fields do not clear the current session prompt drafts; only explicit history fields should overwrite.
+- [ ] Next version: reconsider chat-mode helper text. Current behavior calls the chat API but does not generate images; wording should not imply it is purely local/offline.
+- [ ] Next version: broaden `.svnignore` to match the package-clean exclusions for `.playwright-mcp`, `studio-web/node_modules`, `studio-web/tsconfig.tsbuildinfo`, root screenshots/images, and related local artifacts.
 - [ ] Decide whether `/classic` should remain long term or be retired in a separate cleanup phase.
 - [ ] Consider adding a compact filter/search inside the persistent left history sidebar if history grows large.
 - [ ] Consider adding a current-session export/import if Studio conversations need to move between machines.

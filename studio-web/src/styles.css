@@ -1402,7 +1402,6 @@ button.primary-action:focus-visible,
   min-width: 0;
   height: 100%;
   min-height: 118px;
-  max-height: min(360px, 44vh);
   grid-column: 1;
 }
 

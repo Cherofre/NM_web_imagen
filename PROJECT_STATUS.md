@@ -1,15 +1,15 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-14 15:45 +08:00
-- Phase: v1.0.2 Branch / Session Drafts And Text Constraints
-- Branch: codex/v1.0.2
+- Last Updated: 2026-05-15 00:00 +08:00
+- Phase: v1.0.2 Released / Next Version Planning
+- Branch: main
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: Finish the v1.0.2 slice that moves prompt-related drafts to session scope, surfaces GPT text constraints under the main composer, and keeps sync/package handoff clean.
+- Current Focus: Keep v1.0.2 stable as released; defer the latest review findings to the next version planning round.
 
 ## Resume Here
 - Start with: `git status --short --branch`
-- Main changed files in the current v1.0.2 slice: `app.py`, `studio-web/src/App.tsx`, `studio-web/src/styles.css`, `studio-web/src/sessionDrafts.ts`, `studio-web/src/submissionPayload.ts`, `tests/test_studio_sessions.py`, and built `static/studio/*`.
+- Current release tag: `v1.0.2` at `b15b3ab`.
 - Sync target after local commits: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
 - Current-project rule: after every update, sync a clean copy to the G: target above, but do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`.
@@ -49,6 +49,8 @@
 - [x] Added backend session persistence coverage for draft payloads, turn `posterText`, and cleanup of deleted session reference snapshots.
 - [x] Fixed a regenerate edge case so explicit turn `negativePrompt / posterText` override the previously rendered active draft during submission.
 - [x] Fixed active-session deletion so the current composer reference images are cleared instead of leaking into the next session.
+- [x] Released v1.0.2 from `main` and synchronized the clean package to the G: target.
+- [x] Patched v1.0.2 for upstream UTF-8 JSON charset mismatch so Chinese chat replies no longer render as mojibake.
 
 ## Verification
 - Latest session-draft verification:
