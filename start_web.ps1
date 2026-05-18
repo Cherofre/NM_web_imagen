@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppPath = Join-Path $ScriptDir "app.py"
+$VersionPath = Join-Path $ScriptDir "VERSION"
 $RequirementsPath = Join-Path $ScriptDir "requirements.txt"
 $VenvDir = Join-Path $ScriptDir ".venv"
 $VenvPythonPath = Join-Path $VenvDir "Scripts\python.exe"
@@ -16,6 +17,14 @@ $RuntimePythonDir = Join-Path $RuntimeDir "python"
 $RuntimeSitePackages = Join-Path $RuntimeDir "site-packages"
 $RuntimePythonPath = Join-Path $RuntimePythonDir "python.exe"
 $Url = "http://127.0.0.1:$Port"
+$AppVersion = "0.0.0"
+if (Test-Path -LiteralPath $VersionPath) {
+  $AppVersion = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
+  if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+    $AppVersion = "0.0.0"
+  }
+}
+$OpenUrl = "$Url/?v=$([System.Uri]::EscapeDataString($AppVersion))"
 $HealthUrl = "$Url/api/health"
 
 try {
@@ -271,6 +280,7 @@ function Install-Dependencies {
 }
 
 Write-Section "Image Generate Web Tool - Start"
+Write-Host "Version: $AppVersion"
 
 Set-Location -LiteralPath $ScriptDir
 
@@ -284,8 +294,8 @@ if (-not (Test-Path -LiteralPath $RequirementsPath)) {
 
 if (Test-LocalServer) {
   Write-Host "Backend service is already running. Opening:"
-  Write-Host $Url
-  Start-Process $Url
+  Write-Host $OpenUrl
+  Start-Process $OpenUrl
   exit 0
 }
 
@@ -306,12 +316,12 @@ if (-not (Test-PythonDependencies -Python $Python)) {
 }
 
 Write-Host "Opening:"
-Write-Host $Url
+Write-Host $OpenUrl
 Write-Host ""
 Write-Host "Keep this window open while using the web tool."
 Write-Host "To stop the service, close this window, press Ctrl+C, or run stop_web.bat."
 Write-Host ""
 
-Start-Process $Url
+Start-Process $OpenUrl
 Invoke-SelectedPython -Python $Python -Arguments @(".\app.py", "--host", "127.0.0.1", "--port", "$Port")
 exit $LASTEXITCODE

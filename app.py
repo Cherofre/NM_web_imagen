@@ -29,6 +29,7 @@ STATIC_DIR = ROOT_DIR / "static"
 STUDIO_STATIC_DIR = STATIC_DIR / "studio"
 OUTPUTS_DIR = ROOT_DIR / "outputs"
 OUTPUTS_URL_PREFIX = "/outputs"
+VERSION_FILE = ROOT_DIR / "VERSION"
 HISTORY_FILE = OUTPUTS_DIR / "history.json"
 HISTORY_MAX_ENTRIES = 300
 STUDIO_SESSIONS_FILE = OUTPUTS_DIR / "studio_sessions.json"
@@ -55,6 +56,14 @@ CONFIG_CONNECTION_FIELDS = {
     "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model", "reasoning_effort"},
 }
 LOCAL_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+
+
+def read_app_version() -> str:
+    try:
+        version = VERSION_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0"
+    return version or "0.0.0"
 GPT_ENDPOINT_OPTIONS = {
     "auto",
     "/v1/images/generations",
@@ -1706,6 +1715,7 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "app": "image-generate-web-tool",
+            "version": read_app_version(),
             "engines": ["banana", "gpt-image-2"],
             "features": {"studio_sessions": True, "session_reference_files": True},
         }

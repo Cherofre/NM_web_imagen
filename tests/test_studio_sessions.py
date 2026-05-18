@@ -30,11 +30,13 @@ class StudioSessionTests(unittest.TestCase):
         (self.root / "static" / "studio").mkdir(parents=True, exist_ok=True)
         (self.root / "static" / "index.html").write_text("<div>classic</div>", encoding="utf-8")
         (self.root / "static" / "studio" / "index.html").write_text("<div>studio</div>", encoding="utf-8")
+        (self.root / "VERSION").write_text("9.8.7\n", encoding="utf-8")
         patches = {
             "ROOT_DIR": self.root,
             "STATIC_DIR": self.root / "static",
             "STUDIO_STATIC_DIR": self.root / "static" / "studio",
             "OUTPUTS_DIR": self.outputs,
+            "VERSION_FILE": self.root / "VERSION",
             "HISTORY_FILE": self.outputs / "history.json",
             "STUDIO_SESSIONS_FILE": self.outputs / "studio_sessions.json",
             "SESSION_REFS_DIR": self.outputs / "session_refs",
@@ -58,6 +60,12 @@ class StudioSessionTests(unittest.TestCase):
             self.assertIn(token, cache_control)
         self.assertEqual("no-cache", response.headers.get("pragma"))
         self.assertEqual("0", response.headers.get("expires"))
+
+    def test_health_returns_app_version(self) -> None:
+        response = self.client.get("/api/health")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("9.8.7", response.json()["version"])
 
     def test_studio_sessions_persist_reference_files_outside_json(self) -> None:
         references = [
