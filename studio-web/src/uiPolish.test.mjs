@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const css = fs.readFileSync(path.resolve("src/styles.css"), "utf8");
+const appSource = fs.readFileSync(path.resolve("src/App.tsx"), "utf8");
 
 function cssBlock(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -28,6 +29,9 @@ function cssBlockIn(source, selector) {
 
 test("text settings actions keep their button on one line and expose focus styling", () => {
   assert.match(cssBlock(".composer"), /--composer-prompt-height:\s*148px;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\);/);
+  assert.match(cssBlock(".composer-top"), /display:\s*grid;[\s\S]*gap:\s*8px;[\s\S]*min-height:\s*0;/);
+  assert.match(appSource, /<div className="composer-top">\s*\{references\.length > 0 && \(/);
+  assert.match(appSource, /<\/div>\s*<button\s+type="button"\s+className="composer-resize-handle"/);
   assert.match(cssBlock(".composer-input"), /align-items:\s*stretch;[\s\S]*min-height:\s*0;/);
   assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-9px;[\s\S]*right:\s*18px;[\s\S]*cursor:\s*ns-resize;/);
   assert.match(cssBlock(".composer-textarea-wrap"), /height:\s*100%;[\s\S]*min-height:\s*118px;/);
@@ -65,8 +69,8 @@ test("advanced parameter toggles align to input height without stretching", () =
 test("save-like actions are visually primary and clear", () => {
   assert.match(css, /button\.primary-action,\s*\.header-actions button\.primary-action,\s*\.drawer-actions button\.primary-action,\s*\.composer-popover button\.primary-action\s*\{[\s\S]*border-color:\s*rgba\(17, 17, 17, 0\.32\);[\s\S]*background:\s*#111;/);
   assert.match(css, /button\.primary-action,\s*\.header-actions button\.primary-action,\s*\.drawer-actions button\.primary-action,\s*\.composer-popover button\.primary-action\s*\{[\s\S]*color:\s*#fff;/);
-  assert.doesNotMatch(fs.readFileSync(path.resolve("src/App.tsx"), "utf8"), /清空 GPT 辅助项/);
-  assert.match(fs.readFileSync(path.resolve("src/App.tsx"), "utf8"), /清空负面和画面文字/);
+  assert.doesNotMatch(appSource, /清空 GPT 辅助项/);
+  assert.match(appSource, /清空负面和画面文字/);
 });
 
 test("narrow layout keeps sessions as a left drawer and pins composer to the bottom", () => {

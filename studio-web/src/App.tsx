@@ -2419,45 +2419,46 @@ function App() {
           style={composerPromptStyle}
           onSubmit={(event) => void submit(event)}
         >
-          {references.length > 0 && (
-            <div className="reference-strip">
-              {references.map((file, index) => {
-                const src = URL.createObjectURL(file);
-                return (
-                  <div
-                    className={[
-                      "reference-chip",
-                      draggedReferenceIndex === index ? "is-dragging" : "",
-                      referenceDropIndex === index && draggedReferenceIndex !== index ? "is-drop-target" : "",
-                    ].filter(Boolean).join(" ")}
-                    key={`${file.name}-${index}`}
-                    onDragOver={(event) => onReferenceDragOver(event, index)}
-                    onDrop={(event) => onReferenceDrop(event, index)}
-                    onDragEnd={onReferenceDragEnd}
-                    title="拖拽调整顺序"
-                  >
-                    <span
-                      className="reference-drag-handle"
-                      draggable
-                      onDragStart={(event) => onReferenceDragStart(event, index)}
+          <div className="composer-top">
+            {references.length > 0 && (
+              <div className="reference-strip">
+                {references.map((file, index) => {
+                  const src = URL.createObjectURL(file);
+                  return (
+                    <div
+                      className={[
+                        "reference-chip",
+                        draggedReferenceIndex === index ? "is-dragging" : "",
+                        referenceDropIndex === index && draggedReferenceIndex !== index ? "is-drop-target" : "",
+                      ].filter(Boolean).join(" ")}
+                      key={`${file.name}-${index}`}
+                      onDragOver={(event) => onReferenceDragOver(event, index)}
+                      onDrop={(event) => onReferenceDrop(event, index)}
                       onDragEnd={onReferenceDragEnd}
-                      title="拖动排序"
+                      title="拖拽调整顺序"
                     >
-                      ⋮⋮
-                    </span>
-                    <button type="button" className="reference-preview" onClick={() => previewReference(file)} title="预览参考图">
-                      <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
-                    </button>
-                    <span>{file.name}</span>
-                    <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title="移除参考图">
-                      <X size={13} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="composer-toolbar" ref={composerToolsRef}>
+                      <span
+                        className="reference-drag-handle"
+                        draggable
+                        onDragStart={(event) => onReferenceDragStart(event, index)}
+                        onDragEnd={onReferenceDragEnd}
+                        title="拖动排序"
+                      >
+                        ⋮⋮
+                      </span>
+                      <button type="button" className="reference-preview" onClick={() => previewReference(file)} title="预览参考图">
+                        <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
+                      </button>
+                      <span>{file.name}</span>
+                      <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title="移除参考图">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="composer-toolbar" ref={composerToolsRef}>
             <div className="submit-mode-switch" role="tablist" aria-label="发送模式">
               <button
                 type="button"
@@ -2727,6 +2728,7 @@ function App() {
             <button type="button" onClick={() => { hideTooltip(); setAdvancedOpen(true); }} {...tooltipProps("打开较少使用的生成控制，例如负面提示词、种子、风格、返回格式和超时。")}>
               高级参数
             </button>
+            </div>
           </div>
           <button
             type="button"
