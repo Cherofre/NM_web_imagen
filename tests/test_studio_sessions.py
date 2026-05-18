@@ -49,6 +49,16 @@ class StudioSessionTests(unittest.TestCase):
             item.stop()
         self.temp_dir.cleanup()
 
+    def test_index_disables_cache(self) -> None:
+        response = self.client.get("/")
+        cache_control = response.headers.get("cache-control", "")
+
+        self.assertEqual(200, response.status_code)
+        for token in ["no-store", "no-cache", "must-revalidate", "max-age=0"]:
+            self.assertIn(token, cache_control)
+        self.assertEqual("no-cache", response.headers.get("pragma"))
+        self.assertEqual("0", response.headers.get("expires"))
+
     def test_studio_sessions_persist_reference_files_outside_json(self) -> None:
         references = [
             {

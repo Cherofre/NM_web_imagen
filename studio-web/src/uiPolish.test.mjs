@@ -51,6 +51,14 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.doesNotMatch(css, /\.composer-textarea-meta\s*\{/);
 });
 
+test("release package keeps previous hashed assets as cache fallbacks", () => {
+  const assetsDir = path.resolve("..", "static", "studio", "assets");
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-8pzV_2va.css")));
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-BiyMHVvw.js")));
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-D6wyuxyS.css")));
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-DjJyEBb1.js")));
+});
+
 test("floating tooltip uses stronger readable styling", () => {
   assert.match(css, /\.floating-tooltip,\s*\.inline-tooltip\s*\{[\s\S]*background:\s*rgba\(17, 17, 17, 0\.96\);/);
   assert.match(css, /\.floating-tooltip,\s*\.inline-tooltip\s*\{[\s\S]*color:\s*#f8fafc;/);

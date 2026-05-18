@@ -1689,8 +1689,13 @@ def create_app() -> FastAPI:
     async def index() -> FileResponse:
         studio_index = STUDIO_STATIC_DIR / "index.html"
         if studio_index.exists():
-            return FileResponse(studio_index)
-        return FileResponse(STATIC_DIR / "index.html")
+            response = FileResponse(studio_index)
+        else:
+            response = FileResponse(STATIC_DIR / "index.html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
     @app.get("/classic")
     async def classic_index() -> FileResponse:
