@@ -40,6 +40,11 @@ $ExcludedFiles = @(
   "PROJECT_STATUS.md",
   "NEXT_ACTIONS.md",
   "DECISIONS.md",
+  "package_web_tool.ps1",
+  "release_one_click.ps1",
+  "release_preflight.ps1",
+  "sync_release_to_g.ps1",
+  "一键发布.bat",
   "config.local.json",
   "tsconfig.tsbuildinfo",
   "page-check*.png",
@@ -90,6 +95,13 @@ function Test-IsExcludedFile {
     }
   }
 
+  if ($NormalizedRelativePath -notlike "*/*" -and $File.Extension -ieq ".bat") {
+    $BatText = Get-Content -LiteralPath $File.FullName -Raw -ErrorAction SilentlyContinue
+    if ($BatText -like "*release_one_click.ps1*") {
+      return $true
+    }
+  }
+
   return $false
 }
 
@@ -123,7 +135,7 @@ try {
   Compress-Archive -Path $TempAppDir -DestinationPath $OutputPath -Force
   Write-Host "Package created: $OutputPath"
   Write-Host "Win64 offline package: kept portable Python 3.12 and compatible wheels only."
-  Write-Host "Excluded local config, outputs, logs, saved images, local .venv/.runtime, browser cache and Python cache."
+  Write-Host "Excluded release scripts, local config, outputs, logs, saved images, local .venv/.runtime, browser cache and Python cache."
 } finally {
   if (Test-Path -LiteralPath $TempRoot) {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force

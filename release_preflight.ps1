@@ -79,11 +79,30 @@ function Test-ZipClean {
       "^$AppName/__pycache__/",
       "^$AppName/studio-web/node_modules/",
       "^$AppName/studio-web/tsconfig\.tsbuildinfo$",
+      "^$AppName/package_web_tool\.ps1$",
+      "^$AppName/release_one_click\.ps1$",
+      "^$AppName/release_preflight\.ps1$",
+      "^$AppName/sync_release_to_g\.ps1$",
+      "^$AppName/一键发布\.bat$",
       "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$"
     )
     foreach ($Pattern in $BadPatterns) {
       if (($Names -match $Pattern).Count -gt 0) {
         throw "Package contains excluded content matching: $Pattern"
+      }
+    }
+    foreach ($Entry in $Zip.Entries) {
+      $EntryName = $Entry.FullName -replace "\\", "/"
+      if ($EntryName -match "^$AppName/[^/]+\.bat$") {
+        $Reader = New-Object System.IO.StreamReader($Entry.Open())
+        try {
+          $EntryText = $Reader.ReadToEnd()
+          if ($EntryText -like "*release_one_click.ps1*") {
+            throw "Package contains release batch launcher: $EntryName"
+          }
+        } finally {
+          $Reader.Dispose()
+        }
       }
     }
   } finally {

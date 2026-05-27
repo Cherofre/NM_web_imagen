@@ -101,6 +101,19 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn("outputs", script)
         self.assertIn(".runtime", script)
         self.assertIn("PROJECT_STATUS.md", script)
+        self.assertIn("release_one_click", script)
+        self.assertIn("sync_release_to_g", script)
+        self.assertIn("Package contains release batch launcher", script)
+
+    def test_package_script_excludes_release_only_files(self) -> None:
+        script = (ROOT / "package_web_tool.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('"package_web_tool.ps1"', script)
+        self.assertIn('"release_one_click.ps1"', script)
+        self.assertIn('"release_preflight.ps1"', script)
+        self.assertIn('"sync_release_to_g.ps1"', script)
+        self.assertIn('"一键发布.bat"', script)
+        self.assertIn("release_one_click.ps1", script)
 
     def test_one_click_batch_uses_release_script(self) -> None:
         script = (ROOT / "一键发布.bat").read_text(encoding="utf-8")
