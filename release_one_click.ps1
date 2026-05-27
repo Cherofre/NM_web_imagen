@@ -24,7 +24,11 @@ function Invoke-Step {
   Write-Host "================================"
   Write-Host $Title
   Write-Host "================================"
+  $global:LASTEXITCODE = 0
   & $Action
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Title failed with exit code $LASTEXITCODE"
+  }
 }
 
 if (-not (Test-Path -LiteralPath $PreflightScript)) {
@@ -37,7 +41,7 @@ if (-not (Test-Path -LiteralPath $SyncScript)) {
 Invoke-Step "Frontend tests" {
   Push-Location $StudioDir
   try {
-    node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs
+    node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs
   } finally {
     Pop-Location
   }

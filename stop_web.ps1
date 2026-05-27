@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppPath = Join-Path $ScriptDir "app.py"
+$ResolvedAppPath = [System.IO.Path]::GetFullPath($AppPath)
 
 try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -31,13 +32,8 @@ function Test-IsWebToolProcess {
   }
 
   $NormalizedCommand = $CommandLine.Replace("/", "\")
-  $NormalizedAppPath = $AppPath.Replace("/", "\")
-  return $NormalizedCommand -like "*app.py*" -and (
-    $NormalizedCommand -like "*$NormalizedAppPath*" -or
-    $NormalizedCommand -like "*\app.py*" -or
-    $NormalizedCommand -like "* app.py*" -or
-    $NormalizedCommand -like "*.\\app.py*"
-  )
+  $NormalizedAppPath = $ResolvedAppPath.Replace("/", "\")
+  return $NormalizedCommand -like "*$NormalizedAppPath*"
 }
 
 Write-Section "Image Generate Web Tool - Stop Service"

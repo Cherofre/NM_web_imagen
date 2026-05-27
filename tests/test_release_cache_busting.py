@@ -83,9 +83,11 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         script = (ROOT / "release_one_click.ps1").read_text(encoding="utf-8")
 
         self.assertIn("node --test", script)
+        self.assertIn("generationQueue.test.mjs", script)
         self.assertIn("npm run build", script)
         self.assertIn("python -m py_compile .\\app.py", script)
         self.assertIn("python -m unittest tests.test_studio_sessions tests.test_release_cache_busting", script)
+        self.assertIn("failed with exit code", script)
         self.assertLess(script.index("Frontend tests"), script.index("Package and sync"))
         self.assertLess(script.index("Package and sync"), script.index("Release preflight"))
         self.assertIn("sync_release_to_g.ps1", script)
@@ -97,13 +99,18 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn('"^\\d+\\.\\d+\\.\\d+$"', script)
         self.assertIn("$AppName-v$Version.zip", script)
         self.assertIn("Test-ZipClean", script)
-        self.assertIn("config.local.json", script)
+        self.assertIn("config\\.local\\.json", script)
         self.assertIn("outputs", script)
         self.assertIn(".runtime", script)
-        self.assertIn("PROJECT_STATUS.md", script)
+        self.assertIn("PROJECT_STATUS|NEXT_ACTIONS|DECISIONS", script)
         self.assertIn("release_one_click", script)
         self.assertIn("sync_release_to_g", script)
+        self.assertIn('"^$AppName/tests/"', script)
+        self.assertIn('"^$AppName/studio-web/"', script)
+        self.assertIn("Assert-DirectoryMatchesZip", script)
+        self.assertIn("Get-ForbiddenReleasePatterns", script)
         self.assertIn("Package contains release batch launcher", script)
+        self.assertIn("Package text contains development or local token", script)
 
     def test_package_script_excludes_release_only_files(self) -> None:
         script = (ROOT / "package_web_tool.ps1").read_text(encoding="utf-8")
@@ -112,8 +119,18 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn('"release_one_click.ps1"', script)
         self.assertIn('"release_preflight.ps1"', script)
         self.assertIn('"sync_release_to_g.ps1"', script)
-        self.assertIn('"一键发布.bat"', script)
         self.assertIn("release_one_click.ps1", script)
+        self.assertIn('"studio-web"', script)
+        self.assertIn('"tests"', script)
+        self.assertIn("Write-PackageReadme", script)
+
+    def test_stop_script_only_stops_current_tool_backend(self) -> None:
+        script = (ROOT / "stop_web.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("$ResolvedAppPath = [System.IO.Path]::GetFullPath($AppPath)", script)
+        self.assertNotIn('$NormalizedCommand -like "*\\app.py*"', script)
+        self.assertNotIn('$NormalizedCommand -like "* app.py*"', script)
+        self.assertNotIn('$NormalizedCommand -like "*.\\\\app.py*"', script)
 
     def test_one_click_batch_uses_release_script(self) -> None:
         script = (ROOT / "一键发布.bat").read_text(encoding="utf-8")

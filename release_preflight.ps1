@@ -34,16 +34,133 @@ function Get-DefaultDestinationRoot {
   return Join-Path "G:\su\doc\Tools" (Join-Path $Segment1 (Join-Path $Segment2 (Join-Path $Segment3 $Segment4)))
 }
 
-function Assert-PathMissing {
+function Get-ForbiddenReleasePatterns {
+  return @(
+    "^$AppName/config\.local\.json$",
+    "^$AppName/outputs/",
+    "^$AppName/logs/",
+    "^$AppName/\.chrome-debug/",
+    "^$AppName/\.codex/",
+    "^$AppName/\.git/",
+    "^$AppName/\.svn/",
+    "^$AppName/\.runtime/",
+    "^$AppName/\.venv/",
+    "^$AppName/\.playwright-mcp/",
+    "^$AppName/_release/",
+    "^$AppName/__pycache__/",
+    "^$AppName/dist/",
+    "^$AppName/node_modules/",
+    "^$AppName/saved_images/",
+    "^$AppName/tests/",
+    "^$AppName/studio-web/",
+    "^$AppName/studio-web/node_modules/",
+    "^$AppName/studio-web/tsconfig\.tsbuildinfo$",
+    "^$AppName/package_web_tool\.ps1$",
+    "^$AppName/release_one_click\.ps1$",
+    "^$AppName/release_preflight\.ps1$",
+    "^$AppName/sync_release_to_g\.ps1$",
+    "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$",
+    "^$AppName/[^/]+\.(?:png|jpg|jpeg|webp)$",
+    "^$AppName/.*\.(?:pyc|pyo|log|tmp|bak|old|7z|rar)$",
+    "^$AppName/(?!vendor/python/python-[^/]+-embed-amd64\.zip$).*\.zip$",
+    "^$AppName/(?:\.env[^/]*|credentials[^/]*|cookies[^/]*|.*(?:secret|token).*)$"
+  )
+}
+
+function Test-TextClean {
   param(
-    [string]$Root,
-    [string[]]$RelativePaths
+    [string]$Name,
+    [string]$Text
   )
 
-  foreach ($RelativePath in $RelativePaths) {
-    $FullPath = Join-Path $Root $RelativePath
-    if (Test-Path -LiteralPath $FullPath) {
-      throw "Unexpected local artifact in release target: $RelativePath"
+  $BadTokens = @(
+    "package_web_tool.ps1",
+    "release_one_click.ps1",
+    "release_preflight.ps1",
+    "sync_release_to_g.ps1",
+    "C:\Users\mumengfei",
+    "I:\AI\",
+    "G:\su\",
+    "D:\Documents\",
+    "WecomData",
+    "PixPin"
+  )
+
+  foreach ($Token in $BadTokens) {
+    if ($Text.Contains($Token)) {
+      throw "Package text contains development or local token in ${Name}: $Token"
+    }
+  }
+}
+
+function Get-ZipFileManifest {
+  param([string]$ZipPath)
+
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $Zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $Rows = @()
+    foreach ($Entry in $Zip.Entries) {
+      $Name = $Entry.FullName -replace "\\", "/"
+      if ($Name.EndsWith("/")) {
+        continue
+      }
+      if (-not $Name.StartsWith("$AppName/")) {
+        throw "Package entry is outside $AppName root: $Name"
+      }
+      $Rows += [pscustomobject]@{
+        Path = $Name.Substring($AppName.Length + 1)
+        Length = [int64]$Entry.Length
+      }
+    }
+    return @($Rows | Sort-Object Path)
+  } finally {
+    $Zip.Dispose()
+  }
+}
+
+function Get-DirectoryFileManifest {
+  param([string]$Root)
+
+  $ResolvedRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root)
+  $PrefixLength = $ResolvedRoot.TrimEnd("\", "/").Length + 1
+  return @(Get-ChildItem -LiteralPath $ResolvedRoot -Recurse -Force -File | ForEach-Object {
+    [pscustomobject]@{
+      Path = ($_.FullName.Substring($PrefixLength) -replace "\\", "/")
+      Length = [int64]$_.Length
+    }
+  } | Sort-Object Path)
+}
+
+function Assert-DirectoryMatchesZip {
+  param(
+    [string]$Root,
+    [string]$ZipPath
+  )
+
+  $ZipManifest = @(Get-ZipFileManifest -ZipPath $ZipPath)
+  $DirManifest = @(Get-DirectoryFileManifest -Root $Root)
+  $ZipByPath = @{}
+  $DirByPath = @{}
+
+  foreach ($Item in $ZipManifest) {
+    $ZipByPath[$Item.Path] = $Item.Length
+  }
+  foreach ($Item in $DirManifest) {
+    $DirByPath[$Item.Path] = $Item.Length
+  }
+
+  foreach ($Path in $ZipByPath.Keys) {
+    if (-not $DirByPath.ContainsKey($Path)) {
+      throw "G: sync folder is missing package file: $Path"
+    }
+    if ($DirByPath[$Path] -ne $ZipByPath[$Path]) {
+      throw "G: sync folder file size differs from package: $Path"
+    }
+  }
+  foreach ($Path in $DirByPath.Keys) {
+    if (-not $ZipByPath.ContainsKey($Path)) {
+      throw "G: sync folder contains extra file not in package: $Path"
     }
   }
 }
@@ -69,28 +186,13 @@ function Test-ZipClean {
     if (-not ($Names -contains "$AppName/static/studio/assets/$ExpectedCss")) {
       throw "Package is missing expected Studio CSS: $ExpectedCss"
     }
-    $BadPatterns = @(
-      "^$AppName/config\.local\.json$",
-      "^$AppName/outputs/",
-      "^$AppName/logs/",
-      "^$AppName/\.runtime/",
-      "^$AppName/\.venv/",
-      "^$AppName/\.playwright-mcp/",
-      "^$AppName/__pycache__/",
-      "^$AppName/studio-web/node_modules/",
-      "^$AppName/studio-web/tsconfig\.tsbuildinfo$",
-      "^$AppName/package_web_tool\.ps1$",
-      "^$AppName/release_one_click\.ps1$",
-      "^$AppName/release_preflight\.ps1$",
-      "^$AppName/sync_release_to_g\.ps1$",
-      "^$AppName/一键发布\.bat$",
-      "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$"
-    )
-    foreach ($Pattern in $BadPatterns) {
+
+    foreach ($Pattern in (Get-ForbiddenReleasePatterns)) {
       if (($Names -match $Pattern).Count -gt 0) {
         throw "Package contains excluded content matching: $Pattern"
       }
     }
+
     foreach ($Entry in $Zip.Entries) {
       $EntryName = $Entry.FullName -replace "\\", "/"
       if ($EntryName -match "^$AppName/[^/]+\.bat$") {
@@ -100,10 +202,22 @@ function Test-ZipClean {
           if ($EntryText -like "*release_one_click.ps1*") {
             throw "Package contains release batch launcher: $EntryName"
           }
+          Test-TextClean -Name $EntryName -Text $EntryText
+        } finally {
+          $Reader.Dispose()
+        }
+      } elseif ($EntryName -match "\.(?:ps1|py|js|css|html|md|json|ts|tsx|mjs|txt|gitignore|svnignore)$" -and $Entry.Length -le 2097152) {
+        $Reader = New-Object System.IO.StreamReader($Entry.Open())
+        try {
+          Test-TextClean -Name $EntryName -Text $Reader.ReadToEnd()
         } finally {
           $Reader.Dispose()
         }
       }
+    }
+
+    if (-not ($Names -contains "$AppName/README.md")) {
+      throw "Package is missing README.md"
     }
   } finally {
     $Zip.Dispose()
@@ -165,22 +279,8 @@ $DestinationZip = Join-Path $DestinationRoot "$AppName-v$Version.zip"
 if (-not (Test-Path -LiteralPath $DestinationAppDir)) {
   throw "G: sync folder was not found: $DestinationAppDir"
 }
-Assert-PathMissing -Root $DestinationAppDir -RelativePaths @(
-  "config.local.json",
-  "outputs",
-  "logs",
-  ".runtime",
-  ".venv",
-  ".playwright-mcp",
-  "__pycache__",
-  "studio-web\node_modules",
-  "studio-web\tsconfig.tsbuildinfo",
-  "AGENTS.md",
-  "PROJECT_STATUS.md",
-  "NEXT_ACTIONS.md",
-  "DECISIONS.md"
-)
 Test-ZipClean -ZipPath $DestinationZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
+Assert-DirectoryMatchesZip -Root $DestinationAppDir -ZipPath $DestinationZip
 Write-Host "G: clean folder OK: $DestinationAppDir"
 Write-Host "G: versioned package OK: $DestinationZip"
 
