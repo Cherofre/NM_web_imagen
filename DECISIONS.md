@@ -1,6 +1,23 @@
 # Decisions
 
 ## Active Decisions
+- 2026-05-26: Queue jobs own a live `sessionId/turnId` reference only while that target exists. Running/queued jobs block deleting or clearing their session, refresh-interrupted jobs reconcile their matching turn to an error state, and queue actions guard missing targets instead of silently switching to deleted sessions.
+- 2026-05-26: Diagnostics may show endpoints for troubleshooting, but endpoints must be sanitized for URL userinfo and sensitive query parameters before returning to the UI.
+- 2026-05-26: Startup stale-process cleanup must only stop processes whose command line includes this repository's resolved `app.py`; loose `app.py` matching is too risky on shared Windows machines.
+- 2026-05-26: v1.0.3 sync uses the clean package as the source of truth: mirror the extracted package folder to G:, exclude runtime/config/output artifacts, and sync only versioned zips such as `NM_web_imagen-v1.0.3.zip`; leave unversioned `NM_web_imagen.zip` untouched for manual deletion.
+- 2026-05-26: Release should be one-click for this tool: `一键发布.bat` runs frontend tests, build, backend checks, clean package sync, and release preflight before reporting success.
+- 2026-05-26: Generation queue execution is serialized in the frontend: new jobs enter `queued`, only one `/api/generate` request runs at a time, and queued/running jobs are canceled on refresh.
+- 2026-05-27: GPT multi-image requests should be result-count tolerant: when an upstream gateway accepts `n` but returns fewer images, the backend follows up for the missing count instead of silently saving only one.
+- 2026-05-26: v1.0.3 config profile migration must remain backward-compatible: legacy `forms` load as default profiles, new saves keep legacy `forms`, and default profile names derive from URL short names when custom names are absent.
+- 2026-05-26: Profile deletion in the multi-config drawer is guarded: show a compact row-level delete icon, require confirmation, keep at least one same-engine profile, and switch to another profile when deleting the active one.
+- 2026-05-26: Diagnostics should call generation and chat checks separately, report partial failures clearly, and redact API keys from returned errors. Startup reuse must also probe required API routes, not only static assets.
+- 2026-05-26: Queue rows should keep controls compact and row-local: cancel for running work, retry for completed/failed/canceled work, apply prompt for any task, and remove for any task.
+- 2026-05-26: Queue metadata persistence is browser-local for v1.0.3. Finished/error/canceled jobs survive refresh, while queued/running jobs restore as canceled with an explicit interruption message because old HTTP requests cannot survive a page reload.
+- 2026-05-26: v1.0.3 queue UI starts as a floating chat-area capsule with an overlay list, not a fixed right sidebar, so it does not squeeze or offset the main conversation/composer layout.
+- 2026-05-26: Completed queue jobs should expose their first generated image as a compact clickable thumbnail, with a direct download action. Image preview lightboxes should keep top-right for file actions only, and put zoom/fit controls inside the canvas bottom corner with wheel zoom and drag pan.
+- 2026-05-26: Multi-config management needs an explicit add-profile entry in the profile list, and queue rows need a text click target that jumps back to the matching conversation turn.
+- 2026-05-22: Startup reuse must validate Studio assets before trusting an existing backend; `/api/health` alone is insufficient after files are overwritten while an old Python process is still running.
+- 2026-05-18: v1.0.3 theme is workflow robustness: multi-config profiles, queued image generation, non-blocking chat/session use while jobs run, separate generation/chat diagnostics, and a later light UI polish pass.
 - 2026-05-15: Defer the latest v1.0.2 review findings to the next version. Do not republish v1.0.2 solely for: history apply preserving session prompt drafts, chat-mode helper wording, or broader `.svnignore` cleanup.
 - 2026-05-14: Prompt-like draft text is session-scoped. In this slice GPT keeps `prompt / negative_prompt / poster_text` per session, Banana keeps `prompt` per session, while non-text generation parameters remain global form settings.
 - 2026-05-14: GPT `负面提示词` and `画面文字` belong near the main composer as an expandable `文本约束` strip instead of living only inside `高级参数`.
@@ -23,6 +40,69 @@
 - 2026-05-03: Keep distribution as a Win64 offline zip/folder package rather than a Go single exe or PyInstaller one-file exe.
 - 2026-05-03: Treat the right panel as result-first; queue, history, and details are secondary controls.
 - 2026-05-03: Use a dedicated GPT Image 2 `poster_text` field for exact required image text.
+
+## 2026-05-18 - v1.0.3 Workflow Robustness Scope
+- Status: active
+- Decision: Plan v1.0.3 around four core workflow capabilities: saved multi-config profiles, real generation queue, non-blocking chat/generation/session switching, and separate minimal diagnostics for image and chat endpoints. Keep UI polish as a follow-up pass after those foundations are stable.
+- Reason: The user wants the tool to behave like a real workbench: generation should not freeze the whole interface, multiple API setups should be reusable, and another computer should be able to quickly tell whether image and chat endpoints both work.
+- Alternatives considered: Only add UI polish first; only add queue without config profiles; keep config as a single global form.
+- Consequences / follow-up: Start v1.0.3 with data model design for config profiles, queue jobs, session/job ownership, and diagnostics results. Avoid building the UI first because the queue/session boundary is the main correctness risk.
+
+## 2026-05-26 - v1.0.3 Profile Compatibility And Queue Placement
+- Status: active
+- Decision: Save v1.0.3 multi-config data as `profiles` plus `active_profile_ids`, while also writing the v1.0.2-compatible `forms` object. When reading old configs that only have `forms`, create one default profile per engine and use a URL-derived short name unless a custom name exists. The queue entry should be a small floating capsule in the chat area that expands into an overlay, not a permanent right-side panel.
+- Reason: The user explicitly required old v1.0.2 configs and other computers to keep opening without config loss or white screens. The existing workbench also treats the conversation/composer as the main surface, so a right queue panel would fight the layout.
+- Alternatives considered: Replace `forms` with only `profiles`; display the model name as the config entry; add a fixed right queue sidebar; keep the redundant `配置已完成` chip.
+- Consequences / follow-up: Future profile edits must keep the legacy `forms` compatibility layer until a migration/release policy says otherwise. Queue hardening should add controls and persistence inside the overlay/drawer pattern rather than making a new right panel.
+
+## 2026-05-26 - Queue Completion Preview Actions
+- Status: active
+- Decision: Completed queue rows should use the first generated image as a 44px thumbnail button that opens the same image preview lightbox used elsewhere, and should expose a direct download action. The lightbox should keep download/reference/close in the header, while zoom in/out, fit, and 100% live as a canvas-corner toolbar. The canvas also supports mouse wheel zoom, drag panning while zoomed, and double-click reset.
+- Reason: The user clarified that completed tasks need an obvious clickable area to view and download outputs, and all previews should support download plus canvas-scale style controls similar to the older web tool.
+- Alternatives considered: Keep only a green completion icon; use a large right-side queue drawer; keep preview controls only on the image cards.
+- Consequences / follow-up: Future queue controls should build on the compact overlay row pattern and avoid increasing the main chat surface height or using oversized controls. Future preview actions should preserve the distinction between header file actions and in-canvas view controls.
+
+## 2026-05-26 - Config Add Entry And Queue Jump
+- Status: active
+- Decision: Put `新增配置` inside the left profile list of the multi-config drawer, below existing profiles. Queue job rows should expose the job title/config text as a click target that closes the queue popover and scrolls to the matching conversation turn.
+- Reason: The user could not discover where to add another config, and completed/running queue tasks need a clear way to return to the related conversation context.
+- Alternatives considered: Put add config only in the footer; make only the thumbnail clickable; add a separate small jump icon.
+- Consequences / follow-up: Future profile controls should remain near the profile list. Future queue row actions should avoid making the download thumbnail/jump targets compete.
+
+## 2026-05-26 - Guarded Config Profile Deletion
+- Status: active
+- Decision: Add profile deletion as a compact icon button inside each same-engine profile row. Deletion asks for confirmation, is disabled when only one profile remains for that engine, and deleting the active profile immediately switches the form to another same-engine profile before the user saves.
+- Reason: The user caught that multi-config management was incomplete without deletion, but deleting the last config would create an empty profile state and risk confusing or broken saves.
+- Alternatives considered: Hide deletion entirely; allow deleting all profiles and recreate defaults on save; make deletion a large text action. These either leave management incomplete, increase migration risk, or make the drawer visually heavier than requested.
+- Consequences / follow-up: Profile rows now use a main selection button plus a secondary delete icon. Persisted deletion still follows the existing explicit `保存配置` flow, which keeps profile edits consistent with the rest of the drawer.
+
+## 2026-05-26 - Separate Diagnostics And Required Route Probe
+- Status: active
+- Decision: Add `/api/diagnostics` as a structured check endpoint that runs generation and chat checks independently for the active engine. The config drawer exposes `测试连接` and renders separate cards for 生图 and 聊天, including endpoint/model/latency/status and redacted errors. `start_web.ps1` now probes `/api/diagnostics` with a no-key chat check before reusing a running backend.
+- Reason: Another computer needs to see whether image generation or chat is the broken side. During local smoke, an old backend could serve new static assets while lacking new API routes, so static asset probing alone was insufficient.
+- Alternatives considered: Reuse only `/api/health`; test only chat because it is cheaper; show raw upstream errors. Those would miss partial failures, stale route mismatches, or leak sensitive config details.
+- Consequences / follow-up: The generation diagnostic may call a real image endpoint when users click it. Keep this as an explicit button, not an automatic startup check.
+
+## 2026-05-26 - Compact Queue Row Controls
+- Status: active
+- Decision: Add compact row-local queue controls: cancel for running/queued jobs, retry for completed/failed/canceled jobs, apply prompt for any job, and remove for any job. Keep clear-completed in the queue header.
+- Reason: The user asked completed tasks to have usable click targets and the planning checklist required cancel/retry/apply/delete controls without turning the queue into a large right-side panel.
+- Alternatives considered: Put all controls in the queue header; open a larger job detail drawer; make only completed jobs actionable. These reduce directness or make the compact queue feel too heavy.
+- Consequences / follow-up: Retry currently resubmits the stored prompt into the job's session with the current active configuration for that engine. Queue metadata persistence and deeper parameter snapshotting remain a separate decision.
+
+## 2026-05-26 - Browser-Local Queue Persistence
+- Status: active
+- Decision: Persist only compact queue metadata in browser `localStorage`. On refresh, preserve `success`, `error`, and `canceled` jobs, but convert stored `queued` or `running` jobs to `canceled` with `页面刷新，任务已中断`.
+- Reason: v1.0.3 has browser-owned queue UI state and normal HTTP generation requests; after a full page refresh there is no reliable client-side controller left for the old request, so restoring it as still running would be misleading.
+- Alternatives considered: Store queue metadata under `outputs/`; attempt to resume running jobs after refresh; do not persist queue rows at all.
+- Consequences / follow-up: Generated images remain durable through existing saved output URLs/history, while the queue list is a convenience surface for the current browser. A future backend job runner could replace this with durable server-side queue state.
+
+## 2026-05-22 - Startup Asset Probe Before Backend Reuse
+- Status: active
+- Decision: `start_web.ps1` must probe the current Studio page JS/CSS assets before reusing an already-running backend. If health succeeds but assets fail, the script may stop a recognizable stale `app.py` process and start the current code.
+- Reason: A stale in-memory backend can still pass `/api/health` and read the updated `static/studio/index.html`, while lacking the new `/assets` mount required by `./assets/...` from the root page. That mismatch produces a white screen.
+- Alternatives considered: Only tell users to run `stop_web.bat`; rely on version query cache-busting; keep absolute `/static/studio/assets` URLs. These do not handle the real stale-process mismatch reliably.
+- Consequences / follow-up: Release checks should include root HTML asset probing from an actual server, plus extracted-zip smoke checks. The G: folder may still contain ignored local runtime/config/output artifacts, so zip packages remain the cleaner distribution source.
 
 ## 2026-05-10 - Browser-Local Workbench Conversation
 - Status: active
@@ -55,6 +135,13 @@
 ## 2026-05-10 - Header Config vs Advanced Parameters
 - Status: active
 - Decision: The top header model/config button opens only API Key, URL, and model fields. Full generation controls remain in the composer `高级参数` modal.
+## 2026-05-26 - Serialized Image Generation Queue
+- Status: active
+- Decision: Treat the v1.0.3 generation queue as a real single-flight queue: new image-generation submissions enter `queued`, only the oldest queued job starts when no generation job is `running`, and refresh still cancels queued/running jobs because browser fetches cannot survive reload.
+- Reason: Parallel upstream image requests made later queue entries appear to be “一直在请求”; users expect a queue to wait behind the active generation job.
+- Alternatives considered: Keep concurrent generation and only improve labels; add a backend worker queue immediately.
+- Consequences / follow-up: The frontend now snapshots payloads for runtime queued jobs and starts them serially. A future backend queue could preserve jobs across refresh, but browser-local v1.0.3 intentionally marks interrupted jobs canceled.
+
 - Reason: The user wants the visible header configuration to behave like simple connection setup, not a duplicate advanced-parameter entry.
 - Alternatives considered: Reuse the full advanced-parameter modal from every config button; keep engine/model duplicated above the composer.
 - Consequences / follow-up: Connection setup has one compact header entry point, while reference image, size, count, and advanced generation controls stay near the prompt composer.

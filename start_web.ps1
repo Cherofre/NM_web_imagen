@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppPath = Join-Path $ScriptDir "app.py"
+$ResolvedAppPath = [System.IO.Path]::GetFullPath($AppPath)
 $VersionPath = Join-Path $ScriptDir "VERSION"
 $RequirementsPath = Join-Path $ScriptDir "requirements.txt"
 $VenvDir = Join-Path $ScriptDir ".venv"
@@ -26,6 +27,7 @@ if (Test-Path -LiteralPath $VersionPath) {
 }
 $OpenUrl = "$Url/?v=$([System.Uri]::EscapeDataString($AppVersion))"
 $HealthUrl = "$Url/api/health"
+$DiagnosticsUrl = "$Url/api/diagnostics"
 
 try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -50,6 +52,115 @@ function Test-LocalServer {
   } catch {
     return $false
   }
+}
+
+function Resolve-StudioAssetUrl {
+  param([string]$Reference)
+
+  if ([string]::IsNullOrWhiteSpace($Reference)) {
+    return $null
+  }
+
+  try {
+    $BaseUri = New-Object System.Uri -ArgumentList $OpenUrl
+    $ResolvedUri = New-Object System.Uri -ArgumentList @($BaseUri, $Reference)
+    return $ResolvedUri.AbsoluteUri
+  } catch {
+    return $null
+  }
+}
+
+function Test-StudioAssets {
+  try {
+    $NoCacheHeaders = @{
+      "Cache-Control" = "no-cache"
+      "Pragma" = "no-cache"
+    }
+    $Response = Invoke-WebRequest -Uri $OpenUrl -UseBasicParsing -TimeoutSec 2 -Headers $NoCacheHeaders
+    if ($Response.StatusCode -lt 200 -or $Response.StatusCode -ge 400) {
+      return $false
+    }
+
+    $AssetPattern = '(?:src|href)=["'']([^"'']*assets/[^"'']+\.(?:js|css))["'']'
+    $AssetMatches = [regex]::Matches([string]$Response.Content, $AssetPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($AssetMatches.Count -eq 0) {
+      return $false
+    }
+
+    foreach ($AssetMatch in $AssetMatches) {
+      $AssetUrl = Resolve-StudioAssetUrl -Reference $AssetMatch.Groups[1].Value
+      if ([string]::IsNullOrWhiteSpace($AssetUrl)) {
+        return $false
+      }
+
+      $AssetResponse = Invoke-WebRequest -Uri $AssetUrl -UseBasicParsing -TimeoutSec 2 -Headers $NoCacheHeaders
+      if ($AssetResponse.StatusCode -lt 200 -or $AssetResponse.StatusCode -ge 400) {
+        return $false
+      }
+    }
+
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Test-RequiredApiRoutes {
+  try {
+    $Payload = @{
+      "engine" = "gpt-image-2"
+      "api_key" = ""
+      "base_url" = "https://example.com/v1"
+      "chat_model" = "gpt-5.5"
+      "checks" = @("chat")
+    } | ConvertTo-Json -Depth 4
+    $Response = Invoke-WebRequest -Uri $DiagnosticsUrl -Method Post -ContentType "application/json" -Body $Payload -UseBasicParsing -TimeoutSec 2
+    return $Response.StatusCode -ge 200 -and $Response.StatusCode -lt 500
+  } catch {
+    return $false
+  }
+}
+
+function Test-IsWebToolProcess {
+  param([string]$CommandLine)
+
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+    return $false
+  }
+
+  $NormalizedCommand = $CommandLine.Replace("/", "\")
+  $NormalizedAppPath = $ResolvedAppPath.Replace("/", "\")
+  return $NormalizedCommand -like "*$NormalizedAppPath*"
+}
+
+function Stop-ExistingWebToolProcesses {
+  $Connections = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+  $Stopped = 0
+  $Skipped = 0
+  $ProcessIds = @($Connections | Select-Object -ExpandProperty OwningProcess -Unique)
+
+  foreach ($ProcessId in $ProcessIds) {
+    $Process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    if ($null -eq $Process) {
+      continue
+    }
+
+    if (-not (Test-IsWebToolProcess -CommandLine $Process.CommandLine)) {
+      $Skipped += 1
+      Write-Host "Skipped non-tool process PID $ProcessId`: $($Process.Name)"
+      continue
+    }
+
+    Stop-Process -Id $ProcessId -Force
+    $Stopped += 1
+    Write-Host "Stopped stale backend service PID $ProcessId."
+  }
+
+  if ($Stopped -eq 0 -and $Skipped -gt 0) {
+    throw "Port $Port is occupied, but it does not look like this web tool backend. Skipped to avoid stopping another program."
+  }
+
+  return $Stopped
 }
 
 function Remove-ChildDirectory {
@@ -293,10 +404,23 @@ if (-not (Test-Path -LiteralPath $RequirementsPath)) {
 }
 
 if (Test-LocalServer) {
-  Write-Host "Backend service is already running. Opening:"
-  Write-Host $OpenUrl
-  Start-Process $OpenUrl
-  exit 0
+  if ((Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
+    Write-Host "Backend service is already running. Opening:"
+    Write-Host $OpenUrl
+    Start-Process $OpenUrl
+    exit 0
+  }
+
+  Write-Host "Backend service responded, but current Studio assets or API routes did not load."
+  Write-Host "Restarting current web tool service..."
+  $Stopped = Stop-ExistingWebToolProcesses
+  if ($Stopped -eq 0) {
+    throw "Could not restart the existing backend service. Please run stop_web.bat, then start again."
+  }
+  Start-Sleep -Milliseconds 800
+  if (Test-LocalServer) {
+    throw "Port $Port is still occupied after restart attempt. Please run stop_web.bat, then start again."
+  }
 }
 
 $Python = Ensure-PortablePython
@@ -323,5 +447,5 @@ Write-Host "To stop the service, close this window, press Ctrl+C, or run stop_we
 Write-Host ""
 
 Start-Process $OpenUrl
-Invoke-SelectedPython -Python $Python -Arguments @(".\app.py", "--host", "127.0.0.1", "--port", "$Port")
+Invoke-SelectedPython -Python $Python -Arguments @($ResolvedAppPath, "--host", "127.0.0.1", "--port", "$Port")
 exit $LASTEXITCODE

@@ -36,7 +36,7 @@ export type SessionLike = {
     engine: Engine;
     prompt: string;
     createdAt: string;
-    status: "running" | "success" | "error";
+    status: "queued" | "running" | "success" | "error";
     images: Array<Record<string, unknown>>;
   }>;
 };

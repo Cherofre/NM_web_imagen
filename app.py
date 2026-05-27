@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse
 
 import requests
 import uvicorn
@@ -55,6 +55,11 @@ CONFIG_CONNECTION_FIELDS = {
     "banana-form": {"api_key", "api_base_url", "model_type"},
     "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model", "reasoning_effort"},
 }
+ENGINE_FORM_IDS = {
+    "banana": "banana-form",
+    "gpt-image-2": "gpt-image-2-form",
+}
+FORM_ENGINES = {value: key for key, value in ENGINE_FORM_IDS.items()}
 LOCAL_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 
 
@@ -462,6 +467,124 @@ def read_config_file_payload() -> Dict[str, Any]:
     return {}
 
 
+def short_config_name_from_url(url: str, fallback: str = "默认配置") -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return fallback
+    parsed = urlparse(raw if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw) else f"//{raw}")
+    host = (parsed.netloc or parsed.path.split("/", 1)[0] or raw).strip().strip("/")
+    if "@" in host:
+        host = host.rsplit("@", 1)[-1]
+    if host.startswith("["):
+        return host
+    host_without_port = host.split(":", 1)[0]
+    if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", host_without_port):
+        return host
+    parts = [part for part in host.split(".") if part]
+    if len(parts) > 1 and parts[-1].lower() in {"com", "cn", "net", "org", "io", "ai", "top", "fun"}:
+        parts = parts[:-1]
+    return ".".join(parts) or fallback
+
+
+def config_profile_name(engine: str, form: Dict[str, Any], fallback: str = "默认配置") -> str:
+    if engine == "banana":
+        return short_config_name_from_url(str(form.get("api_base_url") or ""), fallback)
+    return short_config_name_from_url(str(form.get("base_url") or ""), fallback)
+
+
+def sanitize_profile_id(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip()).strip("-")
+    return slug[:80] or fallback
+
+
+def normalize_config_form(form_id: str, value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    allowed_fields = CONFIG_CONNECTION_FIELDS[form_id]
+    return {
+        key: str(value.get(key) or "").strip()
+        for key in allowed_fields
+        if str(value.get(key) or "").strip()
+    }
+
+
+def build_config_profiles(
+    forms: Dict[str, Dict[str, Any]],
+    raw_profiles: Any = None,
+    raw_active_profile_ids: Any = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    profiles: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    active_profile_ids = {
+        engine: sanitize_profile_id(str(raw_active_profile_ids.get(engine) or ""), f"{engine}-default")
+        for engine in ENGINE_FORM_IDS
+    } if isinstance(raw_active_profile_ids, dict) else {
+        "banana": "banana-default",
+        "gpt-image-2": "gpt-image-2-default",
+    }
+
+    if isinstance(raw_profiles, list):
+        for index, item in enumerate(raw_profiles):
+            if not isinstance(item, dict):
+                continue
+            engine = str(item.get("engine") or "").strip()
+            if engine not in ENGINE_FORM_IDS:
+                continue
+            form_id = ENGINE_FORM_IDS[engine]
+            form = normalize_config_form(form_id, item.get("form") or {})
+            profile_id = sanitize_profile_id(str(item.get("id") or ""), f"{engine}-{index + 1}")
+            if profile_id in seen_ids:
+                profile_id = f"{profile_id}-{index + 1}"
+            seen_ids.add(profile_id)
+            name = str(item.get("name") or "").strip() or config_profile_name(engine, form, "默认配置")
+            profiles.append({
+                "id": profile_id,
+                "engine": engine,
+                "name": name,
+                "form": form,
+            })
+
+    by_engine = {engine: [profile for profile in profiles if profile["engine"] == engine] for engine in ENGINE_FORM_IDS}
+    for engine, form_id in ENGINE_FORM_IDS.items():
+        form = dict(forms.get(form_id) or {})
+        if by_engine[engine]:
+            active_id = active_profile_ids.get(engine) or by_engine[engine][0]["id"]
+            active = next((profile for profile in by_engine[engine] if profile["id"] == active_id), by_engine[engine][0])
+            active_profile_ids[engine] = active["id"]
+            if form:
+                active["form"] = form
+                if not str(active.get("name") or "").strip():
+                    active["name"] = config_profile_name(engine, form, "默认配置")
+            continue
+
+        profile_id = f"{engine}-default"
+        active_profile_ids[engine] = profile_id
+        profiles.append({
+            "id": profile_id,
+            "engine": engine,
+            "name": config_profile_name(engine, form, "默认配置"),
+            "form": form,
+        })
+
+    return profiles, active_profile_ids
+
+
+def forms_from_active_profiles(
+    profiles: List[Dict[str, Any]],
+    active_profile_ids: Dict[str, str],
+) -> Dict[str, Dict[str, Any]]:
+    forms: Dict[str, Dict[str, Any]] = {}
+    for engine, form_id in ENGINE_FORM_IDS.items():
+        engine_profiles = [profile for profile in profiles if profile.get("engine") == engine]
+        active_id = active_profile_ids.get(engine)
+        active = next((profile for profile in engine_profiles if profile.get("id") == active_id), None)
+        if active is None and engine_profiles:
+            active = engine_profiles[0]
+            active_profile_ids[engine] = str(active.get("id") or f"{engine}-default")
+        forms[form_id] = normalize_config_form(form_id, active.get("form") if active else {})
+    return forms
+
+
 def pick_env_value(*names: str) -> str:
     for name in names:
         value = os.getenv(name, "").strip()
@@ -522,11 +645,19 @@ def build_runtime_defaults() -> Dict[str, Any]:
     if any(value for overrides in env_overrides.values() for value in overrides.values()):
         sources.append("环境变量")
 
+    profiles, active_profile_ids = build_config_profiles(
+        defaults,
+        file_payload.get("profiles") if isinstance(file_payload, dict) else None,
+        file_payload.get("active_profile_ids") if isinstance(file_payload, dict) else None,
+    )
+
     return {
         "active_engine": file_payload.get("active_engine", "banana")
         if isinstance(file_payload, dict)
         else "banana",
         "forms": defaults,
+        "profiles": profiles,
+        "active_profile_ids": active_profile_ids,
         "sources": sources,
     }
 
@@ -537,28 +668,29 @@ def normalize_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     forms = payload.get("forms")
     if not isinstance(forms, dict):
-        raise ValueError("配置内容缺少 forms 字段")
+        forms = {}
 
-    normalized_forms: Dict[str, Dict[str, Any]] = {}
-    for form_id in ("banana-form", "gpt-image-2-form"):
-        value = forms.get(form_id, {})
-        if not isinstance(value, dict):
-            normalized_forms[form_id] = {}
-            continue
-        allowed_fields = CONFIG_CONNECTION_FIELDS[form_id]
-        normalized_forms[form_id] = {
-            key: str(value.get(key) or "").strip()
-            for key in allowed_fields
-            if str(value.get(key) or "").strip()
-        }
+    normalized_forms: Dict[str, Dict[str, Any]] = {
+        form_id: normalize_config_form(form_id, forms.get(form_id, {}))
+        for form_id in ("banana-form", "gpt-image-2-form")
+    }
+
+    profiles, active_profile_ids = build_config_profiles(
+        normalized_forms,
+        payload.get("profiles"),
+        payload.get("active_profile_ids"),
+    )
+    normalized_forms = forms_from_active_profiles(profiles, active_profile_ids)
 
     active_engine = str(payload.get("active_engine") or "banana").strip()
     if active_engine not in {"banana", "gpt-image-2"}:
         active_engine = "banana"
 
     return {
-        "version": 1,
+        "version": 2,
         "active_engine": active_engine,
+        "active_profile_ids": active_profile_ids,
+        "profiles": profiles,
         "forms": normalized_forms,
     }
 
@@ -1549,6 +1681,267 @@ def build_banana_chat_contents(prompt: str, history_messages: Any) -> List[Dict[
     return contents
 
 
+def redact_diagnostic_text(text: str, secrets: List[str]) -> str:
+    redacted = str(text or "")
+    for secret in secrets:
+        secret_text = str(secret or "").strip()
+        if secret_text:
+            redacted = redacted.replace(secret_text, "***")
+    redacted = re.sub(r"sk-[A-Za-z0-9_\-]{6,}", "sk-***", redacted)
+    redacted = re.sub(r"(Bearer\s+)[A-Za-z0-9._\-]+", r"\1***", redacted, flags=re.IGNORECASE)
+    return compact_text(redacted, 600)
+
+
+def redact_diagnostic_endpoint(endpoint: str, secrets: List[str]) -> str:
+    raw_endpoint = str(endpoint or "")
+    try:
+        parsed = urlparse(raw_endpoint)
+        if parsed.scheme and parsed.netloc:
+            netloc = parsed.netloc
+            if parsed.username or parsed.password:
+                host = parsed.hostname or ""
+                if parsed.port:
+                    host = f"{host}:{parsed.port}"
+                netloc = f"***@{host}"
+            query_items = []
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+                if re.search(r"(api[_-]?key|token|secret|password|auth|signature)", key, flags=re.IGNORECASE):
+                    query_items.append((key, "***"))
+                else:
+                    query_items.append((key, value))
+            raw_endpoint = parsed._replace(netloc=netloc, query=urlencode(query_items, safe="*")).geturl()
+    except Exception:
+        pass
+    return redact_diagnostic_text(raw_endpoint, secrets)
+
+
+def diagnostic_result(
+    capability: str,
+    label: str,
+    ok: bool,
+    endpoint: str,
+    model: str,
+    started_at: float,
+    status_code: Optional[int] = None,
+    error: str = "",
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "capability": capability,
+        "label": label,
+        "ok": ok,
+        "endpoint": redact_diagnostic_endpoint(endpoint, []),
+        "model": model,
+        "latency_ms": max(0, int((time.monotonic() - started_at) * 1000)),
+    }
+    if status_code is not None:
+        result["status_code"] = status_code
+    if error:
+        result["error"] = error
+    return result
+
+
+def summarize_diagnostic_warning(results: List[Dict[str, Any]]) -> str:
+    if not results:
+        return "未执行诊断。"
+    by_capability = {str(item.get("capability")): bool(item.get("ok")) for item in results}
+    generation_ok = by_capability.get("generation")
+    chat_ok = by_capability.get("chat")
+    if generation_ok is True and chat_ok is False:
+        return "生图可用，聊天失败。"
+    if generation_ok is False and chat_ok is True:
+        return "聊天可用，生图失败。"
+    failed = [str(item.get("label") or item.get("capability")) for item in results if not item.get("ok")]
+    if failed:
+        return f"{'、'.join(failed)}诊断失败。"
+    return ""
+
+
+def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+    api_key = str(payload.get("api_key") or "").strip()
+    base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
+    model = str(payload.get("model") or DEFAULT_GPT_MODEL).strip()
+    timeout = max(5, min(int(payload.get("timeout") or 45), 120))
+    endpoint = build_gpt_api_url(base_url, "/v1/images/generations")
+    started_at = time.monotonic()
+    if not api_key:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "prompt": "diagnostic connectivity test, simple neutral square",
+                "size": "1024x1024",
+                "n": 1,
+            },
+            timeout=timeout,
+        )
+        if not response.ok:
+            return diagnostic_result(
+                "generation",
+                "生图",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                redact_diagnostic_text(extract_error_message(response), secrets),
+            )
+        response_data = response_json_utf8_first(response)
+        if not extract_gpt_image_values(response_data if isinstance(response_data, dict) else {}):
+            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
+        return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
+    except requests.Timeout as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
+    except requests.RequestException as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+    except Exception as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+
+
+def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+    api_key = str(payload.get("api_key") or "").strip()
+    base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
+    model = str(payload.get("chat_model") or payload.get("model") or DEFAULT_GPT_CHAT_MODEL).strip()
+    reasoning_effort = str(payload.get("reasoning_effort") or "auto").strip()
+    timeout = max(5, min(int(payload.get("timeout") or 45), 120))
+    endpoint = build_openai_chat_url(base_url)
+    started_at = time.monotonic()
+    if not api_key:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error="缺少 API Key")
+    chat_payload: Dict[str, Any] = {
+        "model": model,
+        "messages": build_openai_chat_messages("请只回复 OK，用于连接诊断。", []),
+    }
+    if reasoning_effort in GPT_REASONING_EFFORTS and reasoning_effort != "auto":
+        chat_payload["reasoning_effort"] = reasoning_effort
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=chat_payload,
+            timeout=timeout,
+        )
+        if not response.ok:
+            return diagnostic_result(
+                "chat",
+                "聊天",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                redact_diagnostic_text(extract_error_message(response), secrets),
+            )
+        response_data = response_json_utf8_first(response)
+        if not extract_openai_chat_reply(response_data if isinstance(response_data, dict) else {}):
+            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, "接口成功但未返回聊天内容")
+        return diagnostic_result("chat", "聊天", True, endpoint, model, started_at, response.status_code)
+    except requests.Timeout as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
+    except requests.RequestException as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+    except Exception as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+
+
+def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+    api_key = str(payload.get("api_key") or "").strip()
+    api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
+    model = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
+    timeout = max(5, min(int(payload.get("timeout_seconds") or payload.get("timeout") or 45), 120))
+    endpoint = build_banana_api_url(api_base_url, model)
+    started_at = time.monotonic()
+    if not api_key:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
+    try:
+        session = create_requests_session(bool(payload.get("bypass_proxy")))
+        response = session.post(
+            endpoint,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "X-Banana-Client": "image-generate-web-tool"},
+            json=build_banana_request("diagnostic connectivity test, simple neutral square", 1, "Auto", "1K", -1, 0.95, []),
+            timeout=timeout,
+            verify=not bool(payload.get("disable_ssl")),
+        )
+        if not response.ok:
+            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, redact_diagnostic_text(extract_error_message(response), secrets))
+        response_data = response_json_utf8_first(response)
+        parsed = extract_banana_images(response_data if isinstance(response_data, dict) else {})
+        if not parsed.get("images"):
+            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
+        return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
+    except requests.Timeout as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
+    except requests.RequestException as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+    except Exception as exc:
+        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+
+
+def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+    api_key = str(payload.get("api_key") or "").strip()
+    api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
+    model = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
+    timeout = max(5, min(int(payload.get("timeout_seconds") or payload.get("timeout") or 45), 120))
+    endpoint = build_banana_api_url(api_base_url, model)
+    started_at = time.monotonic()
+    if not api_key:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error="缺少 API Key")
+    try:
+        session = create_requests_session(bool(payload.get("bypass_proxy")))
+        response = session.post(
+            endpoint,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "X-Banana-Client": "image-generate-web-tool"},
+            json={
+                "contents": build_banana_chat_contents("请只回复 OK，用于连接诊断。", []),
+                "generationConfig": {"responseModalities": ["TEXT"]},
+            },
+            timeout=timeout,
+            verify=not bool(payload.get("disable_ssl")),
+        )
+        if not response.ok:
+            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, redact_diagnostic_text(extract_error_message(response), secrets))
+        response_data = response_json_utf8_first(response)
+        if not extract_banana_text_reply(response_data if isinstance(response_data, dict) else {}):
+            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, "接口成功但未返回聊天内容")
+        return diagnostic_result("chat", "聊天", True, endpoint, model, started_at, response.status_code)
+    except requests.Timeout as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
+    except requests.RequestException as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+    except Exception as exc:
+        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+
+
+def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
+    engine = str(payload.get("engine") or "gpt-image-2").strip()
+    if engine not in {"gpt-image-2", "banana"}:
+        engine = "gpt-image-2"
+    raw_checks = payload.get("checks")
+    checks = [str(item) for item in raw_checks] if isinstance(raw_checks, list) else ["generation", "chat"]
+    checks = [item for item in checks if item in {"generation", "chat"}] or ["generation", "chat"]
+    secrets = [str(payload.get("api_key") or "")]
+    results: List[Dict[str, Any]] = []
+    if engine == "banana":
+        if "generation" in checks:
+            results.append(run_banana_generation_diagnostic(payload, secrets))
+        if "chat" in checks:
+            results.append(run_banana_chat_diagnostic(payload, secrets))
+    else:
+        if "generation" in checks:
+            results.append(run_gpt_generation_diagnostic(payload, secrets))
+        if "chat" in checks:
+            results.append(run_gpt_chat_diagnostic(payload, secrets))
+    ok = all(bool(item.get("ok")) for item in results)
+    return {
+        "ok": ok,
+        "engine": engine,
+        "warning": "" if ok else summarize_diagnostic_warning(results),
+        "results": results,
+    }
+
+
 def merge_generation_context_prompt(prompt: str, context_prompt: str) -> str:
     prompt_text = prompt.strip()
     context_text = compact_text(context_prompt.strip(), 1800)
@@ -1684,6 +2077,9 @@ def create_app() -> FastAPI:
     )
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    studio_assets_dir = STUDIO_STATIC_DIR / "assets"
+    if studio_assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(studio_assets_dir)), name="studio-assets")
     app.mount(OUTPUTS_URL_PREFIX, StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 
     @app.exception_handler(Exception)
@@ -1743,6 +2139,10 @@ def create_app() -> FastAPI:
             "ok": True,
             "path": str(PRIMARY_CONFIG_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
         }
+
+    @app.post("/api/diagnostics")
+    async def diagnostics(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        return run_diagnostics(payload)
 
     @app.get("/api/history")
     async def generation_history(limit: int = 120) -> Dict[str, Any]:
@@ -2169,6 +2569,7 @@ def create_app() -> FastAPI:
             "Accept": "*/*",
         }
         request_kwargs: Dict[str, Any]
+        files: List[Tuple[str, Tuple[str, bytes, str]]] = []
 
         if resolved_endpoint == "/v1/responses":
             prompt_text = effective_prompt
@@ -2214,98 +2615,115 @@ def create_app() -> FastAPI:
 
         timeout_value = None if infinite_timeout else timeout
         started_at = time.time()
-        response_data: Optional[Dict[str, Any]] = None
         unknown_param_pattern = re.compile(
             r"(?:Unknown parameter|Unrecognized request argument)[^A-Za-z0-9_.]+([A-Za-z_][A-Za-z0-9_.]*)",
             re.IGNORECASE,
         )
-        retry_delay = 1.0
-        retryable_count = 0
         fallback_api_url = fallback_yuzapi_image_url(api_url)
         used_yuzapi_fallback = False
 
-        for _ in range(max(8, len(payload) + 1)):
-            try:
-                response = await asyncio.to_thread(
-                    requests.post,
-                    api_url,
-                    headers=headers,
-                    timeout=None if timeout_value is None else timeout_value,
-                    **request_kwargs,
-                )
-            except requests.Timeout as exc:
-                if fallback_api_url and not used_yuzapi_fallback:
-                    api_url = fallback_api_url
-                    used_yuzapi_fallback = True
-                    continue
-                raise HTTPException(
-                    status_code=504,
-                    detail="GPT Image 2 请求超时：上游接口长时间没有返回。可以稍后重试，或调低质量/尺寸/数量。",
-                ) from exc
-            except requests.RequestException as exc:
-                if fallback_api_url and not used_yuzapi_fallback:
-                    api_url = fallback_api_url
-                    used_yuzapi_fallback = True
-                    continue
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}",
-                ) from exc
-
-            if response.status_code == 400:
+        async def post_gpt_payload(current_payload: Dict[str, Any], current_request_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+            nonlocal api_url, used_yuzapi_fallback
+            response_data: Optional[Dict[str, Any]] = None
+            retry_delay = 1.0
+            retryable_count = 0
+            for _ in range(max(8, len(current_payload) + 1)):
                 try:
-                    error_payload = response_json_utf8_first(response)
-                except Exception:
-                    error_payload = {}
-                error_message = (
-                    error_payload.get("error", {}).get("message")
-                    if isinstance(error_payload, dict)
-                    else None
-                ) or extract_error_message(response)
-                unknown_param = unknown_param_pattern.search(error_message or "")
-                if unknown_param:
-                    parameter_name = unknown_param.group(1)
-                    if parameter_name in payload:
-                        payload.pop(parameter_name, None)
-                        if "json" in request_kwargs:
-                            request_kwargs["json"] = payload
-                        if "data" in request_kwargs:
-                            request_kwargs["data"] = payload
+                    response = await asyncio.to_thread(
+                        requests.post,
+                        api_url,
+                        headers=headers,
+                        timeout=None if timeout_value is None else timeout_value,
+                        **current_request_kwargs,
+                    )
+                except requests.Timeout as exc:
+                    if fallback_api_url and not used_yuzapi_fallback:
+                        api_url = fallback_api_url
+                        used_yuzapi_fallback = True
                         continue
-                raise HTTPException(status_code=400, detail=f"GPT Image 2 请求失败: {error_message}")
+                    raise HTTPException(
+                        status_code=504,
+                        detail="GPT Image 2 请求超时：上游接口长时间没有返回。可以稍后重试，或调低质量/尺寸/数量。",
+                    ) from exc
+                except requests.RequestException as exc:
+                    if fallback_api_url and not used_yuzapi_fallback:
+                        api_url = fallback_api_url
+                        used_yuzapi_fallback = True
+                        continue
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}",
+                    ) from exc
 
-            if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
-                retryable_count += 1
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 1.5, 8.0)
-                continue
+                if response.status_code == 400:
+                    try:
+                        error_payload = response_json_utf8_first(response)
+                    except Exception:
+                        error_payload = {}
+                    error_message = (
+                        error_payload.get("error", {}).get("message")
+                        if isinstance(error_payload, dict)
+                        else None
+                    ) or extract_error_message(response)
+                    unknown_param = unknown_param_pattern.search(error_message or "")
+                    if unknown_param:
+                        parameter_name = unknown_param.group(1)
+                        if parameter_name in current_payload:
+                            current_payload.pop(parameter_name, None)
+                            if "json" in current_request_kwargs:
+                                current_request_kwargs["json"] = current_payload
+                            if "data" in current_request_kwargs:
+                                current_request_kwargs["data"] = current_payload
+                            continue
+                    raise HTTPException(status_code=400, detail=f"GPT Image 2 请求失败: {error_message}")
 
-            if response.status_code >= 400:
-                status_code = 504 if response.status_code == 504 else 502
-                failed_detail = extract_error_message(response)
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=f"GPT Image 2 请求失败: {failed_detail}",
-                )
+                if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
+                    retryable_count += 1
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 1.5, 8.0)
+                    continue
 
-            try:
-                response_data = response_json_utf8_first(response)
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"GPT Image 2 返回不是 JSON: {extract_error_message(response)}",
-                ) from exc
-            break
+                if response.status_code >= 400:
+                    status_code = 504 if response.status_code == 504 else 502
+                    failed_detail = extract_error_message(response)
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail=f"GPT Image 2 请求失败: {failed_detail}",
+                    )
 
-        if response_data is None:
-            raise HTTPException(status_code=502, detail="GPT Image 2 请求失败，未获得有效响应")
+                try:
+                    response_data = response_json_utf8_first(response)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"GPT Image 2 返回不是 JSON: {extract_error_message(response)}",
+                    ) from exc
+                break
 
+            if response_data is None:
+                raise HTTPException(status_code=502, detail="GPT Image 2 请求失败，未获得有效响应")
+            return response_data
+
+        response_data = await post_gpt_payload(payload, request_kwargs)
+        response_payloads = [response_data]
         images = build_gpt_images_from_response(response_data)
+        while resolved_endpoint != "/v1/responses" and 0 < len(images) < n:
+            remaining = n - len(images)
+            next_payload = {**payload, "n": remaining}
+            if resolved_endpoint == "/v1/images/edits":
+                next_request_kwargs = {"data": next_payload, "files": files}
+            else:
+                next_request_kwargs = {"json": next_payload}
+            next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
+            next_images = build_gpt_images_from_response(next_response_data)
+            if not next_images:
+                break
+            response_payloads.append(next_response_data)
+            images.extend(next_images)
 
         elapsed_seconds = round(time.time() - started_at, 2)
         saved_count = save_generated_images("gpt-image-2", images)
-        usage = response_data.get("usage") or {}
-        total_tokens = int(usage.get("total_tokens") or 0)
+        total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
         meta = {
             "model": model,
             "api_url": api_url,

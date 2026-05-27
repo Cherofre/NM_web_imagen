@@ -1,9 +1,13 @@
 import {
   AlertCircle,
   ArrowUp,
+  ChevronDown,
   Check,
+  Clock3,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   FolderOpen,
   FoldVertical,
@@ -14,15 +18,18 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PencilLine,
+  Plus,
   RefreshCw,
   RotateCcw,
   Settings2,
   Sparkles,
   Star,
   Trash2,
+  ZoomIn,
+  ZoomOut,
   X,
 } from "lucide-react";
-import { ChangeEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
   GPT_CUSTOM_SIZE_MAX_PIXELS,
@@ -54,9 +61,25 @@ import {
   type SessionDrafts,
 } from "./sessionDrafts";
 import { buildSubmissionFields } from "./submissionPayload";
+import {
+  activeProfileForEngine,
+  buildConfigPayload,
+  deriveConfigDisplayName,
+  normalizeConfigProfiles,
+  syncActiveProfileForm,
+  type ActiveProfileIds,
+  type ConfigProfile,
+} from "./configProfiles";
+import { normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence";
+import { appendGenerationQueueJob, nextQueuedGenerationJob } from "./generationQueue";
+import {
+  hasActiveQueueJobForSession,
+  queueJobTargetExists,
+  reconcileInterruptedQueueTurns,
+} from "./queueSessionBoundaries";
 
 type Engine = "gpt-image-2" | "banana";
-type TurnStatus = "running" | "success" | "error";
+type TurnStatus = "queued" | "running" | "success" | "error";
 type SubmitMode = "generate" | "chat";
 
 type ReferenceSnapshot = {
@@ -119,6 +142,7 @@ type ChatMessage = {
 type SubmitOverrides = {
   mode?: SubmitMode;
   engine?: Engine;
+  sessionId?: string;
   prompt?: string;
   draftOverride?: SubmissionDraftOverride;
   references?: File[];
@@ -145,6 +169,56 @@ type WorkbenchSession = {
   updatedAt: string;
   turns: ConversationTurn[];
   drafts: SessionDrafts;
+};
+
+type QueueJob = {
+  id: string;
+  turnId: string;
+  sessionId: string;
+  prompt: string;
+  engine: Engine;
+  configName: string;
+  model: string;
+  status: "queued" | "running" | "success" | "error" | "canceled";
+  createdAt: string;
+  finishedAt?: string;
+  elapsedSeconds?: number;
+  images?: GeneratedImage[];
+  error?: string;
+};
+
+type GenerationQueuePayload = {
+  sessionId: string;
+  turnId: string;
+  jobId: string;
+  engine: Engine;
+  prompt: string;
+  gptForm: GptForm;
+  bananaForm: BananaForm;
+  references: File[];
+  contextPrompt: string;
+  negativePrompt: string;
+  posterText: string;
+};
+
+type DiagnosticCapability = "generation" | "chat";
+
+type DiagnosticItem = {
+  capability: DiagnosticCapability;
+  label?: string;
+  ok: boolean;
+  endpoint?: string;
+  model?: string;
+  latency_ms?: number;
+  status_code?: number;
+  error?: string;
+};
+
+type DiagnosticsResult = {
+  ok: boolean;
+  engine: Engine;
+  warning?: string;
+  results: DiagnosticItem[];
 };
 
 type GptForm = {
@@ -186,6 +260,8 @@ type BananaForm = {
 
 type ConfigPayload = {
   active_engine?: Engine;
+  active_profile_ids?: Partial<ActiveProfileIds>;
+  profiles?: ConfigProfile[];
   forms?: {
     "gpt-image-2-form"?: Partial<GptForm>;
     "banana-form"?: Partial<BananaForm>;
@@ -199,6 +275,7 @@ const activeSessionStorageKey = "image-generate-web-tool:studio-active-session";
 const gptStorageKey = "image-generate-web-tool:studio-gpt-form";
 const bananaStorageKey = "image-generate-web-tool:studio-banana-form";
 const engineStorageKey = "image-generate-web-tool:studio-active-engine";
+const queueStorageKey = "image-generate-web-tool:studio-queue";
 const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
@@ -244,6 +321,12 @@ type PendingSessionSwitch = {
 const COMPOSER_PROMPT_DEFAULT_HEIGHT = 148;
 const COMPOSER_PROMPT_MIN_HEIGHT = 118;
 const COMPOSER_PROMPT_MAX_HEIGHT = 360;
+const QUEUE_POPOVER_DEFAULT_WIDTH = 366;
+const QUEUE_POPOVER_DEFAULT_HEIGHT = 310;
+const QUEUE_POPOVER_MIN_WIDTH = 320;
+const QUEUE_POPOVER_MAX_WIDTH = 560;
+const QUEUE_POPOVER_MIN_HEIGHT = 220;
+const QUEUE_POPOVER_MAX_HEIGHT = 520;
 
 type SessionPromptEditorDraft = {
   fixed_prompt: string;
@@ -406,10 +489,25 @@ function compactInlineText(value: string, limit = 26) {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
+function queueJobTitle(job: QueueJob) {
+  return compactInlineText(job.prompt, 24) || "未命名任务";
+}
+
 function clampComposerPromptHeight(value: number) {
   const viewportMax = typeof window === "undefined" ? COMPOSER_PROMPT_MAX_HEIGHT : Math.floor(window.innerHeight * 0.44);
   const max = Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.min(COMPOSER_PROMPT_MAX_HEIGHT, viewportMax));
   return Math.min(max, Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.round(value)));
+}
+
+function clampQueuePopoverSize(width: number, height: number) {
+  const viewportWidthMax = typeof window === "undefined" ? QUEUE_POPOVER_MAX_WIDTH : window.innerWidth - 52;
+  const viewportHeightMax = typeof window === "undefined" ? QUEUE_POPOVER_MAX_HEIGHT : window.innerHeight - 240;
+  const maxWidth = Math.max(QUEUE_POPOVER_MIN_WIDTH, Math.min(QUEUE_POPOVER_MAX_WIDTH, viewportWidthMax));
+  const maxHeight = Math.max(QUEUE_POPOVER_MIN_HEIGHT, Math.min(QUEUE_POPOVER_MAX_HEIGHT, viewportHeightMax));
+  return {
+    width: Math.min(maxWidth, Math.max(QUEUE_POPOVER_MIN_WIDTH, Math.round(width))),
+    height: Math.min(maxHeight, Math.max(QUEUE_POPOVER_MIN_HEIGHT, Math.round(height))),
+  };
 }
 
 function summarizeSessionPromptDrafts(drafts: SessionDrafts) {
@@ -464,7 +562,15 @@ function coerceBoolean(value: unknown, fallback: boolean) {
 function loadJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(fallback)) {
+      return (Array.isArray(parsed) ? parsed : fallback) as T;
+    }
+    if (fallback && typeof fallback === "object" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { ...fallback, ...parsed };
+    }
+    return parsed;
   } catch {
     return fallback;
   }
@@ -535,6 +641,10 @@ function runningTurnMessage(turn: ConversationTurn, nowMs: number) {
   return `图片生成仍在进行，已等待 ${seconds}s`;
 }
 
+function queuedTurnMessage(turn: ConversationTurn) {
+  return turn.mode === "chat" ? "等待发送..." : "排队中，等待前面的生图任务完成";
+}
+
 function sessionTimestamp(session: WorkbenchSession) {
   const time = new Date(session.updatedAt || session.createdAt).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -562,9 +672,9 @@ function configIssues(engine: Engine, gpt: GptForm, banana: BananaForm) {
   return issues;
 }
 
-function normalizeSessions(value: unknown): WorkbenchSession[] {
+function normalizeSessions(value: unknown, queueJobs: QueueJob[] = []): WorkbenchSession[] {
   if (!Array.isArray(value)) return [];
-  return value
+  const sessions = value
     .map((item) => {
       if (!item || typeof item !== "object") return null;
       const source = item as Partial<WorkbenchSession> & { drafts?: Partial<SessionDrafts> };
@@ -580,12 +690,13 @@ function normalizeSessions(value: unknown): WorkbenchSession[] {
       });
     })
     .filter((item): item is WorkbenchSession => Boolean(item));
+  return reconcileInterruptedQueueTurns(sessions, queueJobs) as WorkbenchSession[];
 }
 
-function loadWorkbenchSessionState() {
+function loadWorkbenchSessionState(queueJobs: QueueJob[] = []) {
   let sessions: WorkbenchSession[] = [];
   try {
-    sessions = normalizeSessions(JSON.parse(localStorage.getItem(sessionsStorageKey) || "[]"));
+    sessions = normalizeSessions(JSON.parse(localStorage.getItem(sessionsStorageKey) || "[]"), queueJobs);
   } catch {
     sessions = [];
   }
@@ -618,10 +729,10 @@ function loadWorkbenchSessionState() {
   return { sessions, activeSessionId };
 }
 
-function normalizeSessionStatePayload(payload: unknown) {
+function normalizeSessionStatePayload(payload: unknown, queueJobs: QueueJob[] = []) {
   if (!payload || typeof payload !== "object") return null;
   const source = payload as { sessions?: unknown; active_session_id?: unknown; activeSessionId?: unknown };
-  const sessions = normalizeSessions(source.sessions);
+  const sessions = normalizeSessions(source.sessions, queueJobs);
   if (!sessions.length) return null;
   const activeCandidate = typeof source.active_session_id === "string"
     ? source.active_session_id
@@ -669,27 +780,6 @@ function normalizeBananaForm(value: Partial<BananaForm> = {}): BananaForm {
   };
 }
 
-function buildConfigPayload(activeEngine: Engine, gpt: GptForm, banana: BananaForm) {
-  return {
-    version: 1,
-    active_engine: activeEngine,
-    forms: {
-    "gpt-image-2-form": {
-      api_key: gpt.api_key.trim(),
-      base_url: gpt.base_url.trim(),
-      model: gpt.model.trim(),
-      chat_model: gpt.chat_model.trim(),
-      reasoning_effort: gpt.reasoning_effort.trim(),
-    },
-      "banana-form": {
-        api_key: banana.api_key.trim(),
-        api_base_url: banana.api_base_url.trim(),
-        model_type: banana.model_type.trim(),
-      },
-    },
-  };
-}
-
 function createFormData(
   engine: Engine,
   prompt: string,
@@ -730,6 +820,31 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
     chat_model: gpt.chat_model,
     reasoning_effort: gpt.reasoning_effort,
     timeout: gpt.timeout,
+  };
+}
+
+function createDiagnosticPayload(engine: Engine, gpt: GptForm, banana: BananaForm) {
+  if (engine === "banana") {
+    return {
+      engine,
+      api_key: banana.api_key,
+      api_base_url: banana.api_base_url,
+      model_type: banana.model_type,
+      timeout_seconds: banana.timeout_seconds,
+      bypass_proxy: banana.bypass_proxy,
+      disable_ssl: banana.disable_ssl,
+      checks: ["generation", "chat"],
+    };
+  }
+  return {
+    engine,
+    api_key: gpt.api_key,
+    base_url: gpt.base_url,
+    model: gpt.model,
+    chat_model: gpt.chat_model,
+    reasoning_effort: gpt.reasoning_effort,
+    timeout: gpt.timeout,
+    checks: ["generation", "chat"],
   };
 }
 
@@ -793,7 +908,8 @@ function isSameOriginOutput(src: string) {
 }
 
 function App() {
-  const initialSessionState = useRef(loadWorkbenchSessionState());
+  const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
+  const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => loadJson(gptStorageKey, defaultGptForm));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => loadJson(bananaStorageKey, defaultBananaForm));
@@ -807,6 +923,16 @@ function App() {
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
+  const [activeProfileIds, setActiveProfileIds] = useState<ActiveProfileIds>({
+    "gpt-image-2": "gpt-image-2-default",
+    banana: "banana-default",
+  });
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [queueJobs, setQueueJobs] = useState<QueueJob[]>(() => initialQueueJobs.current);
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
+  const [diagnosticsResult, setDiagnosticsResult] = useState<DiagnosticsResult | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorDraft, setPromptEditorDraft] = useState("");
@@ -818,6 +944,10 @@ function App() {
   const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "edit" | "strength" | "count" | null>(null);
   const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const [previewDragging, setPreviewDragging] = useState(false);
+  const [queuePopoverSize, setQueuePopoverSize] = useState(() => clampQueuePopoverSize(QUEUE_POPOVER_DEFAULT_WIDTH, QUEUE_POPOVER_DEFAULT_HEIGHT));
   const [dragActive, setDragActive] = useState(false);
   const [draggedReferenceIndex, setDraggedReferenceIndex] = useState<number | null>(null);
   const [referenceDropIndex, setReferenceDropIndex] = useState<number | null>(null);
@@ -837,6 +967,12 @@ function App() {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const promptWrapRef = useRef<HTMLDivElement | null>(null);
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
+  const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
+  const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const previewMouseCleanupRef = useRef<(() => void) | null>(null);
+  const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
+  const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
+  const queueProcessingRef = useRef<string | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
@@ -850,15 +986,27 @@ function App() {
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
   const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
+  const activeProfile = activeProfileForEngine(profiles, activeProfileIds, activeEngine);
+  const activeProfileName = deriveConfigDisplayName(
+    activeProfile?.name,
+    activeEngine === "banana" ? bananaForm.api_base_url : gptForm.base_url,
+    activeModel || "默认配置",
+  );
+  const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm);
   const hasCompleteConfig = activeConfigIssues.length === 0;
-  const configStatusText = hasCompleteConfig ? "配置已完成" : `缺少 ${activeConfigIssues.join("、")}`;
-  const configButtonLabel = hasCompleteConfig ? activeModel || "模型名" : "检查配置";
+  const configButtonLabel = hasCompleteConfig ? `配置 · ${activeProfileName}` : "检查配置";
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
+  const runningQueueCount = queueJobs.filter((job) => job.status === "running").length;
+  const activeQueueCount = queueJobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts);
   const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
+  const queuePopoverStyle: CSSProperties = {
+    "--queue-popover-width": `${queuePopoverSize.width}px`,
+    "--queue-popover-height": `${queuePopoverSize.height}px`,
+  } as CSSProperties;
   const gptSizeSelection = deriveGptSizeSelection({
     size: gptForm.size,
     custom_size: normalizeCustomImageSize(gptForm.custom_size).value,
@@ -875,6 +1023,21 @@ function App() {
   useEffect(() => {
     localStorage.setItem(engineStorageKey, activeEngine);
   }, [activeEngine]);
+
+  useEffect(() => {
+    localStorage.setItem(queueStorageKey, serializeQueueJobs(queueJobs));
+  }, [queueJobs]);
+
+  useEffect(() => {
+    const nextJob = nextQueuedGenerationJob(queueJobs);
+    if (!nextJob || queueProcessingRef.current) return;
+    queueProcessingRef.current = nextJob.id;
+    void runQueuedGenerationJob(nextJob.id);
+  }, [queueJobs]);
+
+  useEffect(() => {
+    if (connectionOpen) setApiKeyVisible(false);
+  }, [connectionOpen]);
 
   useEffect(() => {
     if (composerPopover === "size") return;
@@ -895,7 +1058,7 @@ function App() {
         const response = await fetch("/api/studio/sessions");
         if (!response.ok) throw new Error(await readError(response));
         const payload = await response.json();
-        const normalized = normalizeSessionStatePayload(payload);
+        const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
         if (!cancelled && normalized) {
           setSessions(normalized.sessions);
           setActiveSessionId(normalized.activeSessionId);
@@ -937,7 +1100,7 @@ function App() {
           return response.json();
         })
         .then((payload) => {
-          const normalized = normalizeSessionStatePayload(payload);
+          const normalized = normalizeSessionStatePayload(payload, queueJobs);
           if (normalized) {
             localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
           }
@@ -1028,8 +1191,11 @@ function App() {
       const payload = (await response.json()) as ConfigPayload;
       const nextGpt = normalizeGptForm({ ...gptForm, ...(payload.forms?.["gpt-image-2-form"] || {}) });
       const nextBanana = normalizeBananaForm({ ...bananaForm, ...(payload.forms?.["banana-form"] || {}) });
+      const nextProfiles = normalizeConfigProfiles(payload, nextGpt, nextBanana);
       setGptForm(nextGpt);
       setBananaForm(nextBanana);
+      setProfiles(nextProfiles.profiles);
+      setActiveProfileIds(nextProfiles.activeProfileIds);
       const startupEngine: Engine = "gpt-image-2";
       const issues = configIssues(startupEngine, nextGpt, nextBanana);
       if (!hasPromptedForConfig) {
@@ -1052,12 +1218,237 @@ function App() {
     }
   }
 
+  function applyProfileForm(profile: ConfigProfile) {
+    if (profile.engine === "banana") {
+      setBananaForm((current) => normalizeBananaForm({ ...current, ...(profile.form as Partial<BananaForm>) }));
+    } else {
+      setGptForm((current) => normalizeGptForm({ ...current, ...(profile.form as Partial<GptForm>) }));
+    }
+  }
+
+  function selectConfigProfile(profile: ConfigProfile) {
+    const currentForm = profile.engine === "banana" ? bananaForm : gptForm;
+    setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, profile.engine, currentForm));
+    setActiveProfileIds((current) => ({ ...current, [profile.engine]: profile.id }));
+    applyProfileForm(profile);
+  }
+
+  function updateActiveProfileName(name: string) {
+    const profileId = activeProfileIds[activeEngine];
+    setProfiles((items) => items.map((item) => (
+      item.engine === activeEngine && item.id === profileId ? { ...item, name } : item
+    )));
+  }
+
+  function addConfigProfile() {
+    const id = makeId(`${activeEngine}-profile`);
+    const form = activeEngine === "banana"
+      ? {
+          api_key: bananaForm.api_key.trim(),
+          api_base_url: bananaForm.api_base_url.trim(),
+          model_type: bananaForm.model_type.trim(),
+        }
+      : {
+          api_key: gptForm.api_key.trim(),
+          base_url: gptForm.base_url.trim(),
+          model: gptForm.model.trim(),
+          chat_model: gptForm.chat_model.trim(),
+          reasoning_effort: gptForm.reasoning_effort.trim(),
+        };
+    setProfiles((items) => [
+      ...items,
+      {
+        id,
+        engine: activeEngine,
+        name: `新配置 ${items.filter((item) => item.engine === activeEngine).length + 1}`,
+        form,
+      },
+    ]);
+    setActiveProfileIds((current) => ({ ...current, [activeEngine]: id }));
+  }
+
+  function deleteConfigProfile(profile: ConfigProfile) {
+    const sameEngineProfiles = profiles.filter((item) => item.engine === profile.engine);
+    if (sameEngineProfiles.length <= 1) {
+      setNotice("至少保留一个配置");
+      return;
+    }
+    if (!confirm(`删除配置「${profile.name || "未命名配置"}」？保存后会写入 config.local.json。`)) return;
+
+    const remainingProfiles = sameEngineProfiles.filter((item) => item.id !== profile.id);
+    const nextActiveProfile = activeProfileIds[profile.engine] === profile.id ? remainingProfiles[0] : null;
+    setProfiles((items) => items.filter((item) => item.id !== profile.id));
+    if (nextActiveProfile) {
+      setActiveProfileIds((current) => ({ ...current, [profile.engine]: nextActiveProfile.id }));
+      applyProfileForm(nextActiveProfile);
+      setNotice(`已删除配置，并切换到 ${nextActiveProfile.name || "其他配置"}；保存后写入 config.local.json`);
+    } else {
+      setNotice("已删除配置；保存后写入 config.local.json");
+    }
+  }
+
+  async function runDiagnostics() {
+    setDiagnosticsRunning(true);
+    setDiagnosticsResult(null);
+    try {
+      const response = await fetch("/api/diagnostics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createDiagnosticPayload(activeEngine, gptForm, bananaForm)),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const payload = (await response.json()) as DiagnosticsResult;
+      setDiagnosticsResult(payload);
+      if (payload.ok) {
+        setNotice("连接诊断通过：生图和聊天都可用");
+      } else if (payload.warning) {
+        setNotice(payload.warning);
+      } else {
+        setNotice("连接诊断未通过");
+      }
+    } catch (error) {
+      setDiagnosticsResult({
+        ok: false,
+        engine: activeEngine,
+        warning: error instanceof Error ? error.message : "连接诊断失败",
+        results: [],
+      });
+      setNotice(error instanceof Error ? error.message : "连接诊断失败");
+    } finally {
+      setDiagnosticsRunning(false);
+    }
+  }
+
+  function updateQueueJob(jobId: string, patch: Partial<QueueJob>) {
+    setQueueJobs((items) => items.map((item) => (item.id === jobId ? { ...item, ...patch } : item)));
+  }
+
+  function jumpToQueueJob(job: QueueJob) {
+    setQueueOpen(false);
+    if (!queueJobTargetExists(sessions, job)) {
+      setNotice("原会话内容已不存在，无法跳转");
+      return;
+    }
+    if (job.sessionId !== activeSessionId) {
+      setActiveSessionId(job.sessionId);
+    }
+    window.setTimeout(() => {
+      document.getElementById(`turn-${job.turnId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  }
+
+  function cancelQueueJob(job: QueueJob) {
+    if (job.status !== "running" && job.status !== "queued") return;
+    queueAbortControllersRef.current[job.id]?.abort();
+    delete queueAbortControllersRef.current[job.id];
+    delete queuePayloadsRef.current[job.id];
+    const finishedAt = new Date().toISOString();
+    updateQueueJob(job.id, {
+      status: "canceled",
+      finishedAt,
+      error: "已取消生成",
+    });
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === job.sessionId
+          ? {
+              ...session,
+              updatedAt: finishedAt,
+              turns: session.turns.map((turn) =>
+                turn.id === job.turnId
+                  ? {
+                      ...turn,
+                      status: "error",
+                      finishedAt,
+                      error: "已取消生成",
+                    }
+                  : turn,
+              ),
+            }
+          : session,
+      ),
+    );
+    setNotice("已取消队列任务");
+  }
+
+  function retryQueueJob(job: QueueJob) {
+    setQueueOpen(false);
+    const targetExists = sessions.some((session) => session.id === job.sessionId);
+    if (targetExists) {
+      setActiveSessionId(job.sessionId);
+    }
+    setActiveEngine(job.engine);
+    setSubmitMode("generate");
+    void submit(undefined, {
+      mode: "generate",
+      engine: job.engine,
+      sessionId: targetExists ? job.sessionId : undefined,
+      prompt: job.prompt,
+    });
+    if (!targetExists) {
+      setNotice("原会话已不存在，已在当前会话重试");
+    }
+  }
+
+  function applyQueueJob(job: QueueJob) {
+    setQueueOpen(false);
+    const targetSessionId = sessions.some((session) => session.id === job.sessionId) ? job.sessionId : activeSessionId;
+    if (targetSessionId !== job.sessionId) {
+      setNotice("原会话已不存在，已套用到当前会话");
+    } else {
+      setNotice("已套用队列任务提示词");
+    }
+    setActiveSessionId(targetSessionId);
+    setActiveEngine(job.engine);
+    setSubmitMode("generate");
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === targetSessionId
+          ? {
+              ...session,
+              updatedAt: new Date().toISOString(),
+              drafts: applyPromptToDrafts(job.engine, session.drafts, job.prompt),
+            }
+          : session,
+      ),
+    );
+    window.setTimeout(() => promptRef.current?.focus(), 0);
+  }
+
+  function removeQueueJob(job: QueueJob) {
+    if (job.status === "queued" || job.status === "running") {
+      cancelQueueJob(job);
+      return;
+    }
+    const jobId = job.id;
+    queueAbortControllersRef.current[jobId]?.abort();
+    delete queueAbortControllersRef.current[jobId];
+    delete queuePayloadsRef.current[jobId];
+    setQueueJobs((items) => items.filter((item) => item.id !== jobId));
+  }
+
   async function saveConfig() {
     try {
       const response = await fetch("/api/config/local-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildConfigPayload(activeEngine, gptForm, bananaForm)),
+        body: JSON.stringify(buildConfigPayload(
+          activeEngine,
+          profiles,
+          activeProfileIds,
+          {
+            api_key: gptForm.api_key.trim(),
+            base_url: gptForm.base_url.trim(),
+            model: gptForm.model.trim(),
+            chat_model: gptForm.chat_model.trim(),
+            reasoning_effort: gptForm.reasoning_effort.trim(),
+          },
+          {
+            api_key: bananaForm.api_key.trim(),
+            api_base_url: bananaForm.api_base_url.trim(),
+            model_type: bananaForm.model_type.trim(),
+          },
+        )),
       });
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
@@ -1188,6 +1579,36 @@ function App() {
     }
   }
 
+  function startQueuePopoverResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    queuePopoverResizeRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: queuePopoverSize.width,
+      startHeight: queuePopoverSize.height,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function dragQueuePopoverResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = queuePopoverResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setQueuePopoverSize(clampQueuePopoverSize(drag.startWidth + drag.startX - event.clientX, drag.startHeight + event.clientY - drag.startY));
+  }
+
+  function endQueuePopoverResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = queuePopoverResizeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    queuePopoverResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   function switchToSession(sessionId: string, choice: ReferenceSwitchChoice = "preserve") {
     const resolution = resolveReferenceSwitch(choice, references.map((file) => file.name));
     if (resolution.keepActiveSession) {
@@ -1222,6 +1643,10 @@ function App() {
   }
 
   function deleteSession(sessionId: string) {
+    if (hasActiveQueueJobForSession(queueJobs, sessionId)) {
+      setNotice("该会话还有生成任务进行中，请先取消或等待完成");
+      return;
+    }
     setSessions((current) => {
       const resolution = resolveSessionDeletion(current, activeSessionId, sessionId, () => createEmptySession());
       if (resolution.clearReferences) {
@@ -1313,6 +1738,7 @@ function App() {
       if (current?.objectUrl) URL.revokeObjectURL(current.src);
       return next;
     });
+    resetPreviewCanvas();
   }
 
   function closePreviewImage() {
@@ -1320,6 +1746,98 @@ function App() {
       if (current?.objectUrl) URL.revokeObjectURL(current.src);
       return null;
     });
+    resetPreviewCanvas();
+  }
+
+  function resetPreviewCanvas() {
+    previewMouseCleanupRef.current?.();
+    previewMouseCleanupRef.current = null;
+    setPreviewZoom(1);
+    setPreviewPan({ x: 0, y: 0 });
+    setPreviewDragging(false);
+    previewDragRef.current = null;
+  }
+
+  function setPreviewZoomLevel(nextZoom: number) {
+    const normalized = Math.min(4, Math.max(0.5, Number(nextZoom.toFixed(2))));
+    setPreviewZoom(normalized);
+    if (normalized <= 1) {
+      setPreviewPan({ x: 0, y: 0 });
+      setPreviewDragging(false);
+      previewDragRef.current = null;
+    }
+  }
+
+  function handlePreviewWheel(event: WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setPreviewZoomLevel(previewZoom + (event.deltaY < 0 ? 0.2 : -0.2));
+  }
+
+  function startPreviewPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || previewZoom <= 1) return;
+    previewDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: previewPan.x,
+      panY: previewPan.y,
+    };
+    setPreviewDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function movePreviewPan(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = previewDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPreviewPan({
+      x: drag.panX + event.clientX - drag.startX,
+      y: drag.panY + event.clientY - drag.startY,
+    });
+  }
+
+  function endPreviewPan(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = previewDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    previewDragRef.current = null;
+    setPreviewDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function startPreviewMousePan(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || previewZoom <= 1) return;
+    event.preventDefault();
+    previewMouseCleanupRef.current?.();
+    previewDragRef.current = {
+      pointerId: -1,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: previewPan.x,
+      panY: previewPan.y,
+    };
+    setPreviewDragging(true);
+    const move = (moveEvent: globalThis.MouseEvent) => {
+      const drag = previewDragRef.current;
+      if (!drag || drag.pointerId !== -1) return;
+      setPreviewPan({
+        x: drag.panX + moveEvent.clientX - drag.startX,
+        y: drag.panY + moveEvent.clientY - drag.startY,
+      });
+    };
+    const end = () => {
+      const drag = previewDragRef.current;
+      if (drag?.pointerId === -1) {
+        previewDragRef.current = null;
+        setPreviewDragging(false);
+      }
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", end);
+      previewMouseCleanupRef.current = null;
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", end);
+    previewMouseCleanupRef.current = end;
   }
 
   async function createReferenceSnapshots(files: File[]): Promise<ReferenceSnapshot[]> {
@@ -1575,11 +2093,156 @@ function App() {
     });
   }
 
+  async function runQueuedGenerationJob(jobId: string) {
+    const payload = queuePayloadsRef.current[jobId];
+    if (!payload) {
+      const finishedAt = new Date().toISOString();
+      updateQueueJob(jobId, {
+        status: "canceled",
+        finishedAt,
+        error: "任务已中断，请重新提交",
+      });
+      queueProcessingRef.current = null;
+      return;
+    }
+
+    const startedAt = performance.now();
+    const runningAt = new Date().toISOString();
+    const abortController = new AbortController();
+    queueAbortControllersRef.current[jobId] = abortController;
+    updateQueueJob(jobId, { status: "running" });
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === payload.sessionId
+          ? {
+              ...session,
+              updatedAt: runningAt,
+              turns: session.turns.map((turn) =>
+                turn.id === payload.turnId
+                  ? {
+                      ...turn,
+                      status: "running",
+                      createdAt: runningAt,
+                    }
+                  : turn,
+              ),
+            }
+          : session,
+      ),
+    );
+    setStatus(`${engineLabel(payload.engine)} 生成中`);
+
+    try {
+      const response = await fetch(`/api/generate/${payload.engine}`, {
+        method: "POST",
+        signal: abortController.signal,
+        body: createFormData(
+          payload.engine,
+          payload.prompt,
+          payload.gptForm,
+          payload.bananaForm,
+          payload.references,
+          {
+            context_prompt: payload.contextPrompt,
+            negative_prompt: payload.negativePrompt,
+            poster_text: payload.posterText,
+          },
+        ),
+      });
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(responsePayload.detail || responsePayload.error || `HTTP ${response.status}`);
+      const elapsed = Number(responsePayload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
+      const images = Array.isArray(responsePayload.images) ? responsePayload.images : [];
+      const finishedAt = new Date().toISOString();
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === payload.sessionId
+            ? {
+                ...session,
+                updatedAt: finishedAt,
+                turns: session.turns.map((item) =>
+                  item.id === payload.turnId
+                    ? {
+                        ...item,
+                        status: responsePayload.ok ? "success" : "error",
+                        finishedAt,
+                        elapsedSeconds: elapsed,
+                        images,
+                        error: responsePayload.ok ? "" : "接口返回了结果，但没有拿到图片",
+                        meta: {
+                          ...(item.meta || {}),
+                          ...(responsePayload.meta || {}),
+                          context_prompt: payload.contextPrompt,
+                        },
+                      }
+                    : item,
+                ),
+              }
+            : session,
+        ),
+      );
+      stickToConversationEndIfNearBottom();
+      setStatus(responsePayload.ok ? `返回 ${images.length} 张图片` : "请求完成但没有图片");
+      setNotice(responsePayload.ok ? "图片已保存到 outputs" : "请查看返回信息");
+      updateQueueJob(jobId, {
+        status: responsePayload.ok ? "success" : "error",
+        finishedAt,
+        elapsedSeconds: elapsed,
+        images,
+        error: responsePayload.ok ? "" : "接口返回了结果，但没有拿到图片",
+      });
+      if (responsePayload.history_entry) {
+        void loadHistory();
+      }
+    } catch (error) {
+      const message = error instanceof DOMException && error.name === "AbortError"
+        ? "已取消生成"
+        : error instanceof Error ? error.message : "生成失败";
+      const finishedAt = new Date().toISOString();
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === payload.sessionId
+            ? {
+                ...session,
+                updatedAt: finishedAt,
+                turns: session.turns.map((item) =>
+                  item.id === payload.turnId
+                    ? {
+                        ...item,
+                        status: "error",
+                        finishedAt,
+                        elapsedSeconds: (performance.now() - startedAt) / 1000,
+                        error: message,
+                      }
+                    : item,
+                ),
+              }
+            : session,
+        ),
+      );
+      stickToConversationEndIfNearBottom();
+      setStatus(message === "已取消生成" ? "生成已取消" : "生成失败");
+      setNotice(message);
+      updateQueueJob(jobId, {
+        status: message === "已取消生成" ? "canceled" : "error",
+        finishedAt,
+        elapsedSeconds: (performance.now() - startedAt) / 1000,
+        error: message,
+      });
+    } finally {
+      delete queueAbortControllersRef.current[jobId];
+      delete queuePayloadsRef.current[jobId];
+      queueProcessingRef.current = null;
+    }
+  }
+
   async function submit(event?: FormEvent, overrides: SubmitOverrides = {}) {
     event?.preventDefault();
     const currentMode = overrides.mode || submitMode;
     const currentEngine = overrides.engine || activeEngine;
-    const currentDrafts = activeSession.drafts;
+    const requestedSessionId = overrides.sessionId || activeSessionId;
+    const requestedSession = sessions.find((session) => session.id === requestedSessionId);
+    const currentDrafts = requestedSession?.drafts || activeSession.drafts;
     const currentGptForm = gptForm;
     const currentBananaForm = bananaForm;
     const currentReferences = overrides.references || references;
@@ -1599,9 +2262,10 @@ function App() {
 
     const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
     const turnId = makeId("turn");
+    const queueJobId = makeId("job");
     const createdAt = new Date().toISOString();
-    let targetSessionId = activeSessionId;
-    if (!activeSession || !sessions.some((session) => session.id === activeSessionId)) {
+    let targetSessionId = requestedSessionId;
+    if (!sessions.some((session) => session.id === targetSessionId)) {
       const created = createSessionFromPrompt(prompt);
       targetSessionId = created.id;
     }
@@ -1731,13 +2395,14 @@ function App() {
       negativePrompt: submitNegativePrompt,
       posterText: submitPosterText,
       createdAt,
-      status: "running",
+      status: "queued",
       images: [],
       referenceSnapshots,
       meta: {
         model: currentModel,
         reference_count: currentReferences.length,
         context_prompt: submitContextPrompt,
+        queued_at: createdAt,
       },
     };
     setSessions((current) =>
@@ -1753,92 +2418,32 @@ function App() {
       ),
     );
     jumpToConversationEnd();
-    setBusy(true);
-    setStatus(`${engineLabel(currentEngine)} 生成中`);
-    const startedAt = performance.now();
-
-    try {
-      const response = await fetch(`/api/generate/${currentEngine}`, {
-        method: "POST",
-        body: createFormData(
-          currentEngine,
-          prompt,
-          submitGptForm,
-          currentBananaForm,
-          currentReferences,
-          {
-            context_prompt: submitContextPrompt,
-            negative_prompt: submitNegativePrompt,
-            poster_text: submitPosterText,
-          },
-        ),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
-      const elapsed = Number(payload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
-      const images = Array.isArray(payload.images) ? payload.images : [];
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === targetSessionId
-            ? {
-                ...session,
-                updatedAt: new Date().toISOString(),
-                turns: session.turns.map((item) =>
-                  item.id === turnId
-                    ? {
-                        ...item,
-                        status: payload.ok ? "success" : "error",
-                        finishedAt: new Date().toISOString(),
-                        elapsedSeconds: elapsed,
-                        images,
-                        error: payload.ok ? "" : "接口返回了结果，但没有拿到图片",
-                        meta: {
-                          ...(item.meta || {}),
-                          ...(payload.meta || {}),
-                          context_prompt: submitContextPrompt,
-                        },
-                      }
-                    : item,
-                ),
-              }
-            : session,
-        ),
-      );
-      stickToConversationEndIfNearBottom();
-      setStatus(payload.ok ? `返回 ${images.length} 张图片` : "请求完成但没有图片");
-      setNotice(payload.ok ? "图片已保存到 outputs" : "请查看返回信息");
-      if (payload.history_entry) {
-        void loadHistory();
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "生成失败";
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === targetSessionId
-            ? {
-                ...session,
-                updatedAt: new Date().toISOString(),
-                turns: session.turns.map((item) =>
-                  item.id === turnId
-                    ? {
-                        ...item,
-                        status: "error",
-                        finishedAt: new Date().toISOString(),
-                        elapsedSeconds: (performance.now() - startedAt) / 1000,
-                        error: message,
-                      }
-                    : item,
-                ),
-              }
-            : session,
-        ),
-      );
-      stickToConversationEndIfNearBottom();
-      setStatus("生成失败");
-      setNotice(message);
-    } finally {
-      setBusy(false);
-    }
+    setQueueJobs((items) => appendGenerationQueueJob(items, {
+        id: queueJobId,
+        turnId,
+        sessionId: targetSessionId,
+        prompt,
+        engine: currentEngine,
+        configName: activeProfileName,
+        model: currentModel,
+        status: "queued" as const,
+        createdAt,
+      }));
+    queuePayloadsRef.current[queueJobId] = {
+      sessionId: targetSessionId,
+      turnId,
+      jobId: queueJobId,
+      engine: currentEngine,
+      prompt,
+      gptForm: submitGptForm,
+      bananaForm: currentBananaForm,
+      references: [...currentReferences],
+      contextPrompt: submitContextPrompt,
+      negativePrompt: submitNegativePrompt,
+      posterText: submitPosterText,
+    };
+    setQueueOpen(true);
+    setStatus("已加入生图队列");
   }
 
   async function openOutputs() {
@@ -1857,6 +2462,10 @@ function App() {
   }
 
   function clearCurrentSession() {
+    if (hasActiveQueueJobForSession(queueJobs, activeSessionId)) {
+      setNotice("当前会话还有生成任务进行中，请先取消或等待完成");
+      return;
+    }
     updateActiveSession((session) => ({
       ...session,
       title: "新对话",
@@ -2248,18 +2857,18 @@ function App() {
               </button>
             </div>
             <div className="header-actions">
-              <span className={busy ? "status-chip busy" : hasCompleteConfig ? "status-chip ready" : "status-chip warning"} title={busy ? status : configStatusText}>
-                {busy ? <Loader2 size={14} className="spin" /> : hasCompleteConfig ? <Check size={14} /> : <AlertCircle size={14} />}
-                {busy ? status : configStatusText}
-              </span>
               <button
                 type="button"
                 className={hasCompleteConfig ? "connection-button configured" : "connection-button needs-config"}
                 onClick={() => setConnectionOpen(true)}
-                title={hasCompleteConfig ? "配置 API 请求地址、Key 和模型" : `配置未完成：${activeConfigIssues.join("、")}`}
+                title={hasCompleteConfig ? `点击修改配置：${activeProfileName} · ${activeModel || "模型名"}` : `配置未完成：${activeConfigIssues.join("、")}`}
               >
-                <Settings2 size={16} />
-                <span>{configButtonLabel}</span>
+                <PencilLine size={15} />
+                <span className="connection-button-text">
+                  <strong>{configButtonLabel}</strong>
+                  {hasCompleteConfig && <small>{activeModel || "模型名"}</small>}
+                </span>
+                <ChevronDown size={14} />
               </button>
               <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
               <button type="button" onClick={clearCurrentSession} disabled={turns.length === 0 && references.length === 0}>清空</button>
@@ -2268,6 +2877,86 @@ function App() {
         </header>
 
         <section className="conversation-canvas" ref={conversationCanvasRef}>
+          {queueJobs.length > 0 && (
+            <div className="queue-anchor">
+              {queueOpen && (
+                <div className="queue-popover" role="region" aria-label="生成队列" style={queuePopoverStyle}>
+                  <div className="queue-popover-head">
+                    <div>
+                      <h3>任务队列</h3>
+                      <span>{activeQueueCount ? `${activeQueueCount} 个任务进行中` : `${queueJobs.length} 个任务已完成`}</span>
+                    </div>
+                    <button type="button" onClick={() => setQueueJobs((items) => items.filter((job) => job.status === "queued" || job.status === "running"))}>清空已完成</button>
+                  </div>
+                  <div className="queue-list">
+                    {queueJobs.slice(0, 6).map((job) => {
+                      const firstImage = job.images?.[0];
+                      const thumbSrc = imageSrc(firstImage);
+                      const thumbName = imageName(firstImage);
+                      const jobTitle = queueJobTitle(job);
+                      const jobMeta = [job.configName, job.model].filter(Boolean).join(" / ");
+                      const jobElapsed = job.elapsedSeconds ? `${Math.round(job.elapsedSeconds)} 秒` : "";
+                      return (
+                        <div className={`queue-job ${job.status}`} key={job.id}>
+                          {thumbSrc ? (
+                            <button type="button" className="queue-job-thumb" onClick={() => openPreviewImage({ src: thumbSrc, name: thumbName })} title="查看图片">
+                              <img src={thumbSrc} alt={thumbName} loading="lazy" />
+                            </button>
+                          ) : (
+                            <span className="queue-job-icon">
+                              {job.status === "running" ? <Loader2 size={18} className="spin" /> : job.status === "queued" ? <Clock3 size={18} /> : job.status === "error" || job.status === "canceled" ? <X size={18} /> : <Check size={18} />}
+                            </span>
+                          )}
+                          <button type="button" className="queue-job-main-button" onClick={() => jumpToQueueJob(job)} title="跳转到会话位置">
+                            <strong>{jobTitle}</strong>
+                            <span>{job.status === "queued" ? `${jobMeta} · 排队中` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>
+                          </button>
+                          <div className="queue-job-side">
+                            {thumbSrc ? <a href={thumbSrc} download={thumbName} title="下载图片"><Download size={14} /></a> : null}
+                          </div>
+                          <div className="queue-job-actions" aria-label="队列任务操作">
+                            {(job.status === "running" || job.status === "queued") && (
+                              <button type="button" onClick={() => cancelQueueJob(job)} aria-label={`取消任务 ${job.prompt || "生成图片"}`} title="取消">
+                                <X size={13} />
+                              </button>
+                            )}
+                            {(job.status === "success" || job.status === "error" || job.status === "canceled") && (
+                              <button type="button" onClick={() => retryQueueJob(job)} aria-label={`重试任务 ${job.prompt || "生成图片"}`} title="重试">
+                                <RefreshCw size={13} />
+                              </button>
+                            )}
+                            <button type="button" onClick={() => applyQueueJob(job)} aria-label={`套用任务提示词 ${job.prompt || "生成图片"}`} title="套用提示词">
+                              <RotateCcw size={13} />
+                            </button>
+                            <button type="button" onClick={() => removeQueueJob(job)} aria-label={`移除任务 ${job.prompt || "生成图片"}`} title={job.status === "queued" || job.status === "running" ? "取消并移除" : "移除"}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className="queue-popover-resize-handle"
+                    aria-label="拖拽调整队列窗口宽高"
+                    title="拖拽调整宽高"
+                    onPointerDown={startQueuePopoverResize}
+                    onPointerMove={dragQueuePopoverResize}
+                    onPointerUp={endQueuePopoverResize}
+                    onPointerCancel={endQueuePopoverResize}
+                  >
+                    <span />
+                  </button>
+                </div>
+              )}
+              <button type="button" className={`queue-capsule ${activeQueueCount ? "active" : ""}`.trim()} onClick={() => setQueueOpen((value) => !value)} aria-expanded={queueOpen}>
+                <span className={runningQueueCount ? "queue-capsule-dot running" : "queue-capsule-dot done"} aria-hidden="true" />
+                <span className="queue-capsule-label">队列</span>
+                <span className="queue-capsule-count">{queueJobs.length}</span>
+              </button>
+            </div>
+          )}
           {turns.length === 0 ? (
             <div className="empty-state">
               <Sparkles size={32} />
@@ -2284,7 +2973,7 @@ function App() {
             </div>
           ) : (
             turns.map((turn, turnIndex) => (
-              <article className="turn" key={turn.id}>
+              <article className="turn" id={`turn-${turn.id}`} key={turn.id}>
                 <div className="user-bubble">
                   <div className="bubble-meta">
                     {formatTime(turn.createdAt)} · {turn.mode === "chat" ? "聊天" : engineLabel(turn.engine)}
@@ -2344,9 +3033,13 @@ function App() {
                         {turn.mode === "chat"
                           ? turn.status === "running"
                             ? "正在聊天"
+                            : turn.status === "queued"
+                            ? "等待聊天"
                             : turn.status === "success"
                             ? "聊天已回复"
                             : "聊天失败"
+                          : turn.status === "queued"
+                          ? "排队中"
                           : turn.status === "running"
                           ? "正在生成"
                           : turn.status === "success"
@@ -2359,9 +3052,10 @@ function App() {
                         <span>#{turnIndex + 1}</span>
                       </div>
                     </div>
-                    {turn.status === "running" && (
+                    {(turn.status === "queued" || turn.status === "running") && (
                       <div className="loading-card">
-                        <Loader2 className="spin" size={20} /> {runningTurnMessage(turn, nowMs)}
+                        {turn.status === "queued" ? <Clock3 size={20} /> : <Loader2 className="spin" size={20} />}
+                        {turn.status === "queued" ? queuedTurnMessage(turn) : runningTurnMessage(turn, nowMs)}
                       </div>
                     )}
                     {turn.error && <div className="error-card">{turn.error}</div>}
@@ -2926,56 +3620,134 @@ function App() {
           <section className="drawer connection-drawer" role="dialog" aria-modal="true" aria-label="接口配置" tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>API 请求地址 + Key + 模型</p>
-                <h2>接口配置</h2>
+                <p>配置 Profile + API 请求地址 + Key + 模型</p>
+                <h2>多配置管理</h2>
               </div>
               <button type="button" onClick={() => setConnectionOpen(false)} aria-label="关闭接口配置" title="关闭"><X size={18} /></button>
             </div>
-            <div className="connection-fields">
-              {!hasCompleteConfig && (
-                <div className="config-warning" role="alert">
-                  <AlertCircle size={16} />
-                  <span>当前缺少 {activeConfigIssues.join("、")}，保存前请补全。</span>
-                </div>
-              )}
-              {activeEngine === "gpt-image-2" ? (
-                <>
-                  <Field label="API Key"><input type="password" placeholder="sk-..." value={gptForm.api_key} onChange={(event) => setGptForm({ ...gptForm, api_key: event.target.value })} /></Field>
-                  <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => setGptForm({ ...gptForm, base_url: event.target.value })} /></Field>
-                  <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
-                  <Field label="聊天模型">
-                    <div className="stacked-field">
-                      <select
-                        value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setGptForm({ ...gptForm, chat_model: value === "custom" ? gptForm.chat_model : value });
-                        }}
+            <div className="connection-layout">
+              <aside className="profile-list" aria-label="配置列表">
+                {activeEngineProfiles.map((profile) => {
+                  const selected = profile.id === activeProfileIds[activeEngine];
+                  const canDeleteProfile = activeEngineProfiles.length > 1;
+                  return (
+                    <div
+                      key={profile.id}
+                      className={selected ? "profile-row selected" : "profile-row"}
+                    >
+                      <button
+                        type="button"
+                        className={selected ? "profile-item selected" : "profile-item"}
+                        onClick={() => selectConfigProfile(profile)}
                       >
-                        <option value="gpt-5.5">gpt-5.5</option>
-                        <option value="gpt-5.4">gpt-5.4</option>
-                        <option value="gpt-5.2">gpt-5.2</option>
-                        <option value="custom">自定义</option>
-                      </select>
-                      <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} />
+                        <span>{profile.name}</span>
+                        <small>{profile.engine === "banana" ? "Banana Gemini" : "GPT Image 2"}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="profile-delete-button"
+                        onClick={() => deleteConfigProfile(profile)}
+                        disabled={!canDeleteProfile}
+                        aria-label={`删除配置 ${profile.name || "未命名配置"}`}
+                        title={canDeleteProfile ? "删除配置" : "至少保留一个配置"}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  </Field>
-                  <Field label="思考强度">
-                    <select value={gptForm.reasoning_effort} onChange={(event) => setGptForm({ ...gptForm, reasoning_effort: event.target.value })}>
-                      {gptReasoningOptions.map((item) => <option key={item} value={item}>{gptReasoningLabels[item]}</option>)}
-                    </select>
-                  </Field>
-                </>
-              ) : (
-                <>
-                  <Field label="API Key"><input type="password" placeholder="sk-..." value={bananaForm.api_key} onChange={(event) => setBananaForm({ ...bananaForm, api_key: event.target.value })} /></Field>
-                  <Field label="API 请求地址"><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => setBananaForm({ ...bananaForm, api_base_url: event.target.value })} /></Field>
-                  <Field label="模型名"><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => setBananaForm({ ...bananaForm, model_type: event.target.value })} /></Field>
-                </>
-              )}
+                  );
+                })}
+                <button type="button" className="profile-add-button" onClick={addConfigProfile}>
+                  <Plus size={15} />
+                  <span>新增配置</span>
+                </button>
+              </aside>
+              <div className="connection-fields">
+                {!hasCompleteConfig && (
+                  <div className="config-warning" role="alert">
+                    <AlertCircle size={16} />
+                    <span>当前缺少 {activeConfigIssues.join("、")}，保存前请补全。</span>
+                  </div>
+                )}
+                {diagnosticsResult && (
+                  <div className={diagnosticsResult.ok ? "diagnostics-panel ok" : "diagnostics-panel warning"}>
+                    <div className="diagnostics-panel-head">
+                      <strong>{diagnosticsResult.ok ? "连接诊断通过" : "连接诊断需要处理"}</strong>
+                      {diagnosticsResult.warning && <span>{diagnosticsResult.warning}</span>}
+                    </div>
+                    {diagnosticsResult.results.length > 0 && (
+                      <div className="diagnostics-grid">
+                        {diagnosticsResult.results.map((item) => (
+                          <div className={item.ok ? "diagnostics-card ok" : "diagnostics-card warning"} key={item.capability}>
+                            <div className="diagnostics-card-title">
+                              <strong>{item.capability === "generation" ? "生图" : "聊天"}</strong>
+                              <span>{item.ok ? "通过" : "失败"}</span>
+                            </div>
+                            <small>{item.model || "模型未返回"} · {item.latency_ms ?? 0}ms</small>
+                            {item.endpoint && <code>{item.endpoint}</code>}
+                            {item.error && <p>{item.error}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <Field label="配置名称"><input placeholder={activeProfileName} value={activeProfile?.name || ""} onChange={(event) => updateActiveProfileName(event.target.value)} /></Field>
+                {activeEngine === "gpt-image-2" ? (
+                  <>
+                    <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
+                      <div className="secret-input">
+                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={gptForm.api_key} onChange={(event) => setGptForm({ ...gptForm, api_key: event.target.value })} />
+                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
+                          {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </Field>
+                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => setGptForm({ ...gptForm, base_url: event.target.value })} /></Field>
+                    <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
+                    <Field label="聊天模型">
+                      <div className="stacked-field">
+                        <select
+                          value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setGptForm({ ...gptForm, chat_model: value === "custom" ? gptForm.chat_model : value });
+                          }}
+                        >
+                          <option value="gpt-5.5">gpt-5.5</option>
+                          <option value="gpt-5.4">gpt-5.4</option>
+                          <option value="gpt-5.2">gpt-5.2</option>
+                          <option value="custom">自定义</option>
+                        </select>
+                        <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} />
+                      </div>
+                    </Field>
+                    <Field label="思考强度">
+                      <select value={gptForm.reasoning_effort} onChange={(event) => setGptForm({ ...gptForm, reasoning_effort: event.target.value })}>
+                        {gptReasoningOptions.map((item) => <option key={item} value={item}>{gptReasoningLabels[item]}</option>)}
+                      </select>
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
+                      <div className="secret-input">
+                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={bananaForm.api_key} onChange={(event) => setBananaForm({ ...bananaForm, api_key: event.target.value })} />
+                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
+                          {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </Field>
+                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => setBananaForm({ ...bananaForm, api_base_url: event.target.value })} /></Field>
+                    <Field label="模型名"><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => setBananaForm({ ...bananaForm, model_type: event.target.value })} /></Field>
+                  </>
+                )}
+              </div>
             </div>
             <div className="drawer-actions">
               <button type="button" onClick={() => void loadDefaults()}>读取默认值</button>
+              <button type="button" onClick={() => void runDiagnostics()} disabled={diagnosticsRunning || !hasCompleteConfig}>
+                {diagnosticsRunning ? "测试中..." : "测试连接"}
+              </button>
               <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
               <button type="button" onClick={() => setConnectionOpen(false)}>关闭</button>
             </div>
@@ -3093,11 +3865,37 @@ function App() {
             <div>
               <strong>{previewImage.name}</strong>
               <span>
+                <a href={previewImage.src} download={previewImage.name} title="下载图片"><Download size={18} /></a>
                 <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title="作为参考图"><ImagePlus size={18} /></button>
                 <button type="button" onClick={closePreviewImage} aria-label="关闭预览" title="关闭预览"><X size={18} /></button>
               </span>
             </div>
-            <img src={previewImage.src} alt={previewImage.name} />
+            <div
+              className={`lightbox-stage${previewZoom > 1 ? " is-zoomed" : ""}${previewDragging ? " is-dragging" : ""}`}
+              onWheel={handlePreviewWheel}
+              onPointerDown={startPreviewPan}
+              onPointerMove={movePreviewPan}
+              onPointerUp={endPreviewPan}
+              onPointerCancel={endPreviewPan}
+              onMouseDown={startPreviewMousePan}
+              onDoubleClick={resetPreviewCanvas}
+            >
+              <div className="lightbox-zoom-tools" aria-label="图片缩放控制">
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label="缩小图片" title="缩小图片"><ZoomOut size={18} /></button>
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label="放大图片" title="放大图片"><ZoomIn size={18} /></button>
+                <button type="button" onClick={resetPreviewCanvas} title="适配窗口">适配</button>
+                <button type="button" onClick={() => setPreviewZoomLevel(1)} title="原始大小">100%</button>
+              </div>
+              <img
+                src={previewImage.src}
+                alt={previewImage.name}
+                style={{
+                  "--preview-zoom": previewZoom,
+                  "--preview-pan-x": `${previewPan.x}px`,
+                  "--preview-pan-y": `${previewPan.y}px`,
+                } as CSSProperties}
+              />
+            </div>
           </div>
         </div>
       )}

@@ -1,20 +1,61 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-05-15 00:00 +08:00
-- Phase: v1.0.2 Released / Next Version Planning
-- Branch: main
+- Last Updated: 2026-05-26 21:12 +08:00
+- Phase: v1.0.3 Implementation - Profiles and Queue Entry
+- Branch: codex/v1.0.3
 - Goal: Keep the Studio image tool shareable as the new `NM_web_imagen` line while preserving the old `web_imagen_tool` folder and zip for coexistence.
-- Current Focus: Keep v1.0.2 stable as released; defer the latest review findings to the next version planning round.
+- Current Focus: Implement v1.0.3 without breaking v1.0.2 installs: legacy `config.local.json` is wrapped into default profiles, saved configs still include legacy `forms`, the header config entry now shows the profile/URL short name, multi-config management supports guarded delete and separate generation/chat diagnostics, generation uses a smoked-glass queue capsule and resizable materialized queue popover with cancel/retry/apply/remove controls, completed queue items expose clickable thumbnails/downloads and a jump-to-turn action, image previews include download plus canvas-style zoom/pan controls, queue metadata persists in browser storage, and the latest review pass hardened queue/session references, diagnostics redaction, profile switching, startup process matching, and built asset readiness.
 
 ## Resume Here
-- Start with: `git status --short --branch`
-- Current release tag: `v1.0.2` at `b15b3ab`.
+- Start with: `git status --short --branch` on `codex/v1.0.3`.
+- Current release tag: `v1.0.2` at `17f79c2`.
 - Sync target after local commits: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
 - Current-project rule: after every update, sync a clean copy to the G: target above, but do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`.
 
+## v1.0.3 Planning Draft
+- Confirmed scope:
+  - Multi-config profiles: allow saving multiple API/model configurations, likely grouped by engine/provider, with quick switching and a clear active profile.
+  - Generation queue: generation tasks should run as jobs so the whole composer/workbench does not stay in a single blocking spinner state.
+  - Non-blocking session use: while one image job is running, users should be able to switch conversations, chat, edit prompts, or submit another generation without corrupting the running job.
+  - Minimal diagnostics: provide a connection check that can test image generation and chat capability separately, with clear warnings when one side fails.
+  - Light UI polish: keep for a later pass after the workflow architecture is stable.
+- Candidate additions:
+  - Job controls for queued/running/completed items: cancel, retry, duplicate/apply parameters, and clear completed.
+  - Queue persistence policy: decide whether pending/running/completed job metadata survives refresh; generated images should still remain in `outputs/`.
+  - Per-session reference ownership: revisit whether unsubmitted reference images should become session-scoped before queue work lands.
+  - Diagnostics detail: show endpoint, model, latency, and sanitized error text; never expose API keys in UI logs or exported diagnostics.
+  - Current config entry display: show a custom profile name when available; otherwise derive a short name from the API URL by removing protocol, common paths, and common domain suffixes. Make the entry visually read as clickable/editable because it opens configuration editing and later profile switching.
+  - About/version surface: show app version/build info and quick copyable diagnostics for another computer.
+  - Release preflight script: one command to verify version, build assets, cache-busting, package exclusions, zip hash, and G: sync readiness.
+- Suggested implementation order:
+  - Start with data model decisions: config profile schema, job queue schema, and session/job boundaries.
+  - Then implement backend contracts for config profiles and diagnostics.
+  - Then split generation submission into job lifecycle state in the frontend.
+  - Finally add UI polish once queue and diagnostics behavior is proven.
+
 ## Progress Summary
+- [x] Created branch `codex/v1.0.3` from the current worktree and kept existing v1.0.2 hotfix/ledger work in place.
+- [x] Bumped `VERSION` to `1.0.3` so startup cache-busting separates this branch from v1.0.2.
+- [x] Added config profile compatibility: old v1.0.2 `forms` become default profiles, default names derive from URL short names, and saves still write legacy `forms` for v1.0.2 compatibility.
+- [x] Updated the header config entry to display `配置 · <profile/url short name>` with edit/dropdown affordance and removed the redundant `配置已完成` status chip.
+- [x] Converted the connection drawer into an initial multi-config management view with a profile list, editable profile name, and API Key eye toggle that defaults to hidden on every open.
+- [x] Added an initial non-blocking generation queue capsule inside the chat area; it expands into an overlay queue list without adding a right sidebar or pushing conversation layout.
+- [x] Tightened the queue overlay density, added completed-job thumbnails as clickable preview targets, added per-job download links, and added download plus wheel-zoom/drag-pan controls to the global image preview lightbox. The zoom toolbar now lives inside the canvas bottom-right, while the top-right header stays for simple file actions.
+- [x] Added the missing multi-config creation entry in the left config list and made queue job text clickable so it jumps back to the corresponding conversation turn.
+- [x] Added guarded profile deletion in the multi-config list: the current engine must keep at least one profile, and deleting the active profile switches to another same-engine profile before saving back to `config.local.json`.
+- [x] Added separate generation/chat diagnostics at `/api/diagnostics`, surfaced a `测试连接` action in the config drawer, and extended `start_web.ps1` so stale backends missing required API routes are restarted instead of reused.
+- [x] Added queue row controls: running tasks can be canceled, completed/failed/canceled tasks can be retried, all tasks can apply their prompt back to the session composer or be removed from the queue.
+- [x] Added browser-local queue persistence: success/error/canceled jobs survive refresh, while queued/running jobs restore as canceled with `页面刷新，任务已中断`; fixed array localStorage loading so queue arrays are not coerced into objects.
+- [x] Replaced the queue row generic title `生成图片` with a compact prompt-derived title, falling back to `未命名任务` only when a job has no prompt.
+- [x] Restyled the floating queue capsule from the heavy black pill to a compact smoky gray translucent glass pill with a small status dot, no dropdown arrow, and a subtle breathing animation only while queued/running tasks exist.
+- [x] Added a shared smoked-glass material pass for the queue system: capsule inner highlight, queue popover glass gradient/top sheen, separated task cards, and row status strips for running/success/error states.
+- [x] Reduced the queue popover default width by about 15% to `366px` and added a lower-left drag handle for resizing width and height.
+- [x] Audited local runtime, frontend assets, G: sync folder, and both NM zip packages with subagents plus direct smoke checks.
+- [x] Fixed the stale-backend white-screen path: `start_web.ps1` now probes current Studio JS/CSS assets before reusing an existing healthy server, and restarts a recognizable stale `app.py` process if assets fail.
+- [x] Added release-cache tests covering startup asset probing and stale-backend restart logic.
+- [x] Rebuilt the Studio frontend, regenerated `NM_web_imagen-v1.0.2.zip`, copied it to `NM_web_imagen.zip`, and synced package files to the G: `NM_web_imagen/` folder without deleting local runtime/config/output artifacts.
 - [x] Implemented the React/Vite Studio frontend in `studio-web/`, built to `static/studio/`, and kept `/classic` as the rollback path for the old static UI.
 - [x] Added real chat endpoints and frontend chat turns for GPT Image 2 / Banana flows.
 - [x] Added user-turn action buttons for regenerate, copy prompt, and copy reference images.
@@ -53,6 +94,59 @@
 - [x] Patched v1.0.2 for upstream UTF-8 JSON charset mismatch so Chinese chat replies no longer render as mojibake.
 
 ## Verification
+- Latest v1.0.3 profile/queue slice verification:
+  - Baseline before edits: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Baseline before edits: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 25 tests.
+  - Baseline before edits: `node --test .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 19 tests.
+  - Baseline before edits: `npm run build` from `studio-web`: passed.
+  - New profile tests were written red first, then passed: legacy `forms` wrap into profiles, saved profile config keeps legacy `forms`.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 27 tests.
+  - `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 22 tests.
+  - `npm run build` from `studio-web`: passed; current assets are `index-CrF-zptf.js` and `index-2gA9ys33.css`, with v1.0.2 fallback assets preserved.
+  - Browser smoke on `http://127.0.0.1:7861/?v=1.0.3-smoke`: no white screen; header only shows the config button, no redundant `配置已完成` chip; multi-config drawer opens; API Key input is `type=password`; eye button has no border/background; queue capsule and overlay render in the chat area.
+  - 2026-05-26 queue/preview polish: `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 8 tests.
+  - 2026-05-26 queue/preview polish: `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 24 tests.
+  - 2026-05-26 queue/preview polish: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - 2026-05-26 queue/preview polish: `npm run build` from `studio-web`: passed; current generated assets are `index-pyyH3H60.js` and `index-BnuKZBhe.css`.
+  - 2026-05-26 queue/preview polish: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 27 tests.
+  - 2026-05-26 queue/preview polish: browser smoke on `http://127.0.0.1:7861/?v=1.0.3-smoke` with mocked generation response confirmed queue popover width 430px, title 18px, thumbnail 44x44, thumbnail opens the lightbox, and the lightbox has download, zoom in/out, fit, 100%, and `.lightbox-stage` cursor `zoom-in`.
+  - 2026-05-26 queue/preview polish: `git diff --check`: passed with only expected LF/CRLF warnings.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 9 tests.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 25 tests.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: `npm run build` from `studio-web`: passed; current generated assets are `index-DDhUWlv8.js` and `index-jU3LE9wH.css`.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 27 tests.
+  - 2026-05-26 15:12 zoom/pan and toolbar placement polish: browser smoke on `http://127.0.0.1:7861/?v=1.0.3-zoomtools-bottom` confirmed the preview header has no zoom controls, `.lightbox-zoom-tools` is inside `.lightbox-stage`, and it sits 14px from the canvas right/bottom edge.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 10 tests.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 26 tests.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: `npm run build` from `studio-web`: passed; current generated assets are `index-kSsxhjdu.js` and `index-BhdFRWPJ.css`.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 27 tests.
+  - 2026-05-26 15:18 add-profile and queue-jump polish: browser smoke on `http://127.0.0.1:7861/?v=1.0.3-add-profile-jump` confirmed `新增配置` appears in the left profile list, clicking it creates/selects `新配置 2`, and clicking the queue job text closes the queue popover and scrolls to a `turn-*` element.
+  - `git diff --check`: passed with only expected LF/CRLF warnings.
+  - 2026-05-26 15:35 delete-profile polish: `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 11 tests.
+  - 2026-05-26 15:35 delete-profile polish: `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 27 tests.
+  - 2026-05-26 15:35 delete-profile polish: `npm run build` from `studio-web`: passed; current generated assets are `index-VlInpUeL.js` and `index-BZ2WVYkL.css`.
+  - 2026-05-26 15:35 delete-profile polish: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - 2026-05-26 15:35 delete-profile polish: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 27 tests.
+  - 2026-05-26 15:35 delete-profile polish: browser smoke on `http://127.0.0.1:7861/?v=1.0.3-delete-profile` confirmed only-profile delete is disabled, adding a second profile enables delete, deleting the active second profile confirms then switches back to the remaining same-engine profile, and the remaining delete button becomes disabled again.
+  - 2026-05-26 17:02 diagnostics and queue controls: red tests first reproduced missing `/api/diagnostics`, missing frontend diagnostics UI, missing queue action controls, and missing startup required-route probing.
+  - 2026-05-26 17:02 diagnostics and queue controls: `node --test .\src\configProfiles.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 29 tests.
+  - 2026-05-26 17:02 diagnostics and queue controls: `npm run build` from `studio-web`: passed; current generated assets are `index-4bwlxH7e.js` and `index-CZQ5CDIH.css`.
+  - 2026-05-26 17:02 diagnostics and queue controls: `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - 2026-05-26 17:02 diagnostics and queue controls: `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 29 tests.
+  - 2026-05-26 17:02 diagnostics and queue controls: browser smoke on `http://127.0.0.1:7861/?v=1.0.3-diagnostics` confirmed mocked partial diagnostics render `生图可用，聊天失败` with separate cards and redacted error; `http://127.0.0.1:7861/?v=1.0.3-queue-actions` confirmed queue rows expose cancel/retry/apply/remove actions without a live upstream request.
+- Latest package/white-screen audit verification:
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 25 tests.
+  - `node --test .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 19 tests.
+  - `npm run test:size` from `studio-web`: passed.
+  - `npm run build` from `studio-web`: passed; current assets remain `index-DjJyEBb1.js` and `index-D6wyuxyS.css`.
+  - `git diff --check`: passed with only expected LF/CRLF warnings.
+  - `package_web_tool.ps1 -OutputPath <temp zip>`: passed; extracted package had no excluded local artifacts and included startup asset probe logic.
+  - Extracted temp package server smoke on port `7866`: `/api/health` passed; root page assets `/assets/index-DjJyEBb1.js` and `/assets/index-D6wyuxyS.css` returned 200.
+  - G: `NM_web_imagen.zip` and `NM_web_imagen-v1.0.2.zip` were regenerated to identical current packages; both extracted zip smoke checks returned 200 for root page JS/CSS assets.
+  - G: folder now has the updated `start_web.ps1` asset probe and matching `./assets` references, but local artifacts still exist there: `config.local.json`, `outputs/`, `.runtime/`, and `__pycache__/`.
 - Latest session-draft verification:
   - `node --test .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs` from `studio-web`: passed, 8 tests.
   - `npm run build` from `studio-web`: passed; updated assets `static/studio/assets/index-Dp26rfuO.js` and `static/studio/assets/index-acPErJzx.css`.
@@ -120,6 +214,123 @@
   - G: final artifact scan found no `config.local.json`, `outputs/`, `logs/`, `.runtime`, `.venv`, `.playwright-mcp`, `.git`, `.svn`, `__pycache__`, `node_modules`, or `tsconfig.tsbuildinfo`.
   - `NM_web_imagen.zip` root is `NM_web_imagen/`, has no excluded local artifacts, and was updated at `2026-05-12 19:43:50`.
   - Old `web_imagen_tool.zip` remained unchanged at 14,889,614 bytes with timestamp `2026-05-11 15:20:57`.
+- Latest v1.0.3 queue-persistence verification:
+  - `node --test .\src\queuePersistence.test.mjs .\src\uiPolish.test.mjs` from `studio-web`: passed, 17 tests.
+  - `npm run build` from `studio-web`: passed; current built JS asset includes `static/studio/assets/index-Bnaal4ny.js`.
+  - Browser smoke on `http://127.0.0.1:7861/?v=1.0.3-persist-fix2`: a stored `running` queue job restored after refresh as `canceled`, the queue capsule appeared, and the opened row showed `已取消`.
+  - Browser non-blocking smoke with mocked `/api/generate/gpt-image-2`: two generation submissions completed without calling the paid upstream; while the first was running, buttons and textarea were not disabled, and the queue stored two success jobs.
+  - `node --test .\src\configProfiles.test.mjs .\src\queuePersistence.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 33 tests.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 29 tests.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+- Latest v1.0.3 queue-title verification:
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built JS asset includes `static/studio/assets/index-DsWxa4Ga.js`.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 queue-capsule polish verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed on the old black capsule CSS before implementation.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-CND6kz-v.js` and `static/studio/assets/index-C8CWA69z.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser style smoke on `http://127.0.0.1:7861/?v=1.0.3-glass-queue`: queue capsule appeared with text `队列1`, `rgba(255, 255, 255, 0.78)` background, `32px` min-height, `999px` radius, and no SVG arrow inside the capsule.
+- Latest v1.0.3 dark queue-capsule verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed on the previous white-glass capsule CSS before implementation.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index--ehayZV1.js` and `static/studio/assets/index-ThWX4dcl.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser active-state smoke with mocked slow `/api/generate/gpt-image-2`: queue capsule appeared as `queue-capsule active`, text `队列1`, background `rgba(31, 34, 39, 0.76)`, capsule animation `queue-capsule-breathe` for `2.4s`, and running dot animation `queue-dot-pulse`.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 smoky queue-capsule verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed on the prior darker `rgba(31, 34, 39, 0.76)` capsule before implementation.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-BIih_HXH.js` and `static/studio/assets/index-B4mRJfVk.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser active-state smoke with mocked slow `/api/generate/gpt-image-2`: queue capsule appeared as `queue-capsule active`, text `队列1`, background `rgba(72, 76, 84, 0.54)`, backdrop filter `blur(20px) saturate(1.35)`, white text, and active animation `queue-capsule-breathe`.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 queue material verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed because `.queue-capsule::before` and the materialized popover/row CSS did not exist.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-BjlyMQtK.js` and `static/studio/assets/index-DKqCSWDn.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser queue-menu material smoke on `http://127.0.0.1:7861/?v=1.0.3-queue-material`: capsule has inner highlight gradient, popover has glass gradient and `blur(22px) saturate(1.18)`, popover top highlight is `58px`, task rows have `rgba(255,255,255,0.66)` surface, `14px` radius, and `3px` status strip.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 queue resize verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed because `QUEUE_POPOVER_DEFAULT_WIDTH = 366`, resize state, CSS variables, and resize handle did not exist.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-DgRX9Vlo.js` and `static/studio/assets/index-CXJMWb_n.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser resize smoke on `http://127.0.0.1:7861/?v=1.0.3-queue-resize`: default popover measured `366x310`, resize handle existed, and dragging left/down changed it to `446x390`.
+- Latest v1.0.3 queue resize correction verification:
+  - Root cause: the first resize implementation made `.queue-popover` itself the scrolling layer (`overflow:auto`), so the resize handle/content felt mixed with individual queue rows instead of resizing a stable outer window.
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed because `.queue-popover` did not use `grid-template-rows: auto minmax(0, 1fr)` + `overflow:hidden`, and `.queue-list` did not own the scrolling.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-lQYoW3VM.js` and `static/studio/assets/index-COgj2vDB.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser resize smoke on `http://127.0.0.1:7861/?v=1.0.3-queue-resize-fix`: outer `.queue-popover` changed from `366x310` to `456x400`, outer overflow stayed `hidden`, and inner `.queue-list` stayed `overflow:auto`.
+- Latest v1.0.3 single-row queue stretch verification:
+  - Root cause: the queue list is a CSS grid; with a single auto row inside a fixed-height list area, the row stretched to fill the remaining track height unless the list explicitly aligned content to the start.
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed because `.queue-list` lacked `align-content:start` and `grid-auto-rows:max-content`.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-Dwns7EYr.js` and `static/studio/assets/index-vCyicaSU.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser single-row smoke on `http://127.0.0.1:7861/?v=1.0.3-queue-single-row-fix`: popover height was `310`, list height was `218`, but the single row height was `73`; `.queue-list` reported `align-content:start`, `grid-auto-rows:max-content`, and `overflow:auto`.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 queue compact-text verification:
+  - TDD red check: `node --test .\src\uiPolish.test.mjs` first failed because queue rows still rendered repeated status text and elapsed seconds in the right-side status column.
+  - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 15 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-DhVum5vy.js` and `static/studio/assets/index-CdRuknBN.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - Browser compact-text smoke on `http://127.0.0.1:7861/?v=1.0.3-queue-compact-text-fix`: row text no longer contained `失败/已完成/生成中/排队中/已取消`; elapsed seconds moved into the meta line as `test / gpt-image-2 · 2 秒`; title box ended before the action buttons.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 subagent review hardening:
+  - Subagent review found queue/session orphan risks, refresh state mismatch, diagnostics endpoint redaction leakage, loose stale-process matching, unsaved profile edits lost on switch, and untracked current hash assets.
+  - Added queue/session boundary helpers so running/queued jobs block session deletion/clear, refresh-interrupted queue jobs mark matching running turns as errored, missing queue targets no longer pretend to jump, retries avoid deleted session ids, and apply falls back to the current session with a notice.
+  - Added `syncActiveProfileForm` so switching profiles preserves unsaved edits into the previous active profile before loading the next one.
+  - Redacted diagnostics endpoints for URL userinfo and sensitive query params, and tightened `start_web.ps1` to recognize only this repository's resolved `app.py` path.
+  - `node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`: passed, 37 tests.
+  - `npm run build` from `studio-web`: passed; current built assets include `static/studio/assets/index-CsE45KWn.js` and `static/studio/assets/index-CdRuknBN.css`.
+  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`: passed.
+  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`: passed, 30 tests.
+  - Browser smoke on `http://127.0.0.1:7861/?v=1.0.3-review-fix`: page title `生图工作台`, root rendered, script `assets/index-CsE45KWn.js`, stylesheet `assets/index-CdRuknBN.css`, no new console errors.
+  - `git diff --check`: no whitespace errors; only expected LF/CRLF warnings.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`: passed, 0 fail / 0 warn.
+- Latest v1.0.3 sync/package verification:
+  - Added `sync_release_to_g.ps1`; sync strategy is to build a clean package, extract it to a temporary source folder, mirror only that clean folder to the G: `NM_web_imagen/` directory, and update only the versioned package zip.
+  - Fixed the sync script for Windows PowerShell 5.1 Chinese path handling by constructing the default G: path from Unicode code points; removed the accidental mojibake `G:\su\doc\Tools\AI浜у嚭宸ュ叿鎻掍欢` folder created by the first run.
+  - User clarified that unversioned `NM_web_imagen.zip` should no longer be synced; the script now only writes `NM_web_imagen-v1.0.3.zip` locally and in the G: share root.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\sync_release_to_g.ps1`: passed and updated `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` plus `NM_web_imagen-v1.0.3.zip`.
+  - G: clean folder scan found no `config.local.json`, `outputs`, `logs`, `.runtime`, `.venv`, `.playwright-mcp`, `__pycache__`, `studio-web\node_modules`, `studio-web\tsconfig.tsbuildinfo`, or internal ledger files.
+  - G: Studio index points to `assets/index-CsE45KWn.js` and `assets/index-CdRuknBN.css`.
+  - G: copy `$env:PYTHONUTF8='1'; python -m py_compile ...\NM_web_imagen\app.py`: passed; verification-created `__pycache__` was removed afterward.
+  - Local and G: `NM_web_imagen-v1.0.3.zip` contain `sync_release_to_g.ps1`, `index-CsE45KWn.js`, and `index-CdRuknBN.css`, and contain no `config.local.json`, `outputs`, `.runtime`, or internal ledger files.
+  - G: `web_imagen_tool.zip` remained unchanged at timestamp `2026/5/11 15:20:57`; existing unversioned `NM_web_imagen.zip` was not updated by the corrected sync run and is left for the user to delete later.
+- Latest v1.0.3 one-click release verification:
+  - Added `release_preflight.ps1`, `release_one_click.ps1`, and `一键发布.bat`.
+  - `release_one_click.ps1` runs frontend tests, frontend build, backend compile/tests, package sync, then release preflight. `一键发布.bat` launches that script for double-click use.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\release_preflight.ps1`: passed.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\release_one_click.ps1`: passed; frontend tests 37/37, `npm run build` passed, backend/release tests 34/34, package sync passed, final preflight passed.
+  - G: `NM_web_imagen-v1.0.3.zip` updated at `2026/5/26 21:11:13`; G: unversioned `NM_web_imagen.zip` remained at `2026/5/26 20:50:54`; `web_imagen_tool.zip` remained at `2026/5/11 15:20:57`.
+  - G: clean folder includes the one-click scripts and still has no `config.local.json`, `outputs`, `.runtime`, or `__pycache__`.
+- Latest v1.0.3 serialized queue fix:
+  - Root cause: the queue UI was a concurrent task list; each generate submit immediately called `/api/generate/...`, so the second task could sit in an upstream request instead of waiting behind the first.
+  - Evidence from `outputs/studio_sessions.json`: session `猫狗大战` had `猫狗大战` success after about 70.61s and `猪狗大战` error after about 505.27s with `GPT Image 2 请求超时：上游接口长时间没有返回。`
+  - Added a tested queue scheduler so only one generation job runs at a time; submissions enter `queued`, the oldest queued job starts only when no job is `running`, and queued turns now show `排队中，等待前面的生图任务完成`.
+  - Updated refresh reconciliation so both queued and running turns are marked interrupted after reload, preserving the existing “HTTP requests do not survive refresh” decision.
+  - Subagent review found two queue hardening issues: trimming the visible queue to 30 could drop the running job and allow a second request, and removing active queued/running jobs could leave a stuck conversation turn.
+  - Fixed both: queue trimming now preserves active jobs before finished history, and active job remove now delegates to cancellation so the queue item, payload ref, abort controller, and turn state stay consistent.
+  - Verification: `node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web` passed, 42 tests; `npm run build` passed and generated `static/studio/assets/index-DtiPs6UC.js`; `$env:PYTHONUTF8='1'; python -m py_compile .\app.py` passed; backend unittest suite passed, 34 tests; ledger check passed; `git diff --check` passed with only expected LF/CRLF warnings.
+  - Re-ran one-click release after the fix: `powershell -NoProfile -ExecutionPolicy Bypass -File .\release_one_click.ps1` passed; frontend release tests 37/37, build passed with `index-DtiPs6UC.js`, backend tests 34/34, sync updated the clean G: folder and `NM_web_imagen-v1.0.3.zip`, release preflight passed.
+- Latest v1.0.3 multi-image fallback fix:
+  - Root cause evidence: latest `outputs/history.json` entry for `人狗大战` had `form_state.n = 2` and `meta.n = 2`, proving the frontend and backend sent the requested count, but `meta.image_count = 1` / `saved_count = 1`, proving the current GPT gateway returned only one image.
+  - Added backend compensation for `/v1/images/generations` and `/v1/images/edits`: if `n > 1` and the upstream returns fewer images than requested, issue follow-up request(s) for the remaining count and aggregate returned images/usage.
+  - Verification: targeted regression `test_gpt_generation_retries_remaining_images_when_upstream_returns_fewer_than_requested` failed before the fix and passed after; `$env:PYTHONUTF8='1'; python -m py_compile .\app.py` passed; backend/release tests passed, 35 tests; release one-click passed on 2026-05-27 00:23 +08:00, with frontend tests 37/37, build passed, sync updated G: clean folder and `NM_web_imagen-v1.0.3.zip`, and release preflight passed.
+  - After the user confirmed the local restarted service could produce the requested multi-image result, re-ran `release_one_click.ps1` on 2026-05-27 01:27 +08:00; frontend tests 37/37, frontend build, backend tests 35/35, clean G: sync, versioned package update, and release preflight all passed.
 
 ## Blockers And Risks
 - `AGENTS.md` still contains older project snapshot wording, but it explicitly says not to edit that file unless the user asks.

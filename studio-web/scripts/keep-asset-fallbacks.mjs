@@ -3,10 +3,22 @@ import path from "node:path";
 
 const studioDir = path.resolve("..", "static", "studio");
 const assetsDir = path.join(studioDir, "assets");
-const indexHtml = fs.readFileSync(path.join(studioDir, "index.html"), "utf8");
+const indexPath = path.join(studioDir, "index.html");
+let indexHtml = fs.readFileSync(indexPath, "utf8");
 
-const jsAsset = indexHtml.match(/\/static\/studio\/assets\/([^"]+\.js)"/)?.[1];
-const cssAsset = indexHtml.match(/\/static\/studio\/assets\/([^"]+\.css)"/)?.[1];
+const fileOpenableIndexHtml = indexHtml.replace(
+  /<script\s+type="module"\s+crossorigin\s+src="(\.\/assets\/[^"]+\.js)"><\/script>/,
+  '<script defer src="$1"></script>',
+);
+if (fileOpenableIndexHtml !== indexHtml) {
+  fs.writeFileSync(indexPath, fileOpenableIndexHtml, "utf8");
+  indexHtml = fileOpenableIndexHtml;
+}
+
+const assetRefs = [...indexHtml.matchAll(/(?:src|href)="(?:\.\/|\/static\/studio\/)?assets\/([^"]+\.(?:js|css))"/g)]
+  .map((match) => match[1]);
+const jsAsset = assetRefs.find((asset) => asset.endsWith(".js"));
+const cssAsset = assetRefs.find((asset) => asset.endsWith(".css"));
 
 if (!jsAsset || !cssAsset) {
   throw new Error("Could not find studio JS/CSS assets in static/studio/index.html");
@@ -15,6 +27,8 @@ if (!jsAsset || !cssAsset) {
 const fallbacks = [
   { source: cssAsset, fallback: "index-8pzV_2va.css" },
   { source: jsAsset, fallback: "index-BiyMHVvw.js" },
+  { source: cssAsset, fallback: "index-D6wyuxyS.css" },
+  { source: jsAsset, fallback: "index-DjJyEBb1.js" },
 ];
 
 for (const { source, fallback } of fallbacks) {
