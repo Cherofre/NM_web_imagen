@@ -1010,6 +1010,7 @@ button.primary-action:focus-visible,
 }
 
 .queue-job-thumb {
+  position: relative;
   display: block;
   width: 44px;
   height: 44px;
@@ -1020,10 +1021,31 @@ button.primary-action:focus-visible,
   background: #f8fafc;
 }
 
+.queue-job-thumb.multi {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: rgba(15, 23, 42, 0.1);
+}
+
 .queue-job-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.queue-job-thumb-count {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.78);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.3;
 }
 
 .queue-job-main-button {
@@ -1578,6 +1600,28 @@ button.primary-action:focus-visible,
 .composer-toolbar button.active {
   border-color: rgba(17, 17, 17, 0.22);
   background: #111;
+  color: #fff;
+}
+
+.composer-toolbar button.count-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 74px;
+  font-weight: 850;
+}
+
+.composer-toolbar button.count-trigger-alert {
+  border-color: rgba(17, 17, 17, 0.32);
+  background: #111;
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
+}
+
+.composer-toolbar button.count-trigger-alert:hover,
+.composer-toolbar button.count-trigger-alert:focus-visible {
+  background: #1f1f1f;
   color: #fff;
 }
 
@@ -2220,12 +2264,17 @@ button.primary-action:focus-visible,
 
 .connection-drawer,
 .rename-drawer,
-.reference-switch-drawer {
+.reference-switch-drawer,
+.multi-image-confirm-drawer {
   grid-template-rows: auto minmax(0, auto) auto;
 }
 
 .connection-drawer {
   width: min(780px, calc(100vw - 36px));
+}
+
+.multi-image-confirm-drawer {
+  max-width: 420px;
 }
 
 .prompt-editor-drawer {
@@ -2532,6 +2581,22 @@ button.primary-action:focus-visible,
 .diagnostics-card p {
   margin: 0;
   color: #991b1b;
+}
+
+.multi-image-confirm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 100%;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.multi-image-confirm-check input {
+  width: 16px;
+  height: 16px;
 }
 
 .drawer-head {
@@ -2954,6 +3019,29 @@ button.primary-action:focus-visible,
   background: rgba(17, 17, 17, 0.72);
   box-shadow: 0 16px 36px -24px rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(14px);
+}
+
+.lightbox-gallery-button {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 42px;
+  height: 56px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.72);
+  box-shadow: 0 16px 36px -24px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(14px);
+}
+
+.lightbox-gallery-button.previous {
+  left: 14px;
+}
+
+.lightbox-gallery-button.next {
+  right: 14px;
 }
 
 .lightbox-stage img {

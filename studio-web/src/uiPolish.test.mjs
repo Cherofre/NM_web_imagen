@@ -126,7 +126,7 @@ test("queue entry floats as a glass capsule without pushing conversation layout"
   assert.doesNotMatch(appSource, /job\.status === "running" \? "生成中"/);
   assert.doesNotMatch(appSource, /job\.status === "error" \? "失败"/);
   assert.doesNotMatch(appSource, /<small>\{Math\.round\(job\.elapsedSeconds\)\} 秒<\/small>/);
-  assert.match(appSource, /className="queue-job-thumb"/);
+  assert.match(appSource, /className=\{jobImages\.length > 1 \? "queue-job-thumb multi" : "queue-job-thumb"\}/);
   assert.match(appSource, /className="queue-job-main-button"/);
   assert.match(appSource, /onClick=\{\(\) => jumpToQueueJob\(job\)\}/);
   assert.match(appSource, /className="queue-capsule-label">队列/);
@@ -151,6 +151,31 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(cssBlock(".queue-job-actions button"), /width:\s*26px;[\s\S]*height:\s*26px;/);
 });
 
+test("queue rows show multi-image results as a thumbnail collage", () => {
+  assert.match(appSource, /type PreviewImage = \{[\s\S]*gallery\?: PreviewImage\[\];[\s\S]*galleryIndex\?: number;/);
+  assert.match(appSource, /function openPreviewImages\(images: GeneratedImage\[\], index = 0\)/);
+  assert.match(appSource, /function shiftPreviewImage\(direction: -1 \| 1\)/);
+  assert.match(appSource, /const jobImages = job\.images \|\| \[\];/);
+  assert.match(appSource, /const previewImages = jobImages\.slice\(0, 4\);/);
+  assert.match(appSource, /className=\{jobImages\.length > 1 \? "queue-job-thumb multi" : "queue-job-thumb"\}/);
+  assert.match(appSource, /onClick=\{\(\) => openPreviewImages\(jobImages\)\}/);
+  assert.match(appSource, /previewImages\.map\(\(image, index\) =>/);
+  assert.match(appSource, /jobImages\.length > 1 && <span className="queue-job-thumb-count">\{jobImages\.length\} 张<\/span>/);
+  assert.match(appSource, /previewImage\.gallery && previewImage\.gallery\.length > 1/);
+  assert.match(appSource, /function handlePreviewKeyDown\(event: KeyboardEvent<HTMLDivElement>\)/);
+  assert.match(appSource, /window\.addEventListener\("keydown", onPreviewKeyDown\)/);
+  assert.match(appSource, /event\.key === "ArrowLeft"[\s\S]*shiftPreviewImage\(-1\)/);
+  assert.match(appSource, /event\.key === "ArrowRight"[\s\S]*shiftPreviewImage\(1\)/);
+  assert.match(appSource, /onKeyDown=\{handlePreviewKeyDown\}/);
+  assert.match(appSource, /aria-label="上一张图片"/);
+  assert.match(appSource, /aria-label="下一张图片"/);
+  assert.match(cssBlock(".queue-job-thumb.multi"), /display:\s*grid;[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(cssBlock(".queue-job-thumb-count"), /position:\s*absolute;[\s\S]*right:\s*3px;[\s\S]*bottom:\s*3px;/);
+  assert.match(cssBlock(".lightbox-gallery-button"), /position:\s*absolute;[\s\S]*top:\s*50%;[\s\S]*transform:\s*translateY\(-50%\);/);
+  assert.match(cssBlock(".lightbox-gallery-button.previous"), /left:\s*14px;/);
+  assert.match(cssBlock(".lightbox-gallery-button.next"), /right:\s*14px;/);
+});
+
 test("queue jobs persist in browser storage across refreshes", () => {
   assert.match(appSource, /queueStorageKey/);
   assert.match(appSource, /if \(Array\.isArray\(fallback\)\) \{/);
@@ -162,7 +187,7 @@ test("queue jobs persist in browser storage across refreshes", () => {
 
 test("generation queue does not block additional generation submissions", () => {
   const chatBranchStart = appSource.indexOf('if (currentMode === "chat")');
-  const generateBranchStart = appSource.indexOf('if (currentConfigIssues.length > 0)', chatBranchStart);
+  const generateBranchStart = appSource.indexOf("let submitGptForm = currentGptForm", chatBranchStart);
   const submitEnd = appSource.indexOf("async function openOutputs", generateBranchStart);
   assert.notEqual(chatBranchStart, -1, "Missing chat branch");
   assert.notEqual(generateBranchStart, -1, "Missing generation branch");
@@ -170,6 +195,25 @@ test("generation queue does not block additional generation submissions", () => 
   assert.match(appSource.slice(chatBranchStart, generateBranchStart), /setBusy\(true\)/);
   assert.doesNotMatch(appSource.slice(generateBranchStart, submitEnd), /setBusy\(true\)/);
   assert.match(appSource, /disabled=\{busy\}/);
+});
+
+test("multi-image count is prominent and asks for confirmation", () => {
+  assert.match(appSource, /skipMultiImageConfirm\?: boolean;/);
+  assert.match(appSource, /const \[pendingMultiImageConfirm, setPendingMultiImageConfirm\]/);
+  assert.match(appSource, /function generationCountFor\(engine: Engine, gpt: GptForm, banana: BananaForm\)/);
+  assert.match(appSource, /function currentCountLabel\(\)[\s\S]*return `数量 \$\{generationCountFor\(activeEngine, gptForm, bananaForm\)\}张`;/);
+  assert.match(appSource, /function confirmMultiImageGeneration\(\)/);
+  assert.match(appSource, /function resetMultiImageCount\(\)/);
+  assert.match(appSource, /if \(currentMode !== "chat"\) \{[\s\S]*if \(generationCount > 1 && !overrides\.skipMultiImageConfirm/);
+  assert.match(appSource, /确认生成 \{pendingMultiImageConfirm\.count\} 张图片？/);
+  assert.match(appSource, /多张生成会增加等待时间和消耗。/);
+  assert.match(appSource, /生成 \{pendingMultiImageConfirm\.count\} 张/);
+  assert.match(appSource, /改回 1 张/);
+  assert.match(appSource, /本次会话不再提醒/);
+  assert.match(appSource, /className=\{`count-trigger \$\{generationCountFor\(activeEngine, gptForm, bananaForm\) > 1 \? "count-trigger-alert" : ""\} \$\{composerPopover === "count" \? "active" : ""\}`\.trim\(\)\}/);
+  assert.match(cssBlock(".composer-toolbar button.count-trigger"), /gap:\s*6px;/);
+  assert.match(cssBlock(".composer-toolbar button.count-trigger-alert"), /background:\s*#111;[\s\S]*color:\s*#fff;/);
+  assert.match(css, /\.multi-image-confirm-drawer\s*\{[\s\S]*max-width:\s*420px;/);
 });
 
 test("config drawer exposes an obvious add-profile action", () => {
@@ -195,6 +239,10 @@ test("config drawer exposes a guarded delete-profile action", () => {
 test("config drawer exposes separate generation and chat diagnostics", () => {
   assert.match(appSource, /type DiagnosticCapability = "generation" \| "chat";/);
   assert.match(appSource, /async function runDiagnostics\(\)/);
+  assert.match(appSource, /function closeConnectionDrawer\(\)/);
+  assert.match(appSource, /setDiagnosticsResult\(null\);[\s\S]*setConnectionOpen\(false\);/);
+  assert.match(appSource, /function clearDiagnosticsResult\(\)/);
+  assert.match(appSource, /selectConfigProfile\(profile: ConfigProfile\)[\s\S]*clearDiagnosticsResult\(\);/);
   assert.match(appSource, /fetch\("\/api\/diagnostics"/);
   assert.match(appSource, /"测试连接"/);
   assert.match(appSource, /className=\{diagnosticsResult\.ok \? "diagnostics-panel ok" : "diagnostics-panel warning"\}/);

@@ -2,6 +2,8 @@ import {
   AlertCircle,
   ArrowUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Check,
   Clock3,
   Copy,
@@ -147,6 +149,7 @@ type SubmitOverrides = {
   draftOverride?: SubmissionDraftOverride;
   references?: File[];
   referenceSnapshots?: ReferenceSnapshot[];
+  skipMultiImageConfirm?: boolean;
 };
 
 type TooltipState = {
@@ -311,11 +314,19 @@ type PreviewImage = {
   src: string;
   name: string;
   objectUrl?: boolean;
+  gallery?: PreviewImage[];
+  galleryIndex?: number;
 };
 
 type PendingSessionSwitch = {
   nextSessionId: string;
   nextSessionTitle: string;
+};
+
+type PendingMultiImageConfirm = {
+  count: number;
+  engine: Engine;
+  overrides: SubmitOverrides;
 };
 
 const COMPOSER_PROMPT_DEFAULT_HEIGHT = 148;
@@ -954,6 +965,9 @@ function App() {
   const [sizeAdjustmentNotice, setSizeAdjustmentNotice] = useState("");
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [pendingSessionSwitch, setPendingSessionSwitch] = useState<PendingSessionSwitch | null>(null);
+  const [pendingMultiImageConfirm, setPendingMultiImageConfirm] = useState<PendingMultiImageConfirm | null>(null);
+  const [skipMultiImageConfirmForSession, setSkipMultiImageConfirmForSession] = useState(false);
+  const [skipMultiImageConfirmChecked, setSkipMultiImageConfirmChecked] = useState(false);
   const [customSizeDraft, setCustomSizeDraft] = useState<{ width: string; height: string }>(() => {
     const parsed = parseCustomImageSize(loadJson<GptForm>(gptStorageKey, defaultGptForm).custom_size);
     return { width: String(parsed.width), height: String(parsed.height) };
@@ -1036,7 +1050,12 @@ function App() {
   }, [queueJobs]);
 
   useEffect(() => {
-    if (connectionOpen) setApiKeyVisible(false);
+    if (connectionOpen) {
+      setApiKeyVisible(false);
+    } else {
+      setDiagnosticsResult(null);
+      setDiagnosticsRunning(false);
+    }
   }, [connectionOpen]);
 
   useEffect(() => {
@@ -1138,6 +1157,21 @@ function App() {
   }, [notice]);
 
   useEffect(() => {
+    if (!previewImage) return undefined;
+    function onPreviewKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        shiftPreviewImage(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        shiftPreviewImage(1);
+      }
+    }
+    window.addEventListener("keydown", onPreviewKeyDown);
+    return () => window.removeEventListener("keydown", onPreviewKeyDown);
+  }, [previewImage]);
+
+  useEffect(() => {
     return () => {
       if (tooltipTimerRef.current) window.clearTimeout(tooltipTimerRef.current);
     };
@@ -1147,9 +1181,10 @@ function App() {
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
       setAdvancedOpen(false);
-      setConnectionOpen(false);
+      closeConnectionDrawer();
       setRenameOpen(false);
       setSessionPromptOpen(false);
+      setPendingMultiImageConfirm(null);
       setHistoryDetail(null);
       closePreviewImage();
       setComposerPopover(null);
@@ -1186,6 +1221,7 @@ function App() {
 
   async function loadDefaults() {
     try {
+      clearDiagnosticsResult();
       const response = await fetch("/api/config/defaults");
       if (!response.ok) throw new Error(await readError(response));
       const payload = (await response.json()) as ConfigPayload;
@@ -1226,7 +1262,28 @@ function App() {
     }
   }
 
+  function clearDiagnosticsResult() {
+    setDiagnosticsResult(null);
+  }
+
+  function closeConnectionDrawer() {
+    setDiagnosticsResult(null);
+    setDiagnosticsRunning(false);
+    setConnectionOpen(false);
+  }
+
+  function updateGptConnectionForm(patch: Partial<GptForm>) {
+    clearDiagnosticsResult();
+    setGptForm((current) => ({ ...current, ...patch }));
+  }
+
+  function updateBananaConnectionForm(patch: Partial<BananaForm>) {
+    clearDiagnosticsResult();
+    setBananaForm((current) => ({ ...current, ...patch }));
+  }
+
   function selectConfigProfile(profile: ConfigProfile) {
+    clearDiagnosticsResult();
     const currentForm = profile.engine === "banana" ? bananaForm : gptForm;
     setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, profile.engine, currentForm));
     setActiveProfileIds((current) => ({ ...current, [profile.engine]: profile.id }));
@@ -1234,6 +1291,7 @@ function App() {
   }
 
   function updateActiveProfileName(name: string) {
+    clearDiagnosticsResult();
     const profileId = activeProfileIds[activeEngine];
     setProfiles((items) => items.map((item) => (
       item.engine === activeEngine && item.id === profileId ? { ...item, name } : item
@@ -1241,6 +1299,7 @@ function App() {
   }
 
   function addConfigProfile() {
+    clearDiagnosticsResult();
     const id = makeId(`${activeEngine}-profile`);
     const form = activeEngine === "banana"
       ? {
@@ -1268,6 +1327,7 @@ function App() {
   }
 
   function deleteConfigProfile(profile: ConfigProfile) {
+    clearDiagnosticsResult();
     const sameEngineProfiles = profiles.filter((item) => item.engine === profile.engine);
     if (sameEngineProfiles.length <= 1) {
       setNotice("至少保留一个配置");
@@ -1741,6 +1801,28 @@ function App() {
     resetPreviewCanvas();
   }
 
+  function openPreviewImages(images: GeneratedImage[], index = 0) {
+    const gallery = images
+      .map((image, imageIndex) => {
+        const src = imageSrc(image);
+        return src ? { src, name: imageName(image, imageIndex) } : null;
+      })
+      .filter((image): image is PreviewImage => Boolean(image));
+    const galleryIndex = Math.min(Math.max(index, 0), Math.max(gallery.length - 1, 0));
+    const selected = gallery[galleryIndex];
+    if (!selected) return;
+    openPreviewImage({ ...selected, gallery, galleryIndex });
+  }
+
+  function shiftPreviewImage(direction: -1 | 1) {
+    setPreviewImage((current) => {
+      if (!current?.gallery || current.gallery.length <= 1) return current;
+      const galleryIndex = (Number(current.galleryIndex) + direction + current.gallery.length) % current.gallery.length;
+      return { ...current.gallery[galleryIndex], gallery: current.gallery, galleryIndex };
+    });
+    resetPreviewCanvas();
+  }
+
   function closePreviewImage() {
     setPreviewImage((current) => {
       if (current?.objectUrl) URL.revokeObjectURL(current.src);
@@ -1954,12 +2036,27 @@ function App() {
   function closeOnEscape(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") return;
     setAdvancedOpen(false);
-    setConnectionOpen(false);
+    closeConnectionDrawer();
     setRenameOpen(false);
     setPromptEditorOpen(false);
     setHistoryDetail(null);
+    setPendingMultiImageConfirm(null);
     closePreviewImage();
     setComposerPopover(null);
+  }
+
+  function handlePreviewKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      shiftPreviewImage(-1);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      shiftPreviewImage(1);
+      return;
+    }
+    closeOnEscape(event);
   }
 
   async function addOutputAsReference(src: string, name: string) {
@@ -2248,6 +2345,7 @@ function App() {
     const currentReferences = overrides.references || references;
     const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
+    const generationCount = generationCountFor(currentEngine, currentGptForm, currentBananaForm);
     const draftOverride = overrides.draftOverride || {};
     const submissionDrafts = resolveSubmissionDrafts(currentEngine, currentDrafts, {
       ...draftOverride,
@@ -2258,6 +2356,20 @@ function App() {
       setNotice(currentMode === "chat" ? "请先输入要记录的聊天内容" : "请先填写提示词");
       promptRef.current?.focus();
       return;
+    }
+
+    if (currentMode !== "chat") {
+      if (currentConfigIssues.length > 0) {
+        setConnectionOpen(true);
+        setNotice(`请先补全接口配置：${currentConfigIssues.join("、")}`);
+        return;
+      }
+      if (generationCount > 1 && !overrides.skipMultiImageConfirm && !skipMultiImageConfirmForSession) {
+        setComposerPopover(null);
+        setSkipMultiImageConfirmChecked(false);
+        setPendingMultiImageConfirm({ count: generationCount, engine: currentEngine, overrides });
+        return;
+      }
     }
 
     const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
@@ -2373,11 +2485,6 @@ function App() {
       return;
     }
 
-    if (currentConfigIssues.length > 0) {
-      setConnectionOpen(true);
-      setNotice(`请先补全接口配置：${currentConfigIssues.join("、")}`);
-      return;
-    }
     let submitGptForm = currentGptForm;
     if (currentEngine === "gpt-image-2") {
       const normalized = normalizeCustomSize(false);
@@ -2563,8 +2670,37 @@ function App() {
     return gptQualityLabels[gptForm.quality] || gptForm.quality;
   }
 
+  function generationCountFor(engine: Engine, gpt: GptForm, banana: BananaForm) {
+    return Math.max(1, Math.round(Number(engine === "banana" ? banana.batch_size : gpt.n) || 1));
+  }
+
   function currentCountLabel() {
-    return activeEngine === "banana" ? `${bananaForm.batch_size} 张` : `${gptForm.n} 张`;
+    return `数量 ${generationCountFor(activeEngine, gptForm, bananaForm)}张`;
+  }
+
+  function setGenerationCount(engine: Engine, count: number) {
+    const nextCount = Math.max(1, Math.round(Number(count) || 1));
+    if (engine === "banana") {
+      setBananaForm((current) => ({ ...current, batch_size: Math.min(8, nextCount) }));
+    } else {
+      setGptForm((current) => ({ ...current, n: Math.min(10, nextCount) }));
+    }
+  }
+
+  function confirmMultiImageGeneration() {
+    if (!pendingMultiImageConfirm) return;
+    if (skipMultiImageConfirmChecked) setSkipMultiImageConfirmForSession(true);
+    const pending = pendingMultiImageConfirm;
+    setPendingMultiImageConfirm(null);
+    setSkipMultiImageConfirmChecked(false);
+    void submit(undefined, { ...pending.overrides, skipMultiImageConfirm: true });
+  }
+
+  function resetMultiImageCount() {
+    if (!pendingMultiImageConfirm) return;
+    setGenerationCount(pendingMultiImageConfirm.engine, 1);
+    setPendingMultiImageConfirm(null);
+    setSkipMultiImageConfirmChecked(false);
   }
 
   function currentEditModeLabel() {
@@ -2890,7 +3026,9 @@ function App() {
                   </div>
                   <div className="queue-list">
                     {queueJobs.slice(0, 6).map((job) => {
-                      const firstImage = job.images?.[0];
+                      const jobImages = job.images || [];
+                      const previewImages = jobImages.slice(0, 4);
+                      const firstImage = previewImages[0];
                       const thumbSrc = imageSrc(firstImage);
                       const thumbName = imageName(firstImage);
                       const jobTitle = queueJobTitle(job);
@@ -2899,8 +3037,13 @@ function App() {
                       return (
                         <div className={`queue-job ${job.status}`} key={job.id}>
                           {thumbSrc ? (
-                            <button type="button" className="queue-job-thumb" onClick={() => openPreviewImage({ src: thumbSrc, name: thumbName })} title="查看图片">
-                              <img src={thumbSrc} alt={thumbName} loading="lazy" />
+                            <button type="button" className={jobImages.length > 1 ? "queue-job-thumb multi" : "queue-job-thumb"} onClick={() => openPreviewImages(jobImages)} title={jobImages.length > 1 ? `查看 ${jobImages.length} 张图片` : "查看图片"}>
+                              {previewImages.map((image, index) => {
+                                const src = imageSrc(image);
+                                const name = imageName(image, index);
+                                return src ? <img key={`${job.id}-${index}`} src={src} alt={name} loading="lazy" /> : null;
+                              })}
+                              {jobImages.length > 1 && <span className="queue-job-thumb-count">{jobImages.length} 张</span>}
                             </button>
                           ) : (
                             <span className="queue-job-icon">
@@ -3379,7 +3522,7 @@ function App() {
             <div className="composer-popover-wrap">
               <button
                 type="button"
-                className={composerPopover === "count" ? "active" : ""}
+                className={`count-trigger ${generationCountFor(activeEngine, gptForm, bananaForm) > 1 ? "count-trigger-alert" : ""} ${composerPopover === "count" ? "active" : ""}`.trim()}
                 onClick={() => openComposerPopover("count")}
                 aria-expanded={composerPopover === "count"}
                 {...tooltipProps("一次请求生成的图片数量。数量越多等待越久，失败重试成本也更高。")}
@@ -3390,9 +3533,9 @@ function App() {
                 <div className="composer-popover compact" role="dialog" aria-label="选择数量">
                   <Field label="生成数量">
                     {activeEngine === "banana" ? (
-                      <input type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setBananaForm({ ...bananaForm, batch_size: Number(event.target.value) })} />
+                      <input type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setGenerationCount("banana", Number(event.target.value))} />
                     ) : (
-                      <input type="number" min={1} max={10} value={gptForm.n} onChange={(event) => setGptForm({ ...gptForm, n: Number(event.target.value) })} />
+                      <input type="number" min={1} max={10} value={gptForm.n} onChange={(event) => setGenerationCount("gpt-image-2", Number(event.target.value))} />
                     )}
                   </Field>
                   <div className="choice-grid counts">
@@ -3403,13 +3546,7 @@ function App() {
                           type="button"
                           key={item}
                           className={selected ? "selected" : ""}
-                          onClick={() => {
-                            if (activeEngine === "banana") {
-                              setBananaForm({ ...bananaForm, batch_size: item });
-                            } else {
-                              setGptForm({ ...gptForm, n: item });
-                            }
-                          }}
+                          onClick={() => setGenerationCount(activeEngine, item)}
                         >
                           {item}
                         </button>
@@ -3509,6 +3646,34 @@ function App() {
               <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "preserve")}>保留参考图并切换</button>
               <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "clear")}>清空参考图并切换</button>
               <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "cancel")}>取消</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pendingMultiImageConfirm && (
+        <div className="drawer-shell multi-image-confirm-shell">
+          <button className="drawer-backdrop" type="button" aria-label="关闭多张生成确认" onClick={() => setPendingMultiImageConfirm(null)} />
+          <section className="drawer multi-image-confirm-drawer" role="dialog" aria-modal="true" aria-label="多张生成确认" tabIndex={-1} onKeyDown={closeOnEscape}>
+            <div className="drawer-head">
+              <div>
+                <p>当前不是单张生成</p>
+                <h2>确认生成 {pendingMultiImageConfirm.count} 张图片？</h2>
+              </div>
+              <button type="button" onClick={() => setPendingMultiImageConfirm(null)} aria-label="关闭多张生成确认" title="关闭"><X size={18} /></button>
+            </div>
+            <div className="config-warning" role="alert">
+              <AlertCircle size={16} />
+              <span>多张生成会增加等待时间和消耗。</span>
+            </div>
+            <label className="multi-image-confirm-check">
+              <input type="checkbox" checked={skipMultiImageConfirmChecked} onChange={(event) => setSkipMultiImageConfirmChecked(event.target.checked)} />
+              <span>本次会话不再提醒</span>
+            </label>
+            <div className="drawer-actions">
+              <button type="button" className="primary-action" onClick={confirmMultiImageGeneration}>生成 {pendingMultiImageConfirm.count} 张</button>
+              <button type="button" onClick={resetMultiImageCount}>改回 1 张</button>
+              <button type="button" onClick={() => setPendingMultiImageConfirm(null)}>取消</button>
             </div>
           </section>
         </div>
@@ -3616,14 +3781,14 @@ function App() {
 
       {connectionOpen && (
         <div className="drawer-shell connection-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭接口配置" onClick={() => setConnectionOpen(false)} />
+          <button className="drawer-backdrop" type="button" aria-label="关闭接口配置" onClick={closeConnectionDrawer} />
           <section className="drawer connection-drawer" role="dialog" aria-modal="true" aria-label="接口配置" tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
                 <p>配置 Profile + API 请求地址 + Key + 模型</p>
                 <h2>多配置管理</h2>
               </div>
-              <button type="button" onClick={() => setConnectionOpen(false)} aria-label="关闭接口配置" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={closeConnectionDrawer} aria-label="关闭接口配置" title="关闭"><X size={18} /></button>
             </div>
             <div className="connection-layout">
               <aside className="profile-list" aria-label="配置列表">
@@ -3696,21 +3861,21 @@ function App() {
                   <>
                     <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
                       <div className="secret-input">
-                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={gptForm.api_key} onChange={(event) => setGptForm({ ...gptForm, api_key: event.target.value })} />
+                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={gptForm.api_key} onChange={(event) => updateGptConnectionForm({ api_key: event.target.value })} />
                         <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
                     </Field>
-                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => setGptForm({ ...gptForm, base_url: event.target.value })} /></Field>
-                    <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => setGptForm({ ...gptForm, model: event.target.value })} /></Field>
+                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => updateGptConnectionForm({ base_url: event.target.value })} /></Field>
+                    <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} /></Field>
                     <Field label="聊天模型">
                       <div className="stacked-field">
                         <select
                           value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
                           onChange={(event) => {
                             const value = event.target.value;
-                            setGptForm({ ...gptForm, chat_model: value === "custom" ? gptForm.chat_model : value });
+                            updateGptConnectionForm({ chat_model: value === "custom" ? gptForm.chat_model : value });
                           }}
                         >
                           <option value="gpt-5.5">gpt-5.5</option>
@@ -3718,11 +3883,11 @@ function App() {
                           <option value="gpt-5.2">gpt-5.2</option>
                           <option value="custom">自定义</option>
                         </select>
-                        <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => setGptForm({ ...gptForm, chat_model: event.target.value })} />
+                        <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
                       </div>
                     </Field>
                     <Field label="思考强度">
-                      <select value={gptForm.reasoning_effort} onChange={(event) => setGptForm({ ...gptForm, reasoning_effort: event.target.value })}>
+                      <select value={gptForm.reasoning_effort} onChange={(event) => updateGptConnectionForm({ reasoning_effort: event.target.value })}>
                         {gptReasoningOptions.map((item) => <option key={item} value={item}>{gptReasoningLabels[item]}</option>)}
                       </select>
                     </Field>
@@ -3731,14 +3896,14 @@ function App() {
                   <>
                     <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
                       <div className="secret-input">
-                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={bananaForm.api_key} onChange={(event) => setBananaForm({ ...bananaForm, api_key: event.target.value })} />
+                        <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={bananaForm.api_key} onChange={(event) => updateBananaConnectionForm({ api_key: event.target.value })} />
                         <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
                     </Field>
-                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => setBananaForm({ ...bananaForm, api_base_url: event.target.value })} /></Field>
-                    <Field label="模型名"><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => setBananaForm({ ...bananaForm, model_type: event.target.value })} /></Field>
+                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => updateBananaConnectionForm({ api_base_url: event.target.value })} /></Field>
+                    <Field label="模型名"><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => updateBananaConnectionForm({ model_type: event.target.value })} /></Field>
                   </>
                 )}
               </div>
@@ -3749,7 +3914,7 @@ function App() {
                 {diagnosticsRunning ? "测试中..." : "测试连接"}
               </button>
               <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
-              <button type="button" onClick={() => setConnectionOpen(false)}>关闭</button>
+              <button type="button" onClick={closeConnectionDrawer}>关闭</button>
             </div>
           </section>
         </div>
@@ -3861,9 +4026,9 @@ function App() {
       {previewImage && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label="关闭预览" />
-          <div className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <div className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
             <div>
-              <strong>{previewImage.name}</strong>
+              <strong>{previewImage.gallery && previewImage.gallery.length > 1 ? `${previewImage.name} · ${(previewImage.galleryIndex || 0) + 1}/${previewImage.gallery.length}` : previewImage.name}</strong>
               <span>
                 <a href={previewImage.src} download={previewImage.name} title="下载图片"><Download size={18} /></a>
                 <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title="作为参考图"><ImagePlus size={18} /></button>
@@ -3880,6 +4045,12 @@ function App() {
               onMouseDown={startPreviewMousePan}
               onDoubleClick={resetPreviewCanvas}
             >
+              {previewImage.gallery && previewImage.gallery.length > 1 && (
+                <>
+                  <button type="button" className="lightbox-gallery-button previous" onClick={() => shiftPreviewImage(-1)} aria-label="上一张图片" title="上一张图片"><ChevronLeft size={22} /></button>
+                  <button type="button" className="lightbox-gallery-button next" onClick={() => shiftPreviewImage(1)} aria-label="下一张图片" title="下一张图片"><ChevronRight size={22} /></button>
+                </>
+              )}
               <div className="lightbox-zoom-tools" aria-label="图片缩放控制">
                 <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label="缩小图片" title="缩小图片"><ZoomOut size={18} /></button>
                 <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label="放大图片" title="放大图片"><ZoomIn size={18} /></button>
