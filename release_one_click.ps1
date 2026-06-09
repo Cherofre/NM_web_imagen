@@ -5,8 +5,11 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $StudioDir = Join-Path $ScriptDir "studio-web"
+$VersionPath = Join-Path $ScriptDir "VERSION"
+$PackageScript = Join-Path $ScriptDir "package_web_tool.ps1"
 $PreflightScript = Join-Path $ScriptDir "release_preflight.ps1"
 $SyncScript = Join-Path $ScriptDir "sync_release_to_g.ps1"
+$AppName = "NM_web_imagen"
 
 try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -37,11 +40,20 @@ if (-not (Test-Path -LiteralPath $PreflightScript)) {
 if (-not (Test-Path -LiteralPath $SyncScript)) {
   throw "sync_release_to_g.ps1 was not found."
 }
+if (-not (Test-Path -LiteralPath $PackageScript)) {
+  throw "package_web_tool.ps1 was not found."
+}
+if (-not (Test-Path -LiteralPath $VersionPath)) {
+  throw "VERSION was not found."
+}
+
+$Version = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
+$VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 
 Invoke-Step "Frontend tests" {
   Push-Location $StudioDir
   try {
-    node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs
+    node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs .\src\i18n.test.mjs
   } finally {
     Pop-Location
   }
@@ -62,11 +74,16 @@ Invoke-Step "Backend checks" {
   python -m unittest tests.test_studio_sessions tests.test_release_cache_busting
 }
 
-Invoke-Step "Package and sync" {
+Invoke-Step "Package clean zip" {
+  powershell -NoProfile -ExecutionPolicy Bypass -File $PackageScript -OutputPath $VersionedZip
+}
+
+Invoke-Step "Sync clean package" {
   $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SyncScript)
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
+  $Args += "-SkipPackage"
   powershell @Args
 }
 
@@ -75,6 +92,7 @@ Invoke-Step "Release preflight" {
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
+  $Args += @("-ExpectedVersion", $Version)
   powershell @Args
 }
 

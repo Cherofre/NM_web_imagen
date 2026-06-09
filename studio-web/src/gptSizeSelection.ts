@@ -10,6 +10,11 @@ export type GptSizeSelection = {
   summary: string;
 };
 
+export type GptSizeSelectionLabels = {
+  autoSummary?: string;
+  customPrefix?: string;
+};
+
 const PRESET_MATRIX: Record<Exclude<GptComposerSizeTier, "auto">, Record<GptComposerAspect, string>> = {
   "1K": {
     "1:1": "1024x1024",
@@ -66,14 +71,17 @@ function normalizeSizeValue(value: string) {
   return `${Number(match[1])}x${Number(match[2])}`;
 }
 
-export function deriveGptSizeSelection(input: { size?: string; custom_size?: string }): GptSizeSelection {
+export function deriveGptSizeSelection(input: { size?: string; custom_size?: string }, labels: GptSizeSelectionLabels = {}): GptSizeSelection {
+  const autoSummary = labels.autoSummary || "自动尺寸由上游决定";
+  const customPrefix = labels.customPrefix || "自定义";
+
   if (input.size === "auto") {
     return {
       mode: "auto",
       tier: "auto",
       aspect: null,
       value: "auto",
-      summary: "自动尺寸由上游决定",
+      summary: autoSummary,
     };
   }
 
@@ -97,6 +105,6 @@ export function deriveGptSizeSelection(input: { size?: string; custom_size?: str
     tier: null,
     aspect: null,
     value: effectiveValue,
-    summary: effectiveValue ? `自定义 · ${effectiveValue}` : "自定义",
+    summary: effectiveValue ? `${customPrefix} · ${effectiveValue}` : customPrefix,
   };
 }

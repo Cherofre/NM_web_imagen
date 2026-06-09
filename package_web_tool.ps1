@@ -5,14 +5,20 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ParentDir = Split-Path -Parent $ScriptDir
+$AppName = "NM_web_imagen"
+$VersionPath = Join-Path $ScriptDir "VERSION"
+$Version = if (Test-Path -LiteralPath $VersionPath) { (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim() } else { "" }
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-  $OutputPath = Join-Path $ParentDir "NM_web_imagen.zip"
+  if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw "VERSION is empty or missing; pass -OutputPath explicitly."
+  }
+  $OutputPath = Join-Path $ParentDir "$AppName-v$Version.zip"
 }
 
 $OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_web_imagen_package_" + [System.Guid]::NewGuid().ToString("N"))
-$TempAppDir = Join-Path $TempRoot "NM_web_imagen"
+$TempAppDir = Join-Path $TempRoot $AppName
 
 $ExcludedDirs = @(
   ".codex",
@@ -29,6 +35,7 @@ $ExcludedDirs = @(
   "studio-web",
   "tests",
   "logs",
+  "output",
   "outputs",
   "saved_images"
 )
@@ -51,6 +58,10 @@ $ExcludedFiles = @(
   "page-check*.png",
   "release-check*.png",
   "ui-*.png",
+  "drawer-*.png",
+  "mobile-*.png",
+  "PixPin_*.png",
+  "企业微信截图*.png",
   "gpt-image-playground-home.png",
   "server.err.log",
   "server.out.log"
@@ -148,6 +159,114 @@ function Write-PackageReadme {
   Set-Content -LiteralPath $ReadmePath -Value $Readme -Encoding UTF8
 }
 
+function Get-ForbiddenPackagePatterns {
+  return @(
+    "^$AppName/config\.local\.json$",
+    "^$AppName/output/",
+    "^$AppName/outputs/",
+    "^$AppName/logs/",
+    "^$AppName/\.chrome-debug/",
+    "^$AppName/\.codex/",
+    "^$AppName/\.git/",
+    "^$AppName/\.svn/",
+    "^$AppName/\.runtime/",
+    "^$AppName/\.venv/",
+    "^$AppName/\.playwright-mcp/",
+    "^$AppName/_release/",
+    "^$AppName/__pycache__/",
+    "^$AppName/dist/",
+    "^$AppName/node_modules/",
+    "^$AppName/saved_images/",
+    "^$AppName/tests/",
+    "^$AppName/studio-web/",
+    "^$AppName/package_web_tool\.ps1$",
+    "^$AppName/release_one_click\.ps1$",
+    "^$AppName/release_preflight\.ps1$",
+    "^$AppName/sync_release_to_g\.ps1$",
+    "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$",
+    "^$AppName/[^/]+\.(?:png|jpg|jpeg|webp)$",
+    "^$AppName/.*\.(?:pyc|pyo|log|tmp|bak|old|7z|rar)$",
+    "^$AppName/(?!vendor/python/python-[^/]+-embed-amd64\.zip$).*\.zip$",
+    "^$AppName/(?:\.env[^/]*|credentials[^/]*|cookies[^/]*|.*(?:secret|token).*)$"
+  )
+}
+
+function Test-TextClean {
+  param(
+    [string]$Name,
+    [string]$Text
+  )
+
+  $BadTokens = @(
+    "package_web_tool.ps1",
+    "release_one_click.ps1",
+    "release_preflight.ps1",
+    "sync_release_to_g.ps1",
+    "C:\Users\",
+    "I:\AI\",
+    "G:\su\",
+    "D:\Program Files\PixPin",
+    "WecomData",
+    "PixPin",
+    "企业微信截图"
+  )
+
+  foreach ($Token in $BadTokens) {
+    if ($Text.Contains($Token)) {
+      throw "Package text contains development or local token in ${Name}: $Token"
+    }
+  }
+}
+
+function Test-PackageZipClean {
+  param([string]$ZipPath)
+
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $Zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $Names = @($Zip.Entries.FullName | ForEach-Object { $_ -replace "\\", "/" })
+    foreach ($Name in $Names) {
+      if (-not ($Name.StartsWith("$AppName/"))) {
+        throw "Package entry is outside $AppName root: $Name"
+      }
+    }
+
+    foreach ($Pattern in (Get-ForbiddenPackagePatterns)) {
+      if (($Names -match $Pattern).Count -gt 0) {
+        throw "Package contains excluded content matching: $Pattern"
+      }
+    }
+
+    foreach ($Entry in $Zip.Entries) {
+      $EntryName = $Entry.FullName -replace "\\", "/"
+      if ($EntryName.EndsWith("/")) {
+        continue
+      }
+      if ($EntryName -match "^$AppName/[^/]+\.bat$") {
+        $Reader = New-Object System.IO.StreamReader($Entry.Open())
+        try {
+          $EntryText = $Reader.ReadToEnd()
+          if ($EntryText -like "*release_one_click.ps1*") {
+            throw "Package contains release batch launcher: $EntryName"
+          }
+          Test-TextClean -Name $EntryName -Text $EntryText
+        } finally {
+          $Reader.Dispose()
+        }
+      } elseif ($EntryName -match "\.(?:ps1|py|js|css|html|md|json|ts|tsx|mjs|txt|gitignore|svnignore)$" -and $Entry.Length -le 2097152) {
+        $Reader = New-Object System.IO.StreamReader($Entry.Open())
+        try {
+          Test-TextClean -Name $EntryName -Text $Reader.ReadToEnd()
+        } finally {
+          $Reader.Dispose()
+        }
+      }
+    }
+  } finally {
+    $Zip.Dispose()
+  }
+}
+
 if (Test-Path -LiteralPath $TempRoot) {
   Remove-Item -LiteralPath $TempRoot -Recurse -Force
 }
@@ -178,6 +297,7 @@ try {
   }
 
   Compress-Archive -Path $TempAppDir -DestinationPath $OutputPath -Force
+  Test-PackageZipClean -ZipPath $OutputPath
   Write-Host "Package created: $OutputPath"
   Write-Host "Win64 offline package: kept portable Python 3.12 and compatible wheels only."
   Write-Host "Excluded release scripts, development sources/tests, local config, outputs, logs, saved images, local .venv/.runtime, browser cache and Python cache."

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence.ts";
+import { REFRESH_INTERRUPTED_QUEUE_ERROR, normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence.ts";
 
 test("stored queue jobs preserve finished jobs and mark running jobs interrupted", () => {
   const jobs = normalizeStoredQueueJobs([
@@ -31,7 +31,7 @@ test("stored queue jobs preserve finished jobs and mark running jobs interrupted
 
   assert.equal(jobs.length, 2);
   assert.equal(jobs[0].status, "canceled");
-  assert.equal(jobs[0].error, "页面刷新，任务已中断");
+  assert.equal(jobs[0].error, REFRESH_INTERRUPTED_QUEUE_ERROR);
   assert.ok(jobs[0].finishedAt);
   assert.equal(jobs[1].status, "success");
   assert.equal(jobs[1].images?.[0]?.saved_url, "/outputs/a.png");

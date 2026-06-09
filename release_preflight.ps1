@@ -1,5 +1,6 @@
 param(
-  [string]$DestinationRoot = ""
+  [string]$DestinationRoot = "",
+  [string]$ExpectedVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,17 +27,79 @@ function New-TextFromCodes {
   return [string]::Concat([char[]]$Codes)
 }
 
-function Get-DefaultDestinationRoot {
+function Get-CompanySharePathSuffix {
   $Segment1 = New-TextFromCodes @(65, 73, 20135, 20986, 24037, 20855, 25554, 20214)
   $Segment2 = New-TextFromCodes @(32654, 26415)
   $Segment3 = New-TextFromCodes @(29305, 25928, 32452)
   $Segment4 = New-TextFromCodes @(32593, 39029, 29983, 22270, 24037, 20855)
-  return Join-Path "G:\su\doc\Tools" (Join-Path $Segment1 (Join-Path $Segment2 (Join-Path $Segment3 $Segment4)))
+  return Join-Path $Segment1 (Join-Path $Segment2 (Join-Path $Segment3 $Segment4))
+}
+
+function Get-CompanyShareRootOptions {
+  $Suffix = Get-CompanySharePathSuffix
+  return @(
+    [pscustomobject]@{
+      Anchor = "G:\su\doc\Tools"
+      Root = Join-Path "G:\su\doc\Tools" $Suffix
+    },
+    [pscustomobject]@{
+      Anchor = "G:\doc\Tools"
+      Root = Join-Path "G:\doc\Tools" $Suffix
+    }
+  )
+}
+
+function Get-CompanyShareRootCandidates {
+  return @(Get-CompanyShareRootOptions | ForEach-Object { $_.Root })
+}
+
+function Resolve-CompanyShareRoot {
+  param([string]$RequestedRoot)
+
+  if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+    return $RequestedRoot
+  }
+
+  foreach ($Candidate in Get-CompanyShareRootCandidates) {
+    if (Test-Path -LiteralPath $Candidate) {
+      return $Candidate
+    }
+  }
+
+  return (Get-CompanyShareRootCandidates)[0]
+}
+
+function Assert-AllowedCompanyShareRoot {
+  param([string]$DestinationRoot)
+
+  $ResolvedDestinationRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DestinationRoot)
+  foreach ($Option in Get-CompanyShareRootOptions) {
+    $ResolvedOptionRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Option.Root)
+    if ($ResolvedDestinationRoot.Equals($ResolvedOptionRoot, [StringComparison]::OrdinalIgnoreCase)) {
+      if (-not (Test-Path -LiteralPath $Option.Anchor)) {
+        throw "Refusing to create missing company share anchor: $($Option.Anchor)"
+      }
+      if (-not (Test-Path -LiteralPath $ResolvedDestinationRoot)) {
+        throw "DestinationRoot is missing; refusing to create company release root: $ResolvedDestinationRoot"
+      }
+      return [pscustomobject]@{
+        Anchor = $Option.Anchor
+        Root = $ResolvedDestinationRoot
+      }
+    }
+  }
+
+  throw "Refusing to sync outside expected share root: $ResolvedDestinationRoot"
+}
+
+function Get-DefaultDestinationRoot {
+  return Resolve-CompanyShareRoot -RequestedRoot ""
 }
 
 function Get-ForbiddenReleasePatterns {
   return @(
     "^$AppName/config\.local\.json$",
+    "^$AppName/output/",
     "^$AppName/outputs/",
     "^$AppName/logs/",
     "^$AppName/\.chrome-debug/",
@@ -63,8 +126,22 @@ function Get-ForbiddenReleasePatterns {
     "^$AppName/[^/]+\.(?:png|jpg|jpeg|webp)$",
     "^$AppName/.*\.(?:pyc|pyo|log|tmp|bak|old|7z|rar)$",
     "^$AppName/(?!vendor/python/python-[^/]+-embed-amd64\.zip$).*\.zip$",
-    "^$AppName/(?:\.env[^/]*|credentials[^/]*|cookies[^/]*|.*(?:secret|token).*)$"
+    "^$AppName/(?:\.env[^/]*|credentials[^/]*|cookies[^/]*|.*(?:secret|token).*)$",
+    "PixPin",
+    "企业微信截图"
   )
+}
+
+function Get-StreamSha256 {
+  param([System.IO.Stream]$Stream)
+
+  $Sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $Hash = $Sha.ComputeHash($Stream)
+    return ([BitConverter]::ToString($Hash)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $Sha.Dispose()
+  }
 }
 
 function Test-TextClean {
@@ -79,11 +156,14 @@ function Test-TextClean {
     "release_preflight.ps1",
     "sync_release_to_g.ps1",
     "C:\Users\mumengfei",
+    "C:\Users\",
     "I:\AI\",
     "G:\su\",
     "D:\Documents\",
+    "D:\Program Files\PixPin",
     "WecomData",
-    "PixPin"
+    "PixPin",
+    "企业微信截图"
   )
 
   foreach ($Token in $BadTokens) {
@@ -108,9 +188,16 @@ function Get-ZipFileManifest {
       if (-not $Name.StartsWith("$AppName/")) {
         throw "Package entry is outside $AppName root: $Name"
       }
+      $EntryStream = $Entry.Open()
+      try {
+        $EntryHash = Get-StreamSha256 -Stream $EntryStream
+      } finally {
+        $EntryStream.Dispose()
+      }
       $Rows += [pscustomobject]@{
         Path = $Name.Substring($AppName.Length + 1)
         Length = [int64]$Entry.Length
+        Hash = $EntryHash
       }
     }
     return @($Rows | Sort-Object Path)
@@ -128,6 +215,7 @@ function Get-DirectoryFileManifest {
     [pscustomobject]@{
       Path = ($_.FullName.Substring($PrefixLength) -replace "\\", "/")
       Length = [int64]$_.Length
+      Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
   } | Sort-Object Path)
 }
@@ -156,6 +244,11 @@ function Assert-DirectoryMatchesZip {
     }
     if ($DirByPath[$Path] -ne $ZipByPath[$Path]) {
       throw "G: sync folder file size differs from package: $Path"
+    }
+    $ZipItem = $ZipManifest | Where-Object { $_.Path -eq $Path } | Select-Object -First 1
+    $DirItem = $DirManifest | Where-Object { $_.Path -eq $Path } | Select-Object -First 1
+    if ($ZipItem.Hash -ne $DirItem.Hash) {
+      throw "G: sync folder file hash differs from package: $Path"
     }
   }
   foreach ($Path in $DirByPath.Keys) {
@@ -224,9 +317,9 @@ function Test-ZipClean {
   }
 }
 
-if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
-  $DestinationRoot = Get-DefaultDestinationRoot
-}
+$DestinationRoot = Resolve-CompanyShareRoot -RequestedRoot $DestinationRoot
+$DestinationRootInfo = Assert-AllowedCompanyShareRoot -DestinationRoot $DestinationRoot
+$DestinationRoot = $DestinationRootInfo.Root
 
 Write-Step "Version"
 if (-not (Test-Path -LiteralPath $VersionPath)) {
@@ -234,7 +327,10 @@ if (-not (Test-Path -LiteralPath $VersionPath)) {
 }
 $Version = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
 if ($Version -notmatch "^\d+\.\d+\.\d+$") {
-  throw "VERSION must look like 1.0.3, got: $Version"
+  throw "VERSION must look like semantic version x.y.z, got: $Version"
+}
+if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion) -and $Version -ne $ExpectedVersion) {
+  throw "VERSION expected $ExpectedVersion, got: $Version"
 }
 Write-Host "VERSION: $Version"
 
@@ -271,7 +367,9 @@ Write-Host "Studio CSS: $ExpectedCss"
 Write-Step "Local release artifacts"
 $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 Test-ZipClean -ZipPath $VersionedZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
+$LocalZipHash = (Get-FileHash -LiteralPath $VersionedZip -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "Local versioned package OK: $VersionedZip"
+Write-Host "Local versioned package SHA256: $LocalZipHash"
 
 Write-Step "G drive sync target"
 $DestinationAppDir = Join-Path $DestinationRoot $AppName
@@ -280,9 +378,14 @@ if (-not (Test-Path -LiteralPath $DestinationAppDir)) {
   throw "G: sync folder was not found: $DestinationAppDir"
 }
 Test-ZipClean -ZipPath $DestinationZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
+$DestinationZipHash = (Get-FileHash -LiteralPath $DestinationZip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($DestinationZipHash -ne $LocalZipHash) {
+  throw "G: versioned package hash differs from local package."
+}
 Assert-DirectoryMatchesZip -Root $DestinationAppDir -ZipPath $DestinationZip
 Write-Host "G: clean folder OK: $DestinationAppDir"
 Write-Host "G: versioned package OK: $DestinationZip"
+Write-Host "G: versioned package SHA256: $DestinationZipHash"
 
 Write-Step "Result"
 Write-Host "Release preflight passed."

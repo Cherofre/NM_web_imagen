@@ -93,6 +93,10 @@ img {
   transition: width 0.2s ease;
 }
 
+.history-sidebar-backdrop {
+  display: none;
+}
+
 .history-sidebar.is-collapsed {
   width: 76px;
   padding: 12px;
@@ -607,6 +611,42 @@ button.primary-action:focus-visible,
   flex-wrap: nowrap;
   max-width: 100%;
   min-width: 0;
+}
+
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.header-actions .language-switcher button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: none;
+}
+
+.header-actions .language-switcher button:hover,
+.header-actions .language-switcher button:focus-visible {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--ink);
+}
+
+.header-actions .language-switcher button.active {
+  background: #111;
+  color: #fff;
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.7);
 }
 
 .connection-button {
@@ -1997,6 +2037,15 @@ button.primary-action:focus-visible,
   box-shadow: 0 10px 26px -22px rgba(15, 23, 42, 0.5);
 }
 
+.prompt-expand-label-short {
+  display: none;
+}
+
+.session-prompt-label-short,
+.session-prompt-summary-short {
+  display: none;
+}
+
 .session-prompt-button.has-content {
   border-color: rgba(17, 17, 17, 0.18);
   background: #fff;
@@ -3158,13 +3207,24 @@ button.primary-action:focus-visible,
     grid-template-columns: 54px minmax(0, 1fr);
   }
 
+  .history-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: block;
+    padding: 0;
+    border: 0;
+    background: rgba(28, 25, 23, 0.14);
+    backdrop-filter: blur(1.5px);
+  }
+
   .history-sidebar {
     position: fixed;
     top: 10px;
     left: 10px;
     bottom: 10px;
     z-index: 45;
-    width: min(320px, calc(100vw - 20px));
+    width: min(300px, calc(100vw - 56px));
     max-height: none;
     transition: width 0.2s ease, box-shadow 0.2s ease;
   }
@@ -3307,7 +3367,7 @@ button.primary-action:focus-visible,
     top: 6px;
     left: 6px;
     bottom: 6px;
-    width: min(310px, calc(100vw - 12px));
+    width: min(284px, calc(100vw - 54px));
   }
 
   .history-sidebar.is-collapsed {
@@ -3316,6 +3376,39 @@ button.primary-action:focus-visible,
     min-width: 48px;
     height: calc(100dvh - 12px);
     padding: 6px;
+  }
+
+  .composer-input textarea {
+    padding-bottom: 98px;
+  }
+
+  .composer-prompt-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .prompt-expand-button {
+    justify-self: end;
+    min-height: 32px;
+  }
+
+  .session-prompt-label-full,
+  .session-prompt-summary-full {
+    display: none;
+  }
+
+  .session-prompt-label-short,
+  .session-prompt-summary-short {
+    display: inline;
+  }
+
+  .prompt-expand-label-full {
+    display: none;
+  }
+
+  .prompt-expand-label-short {
+    display: inline;
   }
 
   .composer-input {
@@ -3378,9 +3471,9 @@ button.primary-action:focus-visible,
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: 202px;
+    bottom: calc(var(--composer-prompt-height, 148px) + 84px);
     width: auto;
-    max-height: min(420px, calc(100dvh - 228px));
+    max-height: max(160px, min(420px, calc(100dvh - var(--composer-prompt-height, 148px) - 112px)));
     overflow-x: hidden;
     overflow-y: auto;
     transform: none;

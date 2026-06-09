@@ -65,3 +65,21 @@ test("deriveGptSizeSelection keeps unmatched values as pure custom", () => {
     summary: "自定义 · 3536x2288",
   });
 });
+
+test("deriveGptSizeSelection accepts localized summary labels", () => {
+  assert.equal(
+    selection.deriveGptSizeSelection(
+      { size: "auto", custom_size: "1536x864" },
+      { autoSummary: "Auto size decided by upstream", customPrefix: "Custom" },
+    ).summary,
+    "Auto size decided by upstream",
+  );
+
+  assert.equal(
+    selection.deriveGptSizeSelection(
+      { size: "custom", custom_size: "3536x2288" },
+      { autoSummary: "Auto size decided by upstream", customPrefix: "Custom" },
+    ).summary,
+    "Custom · 3536x2288",
+  );
+});

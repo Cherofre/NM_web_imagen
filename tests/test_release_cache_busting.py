@@ -88,8 +88,13 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn("python -m py_compile .\\app.py", script)
         self.assertIn("python -m unittest tests.test_studio_sessions tests.test_release_cache_busting", script)
         self.assertIn("failed with exit code", script)
-        self.assertLess(script.index("Frontend tests"), script.index("Package and sync"))
-        self.assertLess(script.index("Package and sync"), script.index("Release preflight"))
+        self.assertIn("Package clean zip", script)
+        self.assertIn("Sync clean package", script)
+        self.assertLess(script.index("Frontend tests"), script.index("Package clean zip"))
+        self.assertLess(script.index("Package clean zip"), script.index("Sync clean package"))
+        self.assertLess(script.index("Sync clean package"), script.index("Release preflight"))
+        self.assertIn("-SkipPackage", script)
+        self.assertIn("-ExpectedVersion", script)
         self.assertIn("sync_release_to_g.ps1", script)
         self.assertIn("release_preflight.ps1", script)
 
@@ -100,6 +105,7 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn("$AppName-v$Version.zip", script)
         self.assertIn("Test-ZipClean", script)
         self.assertIn("config\\.local\\.json", script)
+        self.assertIn('"^$AppName/output/"', script)
         self.assertIn("outputs", script)
         self.assertIn(".runtime", script)
         self.assertIn("PROJECT_STATUS|NEXT_ACTIONS|DECISIONS", script)
@@ -108,6 +114,9 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn('"^$AppName/tests/"', script)
         self.assertIn('"^$AppName/studio-web/"', script)
         self.assertIn("Assert-DirectoryMatchesZip", script)
+        self.assertIn("Get-StreamSha256", script)
+        self.assertIn("Get-FileHash", script)
+        self.assertIn("ExpectedVersion", script)
         self.assertIn("Get-ForbiddenReleasePatterns", script)
         self.assertIn("Package contains release batch launcher", script)
         self.assertIn("Package text contains development or local token", script)
@@ -122,6 +131,9 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertIn("release_one_click.ps1", script)
         self.assertIn('"studio-web"', script)
         self.assertIn('"tests"', script)
+        self.assertIn('"output"', script)
+        self.assertIn("Test-PackageZipClean", script)
+        self.assertIn("$AppName-v$Version.zip", script)
         self.assertIn("Write-PackageReadme", script)
 
     def test_stop_script_only_stops_current_tool_backend(self) -> None:
@@ -142,9 +154,22 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         script = (ROOT / "sync_release_to_g.ps1").read_text(encoding="utf-8")
 
         self.assertIn("$AppName-v$Version.zip", script)
+        self.assertIn("Assert-CleanPackageZip", script)
+        self.assertIn("Refusing to create missing company share anchor", script)
         self.assertNotIn("$DestinationZip", script)
         self.assertNotIn("$LatestZip", script)
         self.assertNotIn('Join-Path $DestinationRoot "$AppName.zip"', script)
+
+    def test_release_scripts_allow_known_company_share_mount_variants(self) -> None:
+        sync_script = (ROOT / "sync_release_to_g.ps1").read_text(encoding="utf-8")
+        preflight_script = (ROOT / "release_preflight.ps1").read_text(encoding="utf-8")
+
+        for script in (sync_script, preflight_script):
+            self.assertIn("Get-CompanyShareRootCandidates", script)
+            self.assertIn('Join-Path "G:\\su\\doc\\Tools"', script)
+            self.assertIn('Join-Path "G:\\doc\\Tools"', script)
+            self.assertIn("Resolve-CompanyShareRoot", script)
+            self.assertIn("Assert-AllowedCompanyShareRoot", script)
 
 
 if __name__ == "__main__":

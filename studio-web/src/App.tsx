@@ -23,7 +23,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Settings2,
   Sparkles,
   Star,
   Trash2,
@@ -72,13 +71,22 @@ import {
   type ActiveProfileIds,
   type ConfigProfile,
 } from "./configProfiles";
-import { normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence";
+import { normalizeStoredQueueJobs, REFRESH_INTERRUPTED_QUEUE_ERROR, serializeQueueJobs } from "./queuePersistence";
 import { appendGenerationQueueJob, nextQueuedGenerationJob } from "./generationQueue";
 import {
   hasActiveQueueJobForSession,
   queueJobTargetExists,
   reconcileInterruptedQueueTurns,
 } from "./queueSessionBoundaries";
+import {
+  createTranslator,
+  formatUpstreamError,
+  LANGUAGE_STORAGE_KEY,
+  resolveInitialLanguage,
+  type AppLanguage,
+} from "./i18n";
+
+type Translator = ReturnType<typeof createTranslator>;
 
 type Engine = "gpt-image-2" | "banana";
 type TurnStatus = "queued" | "running" | "success" | "error";
@@ -282,31 +290,10 @@ const queueStorageKey = "image-generate-web-tool:studio-queue";
 const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
-const gptSizePresetOptions = gptSizeOptions.filter((item) => item !== "custom");
 const gptQualityOptions = ["auto", "low", "medium", "high"];
-const gptQualityLabels: Record<string, string> = {
-  auto: "自动",
-  low: "低",
-  medium: "中",
-  high: "高",
-};
 const gptEditModeOptions = ["generate", "reference", "outpaint"];
-const gptEditModeLabels: Record<string, string> = {
-  generate: "生成",
-  reference: "参考",
-  outpaint: "扩图",
-};
 const gptChatModelOptions = ["gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh"];
-const gptReasoningLabels: Record<string, string> = {
-  auto: "自动",
-  none: "无",
-  minimal: "极低",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "极高",
-};
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
 
@@ -338,6 +325,7 @@ const QUEUE_POPOVER_MIN_WIDTH = 320;
 const QUEUE_POPOVER_MAX_WIDTH = 560;
 const QUEUE_POPOVER_MIN_HEIGHT = 220;
 const QUEUE_POPOVER_MAX_HEIGHT = 520;
+const SIDEBAR_NARROW_QUERY = "(max-width: 920px)";
 
 type SessionPromptEditorDraft = {
   fixed_prompt: string;
@@ -345,13 +333,20 @@ type SessionPromptEditorDraft = {
   poster_text: string;
 };
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(file: File, fallbackError = "Failed to read reference image"): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => resolve(String(reader.result || "")));
-    reader.addEventListener("error", () => reject(reader.error || new Error("读取参考图失败")));
+    reader.addEventListener("error", () => reject(reader.error || new Error(fallbackError)));
     reader.readAsDataURL(file);
   });
+}
+
+function shouldStartHistoryCollapsed() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia(SIDEBAR_NARROW_QUERY).matches;
 }
 
 function createEmptySession(title = "新对话"): WorkbenchSession {
@@ -403,23 +398,7 @@ const defaultBananaForm: BananaForm = {
   disable_ssl: false,
 };
 
-const inspirationPrompts = [
-  {
-    title: "收藏版角色海报",
-    prompt:
-      "一个收藏版叙事海报，中心是强辨识度的象征性轮廓，内部展开完整主题宇宙，纸张颗粒、水彩晕染、电影级光影、高级留白。",
-  },
-  {
-    title: "博物馆中文图鉴",
-    prompt:
-      "青花瓷博物馆图鉴式中文信息图，中心主体清晰，左侧结构拆解，右侧材质和纹样说明，简体中文标注，米白纸张质感。",
-  },
-  {
-    title: "次世代游戏截图",
-    prompt:
-      "次世代开放世界赛车游戏实机截图，深圳夜景，高楼天际线，湿润路面反射，速度感，真实车辆材质，电影级构图。",
-  },
-];
+const inspirationPromptKeys = ["characterPoster", "museumGuide", "gameScreenshot"];
 
 function engineLabel(engine: Engine | string) {
   return engine === "banana" ? "Banana Gemini" : "GPT Image 2";
@@ -432,11 +411,11 @@ function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function formatTime(value?: string) {
+function formatTime(value?: string, language: AppLanguage = "zh-CN") {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -500,8 +479,8 @@ function compactInlineText(value: string, limit = 26) {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
-function queueJobTitle(job: QueueJob) {
-  return compactInlineText(job.prompt, 24) || "未命名任务";
+function queueJobTitle(job: QueueJob, fallback: string) {
+  return compactInlineText(job.prompt, 24) || fallback;
 }
 
 function clampComposerPromptHeight(value: number) {
@@ -521,11 +500,11 @@ function clampQueuePopoverSize(width: number, height: number) {
   };
 }
 
-function summarizeSessionPromptDrafts(drafts: SessionDrafts) {
+function summarizeSessionPromptDrafts(drafts: SessionDrafts, t: Translator) {
   return [
-    drafts.shared.fixed_prompt ? `固定：${compactInlineText(drafts.shared.fixed_prompt)}` : "",
-    drafts.gpt.negative_prompt ? `负面：${compactInlineText(drafts.gpt.negative_prompt)}` : "",
-    drafts.gpt.poster_text ? `文字：${compactInlineText(drafts.gpt.poster_text)}` : "",
+    drafts.shared.fixed_prompt ? t("sessionPrompt.summaryFixed", { value: compactInlineText(drafts.shared.fixed_prompt) }) : "",
+    drafts.gpt.negative_prompt ? t("sessionPrompt.summaryNegative", { value: compactInlineText(drafts.gpt.negative_prompt) }) : "",
+    drafts.gpt.poster_text ? t("sessionPrompt.summaryText", { value: compactInlineText(drafts.gpt.poster_text) }) : "",
   ]
     .filter(Boolean)
     .join(" | ");
@@ -587,13 +566,32 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
-function sessionTitleFromTurns(turns: ConversationTurn[]) {
+function sessionTitleFromTurns(turns: ConversationTurn[], fallback = "新对话") {
   const firstPrompt = turns.find((turn) => turn.prompt.trim())?.prompt.trim();
-  if (!firstPrompt) return "新对话";
+  if (!firstPrompt) return fallback;
   return firstPrompt.length > 24 ? `${firstPrompt.slice(0, 24)}...` : firstPrompt;
 }
 
-function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: string, limit = 12): ChatMessage[] {
+function localizeSessionTitle(title: string, t: Translator) {
+  const trimmed = title.trim();
+  if (trimmed === "新对话" || trimmed === "New chat") {
+    return t("session.new");
+  }
+  const numbered = trimmed.match(/^(?:新对话|New chat) (\d+)$/);
+  if (numbered) {
+    return t("session.newNumber", { count: numbered[1] });
+  }
+  return title || t("session.new");
+}
+
+function formatStoredErrorMessage(t: Translator, message: string) {
+  if (message === REFRESH_INTERRUPTED_QUEUE_ERROR || message === "页面刷新，任务已中断") {
+    return t("status.queueInterrupted");
+  }
+  return formatUpstreamError(t, message);
+}
+
+function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: string, t: Translator, limit = 12): ChatMessage[] {
   const context: ChatMessage[] = [];
   for (const turn of turns) {
     if (turn.id === currentTurnId) break;
@@ -609,7 +607,7 @@ function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: stri
 
     if (turn.mode !== "chat" && turn.status === "success") {
       const count = turn.images.length;
-      const imageSummary = count > 0 ? `已根据上一轮提示生成 ${count} 张图片。` : "上一轮生成已完成，但没有记录到结果图。";
+      const imageSummary = count > 0 ? t("prompt.imageSummary", { count }) : t("prompt.imageSummaryEmpty");
       const metaMessages = Array.isArray(turn.meta?.messages) ? turn.meta.messages : [];
       const textMessages = metaMessages.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 3);
       context.push({
@@ -617,18 +615,18 @@ function buildChatContextMessages(turns: ConversationTurn[], currentTurnId: stri
         content: [imageSummary, ...textMessages].join("\n"),
       });
     } else if (turn.error?.trim()) {
-      context.push({ role: "assistant", content: `上一轮失败：${turn.error.trim()}` });
+      context.push({ role: "assistant", content: t("prompt.previousFailed", { error: formatStoredErrorMessage(t, turn.error.trim()) }) });
     }
   }
   return context.slice(-limit);
 }
 
-function buildGenerationContextPrompt(turns: ConversationTurn[], limit = 10) {
-  const messages = buildChatContextMessages(turns, "", limit);
+function buildGenerationContextPrompt(turns: ConversationTurn[], t: Translator, limit = 10) {
+  const messages = buildChatContextMessages(turns, "", t, limit);
   if (!messages.length) return "";
   return messages
     .map((message) => {
-      const label = message.role === "assistant" ? "创作助手" : "用户";
+      const label = message.role === "assistant" ? t("prompt.assistantLabel") : t("prompt.userLabel");
       return `${label}: ${message.content}`;
     })
     .join("\n\n");
@@ -640,20 +638,16 @@ function runningTurnSeconds(turn: ConversationTurn, nowMs: number) {
   return Math.max(0, Math.floor((nowMs - startedAt) / 1000));
 }
 
-function runningTurnMessage(turn: ConversationTurn, nowMs: number) {
+function runningTurnMessage(turn: ConversationTurn, nowMs: number, t: Translator) {
   const seconds = runningTurnSeconds(turn, nowMs);
   if (turn.mode === "chat") {
-    if (seconds < 4) return `正在整理上下文... ${seconds}s`;
-    if (seconds < 12) return `思考中... ${seconds}s`;
-    return `上游还在处理，已等待 ${seconds}s`;
+    if (seconds < 4) return t("running.chatShort", { seconds });
+    if (seconds < 12) return t("running.chatThinking", { seconds });
+    return t("running.chatUpstream", { seconds });
   }
-  if (seconds < 6) return `正在提交生图请求... ${seconds}s`;
-  if (seconds < 20) return `等待上游返回图片... ${seconds}s`;
-  return `图片生成仍在进行，已等待 ${seconds}s`;
-}
-
-function queuedTurnMessage(turn: ConversationTurn) {
-  return turn.mode === "chat" ? "等待发送..." : "排队中，等待前面的生图任务完成";
+  if (seconds < 6) return t("running.generateSubmit", { seconds });
+  if (seconds < 20) return t("running.generateWait", { seconds });
+  return t("running.generateLong", { seconds });
 }
 
 function sessionTimestamp(session: WorkbenchSession) {
@@ -669,16 +663,18 @@ function isPlaceholderValue(value: string, placeholder: string) {
   return value.trim() === "" || value.trim() === placeholder;
 }
 
-function configIssues(engine: Engine, gpt: GptForm, banana: BananaForm) {
+function configIssues(engine: Engine, gpt: GptForm, banana: BananaForm, t?: Translator) {
   const issues: string[] = [];
+  const apiUrlLabel = t ? t("config.apiUrl") : "API 请求地址";
+  const modelLabel = t ? t("config.modelName") : "模型名";
   if (engine === "banana") {
     if (!banana.api_key.trim()) issues.push("API Key");
-    if (isPlaceholderValue(banana.api_base_url, defaultBananaForm.api_base_url)) issues.push("API 请求地址");
-    if (!banana.model_type.trim()) issues.push("模型名");
+    if (isPlaceholderValue(banana.api_base_url, defaultBananaForm.api_base_url)) issues.push(apiUrlLabel);
+    if (!banana.model_type.trim()) issues.push(modelLabel);
   } else {
     if (!gpt.api_key.trim()) issues.push("API Key");
-    if (isPlaceholderValue(gpt.base_url, defaultGptForm.base_url)) issues.push("API 请求地址");
-    if (!gpt.model.trim()) issues.push("模型名");
+    if (isPlaceholderValue(gpt.base_url, defaultGptForm.base_url)) issues.push(apiUrlLabel);
+    if (!gpt.model.trim()) issues.push(modelLabel);
   }
   return issues;
 }
@@ -921,6 +917,7 @@ function isSameOriginOutput(src: string) {
 function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
+  const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => loadJson(gptStorageKey, defaultGptForm));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => loadJson(bananaStorageKey, defaultBananaForm));
@@ -931,7 +928,7 @@ function App() {
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "history">("sessions");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(() => shouldStartHistoryCollapsed());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
@@ -977,6 +974,9 @@ function App() {
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const t = createTranslator(language);
+  const listText = (items: string[]) => items.join(language === "en" ? ", " : "、");
+  const isDefaultSessionTitle = (title: string) => title === "新对话" || title === "New chat" || title === t("session.new");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const promptWrapRef = useRef<HTMLDivElement | null>(null);
@@ -996,7 +996,7 @@ function App() {
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
   const initialScrollKeyRef = useRef("");
-  const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession();
+  const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession(t("session.new"));
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
   const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
@@ -1004,18 +1004,18 @@ function App() {
   const activeProfileName = deriveConfigDisplayName(
     activeProfile?.name,
     activeEngine === "banana" ? bananaForm.api_base_url : gptForm.base_url,
-    activeModel || "默认配置",
+    activeModel || t("config.label"),
   );
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
-  const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm);
+  const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm, t);
   const hasCompleteConfig = activeConfigIssues.length === 0;
-  const configButtonLabel = hasCompleteConfig ? `配置 · ${activeProfileName}` : "检查配置";
+  const configButtonLabel = hasCompleteConfig ? `${t("config.label")} · ${activeProfileName}` : t("config.check");
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
   const runningQueueCount = queueJobs.filter((job) => job.status === "running").length;
   const activeQueueCount = queueJobs.filter((job) => job.status === "queued" || job.status === "running").length;
-  const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts);
+  const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts, t);
   const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
   const queuePopoverStyle: CSSProperties = {
     "--queue-popover-width": `${queuePopoverSize.width}px`,
@@ -1024,7 +1024,38 @@ function App() {
   const gptSizeSelection = deriveGptSizeSelection({
     size: gptForm.size,
     custom_size: normalizeCustomImageSize(gptForm.custom_size).value,
+  }, {
+    autoSummary: t("composer.autoSizeSummary"),
+    customPrefix: t("config.custom"),
   });
+
+  useEffect(() => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    document.documentElement.lang = language;
+    document.title = t("app.title");
+  }, [language]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(SIDEBAR_NARROW_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setHistoryCollapsed(true);
+      }
+    };
+
+    if (media.matches) {
+      setHistoryCollapsed(true);
+    }
+
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", handleChange);
+      return () => media.removeEventListener("change", handleChange);
+    }
+
+    media.addListener(handleChange);
+    return () => media.removeListener(handleChange);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(gptStorageKey, JSON.stringify(gptForm));
@@ -1102,7 +1133,7 @@ function App() {
       localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
     } catch {
       localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
-      setNotice("会话图片引用过多，已只保留文字上下文");
+      setNotice(t("status.sessionTooLarge"));
     }
     if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
     sessionSaveTimerRef.current = window.setTimeout(() => {
@@ -1124,7 +1155,7 @@ function App() {
             localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
           }
         })
-        .catch((error) => setNotice(error instanceof Error ? error.message : "保存会话失败"));
+        .catch((error) => setNotice(error instanceof Error ? error.message : t("status.sessionSaveFailed")));
     }, 650);
     return () => {
       if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
@@ -1216,7 +1247,7 @@ function App() {
 
   useEffect(() => {
     if (!hasPromptedForConfig || connectionOpen || hasCompleteConfig) return;
-    setNotice(`当前配置不完整：${activeConfigIssues.join("、")}`);
+    setNotice(t("config.incompleteNotice", { items: listText(activeConfigIssues) }));
   }, [connectionOpen, hasCompleteConfig, hasPromptedForConfig]);
 
   async function loadDefaults() {
@@ -1233,20 +1264,20 @@ function App() {
       setProfiles(nextProfiles.profiles);
       setActiveProfileIds(nextProfiles.activeProfileIds);
       const startupEngine: Engine = "gpt-image-2";
-      const issues = configIssues(startupEngine, nextGpt, nextBanana);
+      const issues = configIssues(startupEngine, nextGpt, nextBanana, t);
       if (!hasPromptedForConfig) {
         setHasPromptedForConfig(true);
         if (issues.length > 0) {
           setConnectionOpen(true);
-          setNotice(`请先补全接口配置：${issues.join("、")}`);
+          setNotice(t("config.completeFirst", { items: listText(issues) }));
         } else {
-          setNotice(payload.sources?.length ? `已读取 ${payload.sources.join("、")}` : "已读取后端默认配置");
+          setNotice(payload.sources?.length ? t("config.loadedSources", { sources: listText(payload.sources) }) : t("config.loadedDefaults"));
         }
       } else {
-        setNotice(payload.sources?.length ? `已读取 ${payload.sources.join("、")}` : "已读取后端默认配置");
+        setNotice(payload.sources?.length ? t("config.loadedSources", { sources: listText(payload.sources) }) : t("config.loadedDefaults"));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "读取默认配置失败");
+      setNotice(error instanceof Error ? error.message : t("config.loadDefaultsFailed"));
       if (!hasPromptedForConfig) {
         setHasPromptedForConfig(true);
         setConnectionOpen(true);
@@ -1319,7 +1350,9 @@ function App() {
       {
         id,
         engine: activeEngine,
-        name: `新配置 ${items.filter((item) => item.engine === activeEngine).length + 1}`,
+        name: language === "en"
+          ? `New profile ${items.filter((item) => item.engine === activeEngine).length + 1}`
+          : `新配置 ${items.filter((item) => item.engine === activeEngine).length + 1}`,
         form,
       },
     ]);
@@ -1330,10 +1363,10 @@ function App() {
     clearDiagnosticsResult();
     const sameEngineProfiles = profiles.filter((item) => item.engine === profile.engine);
     if (sameEngineProfiles.length <= 1) {
-      setNotice("至少保留一个配置");
+      setNotice(t("config.keepOne"));
       return;
     }
-    if (!confirm(`删除配置「${profile.name || "未命名配置"}」？保存后会写入 config.local.json。`)) return;
+    if (!confirm(t("config.deleteConfirm", { name: profile.name || t("queue.unnamed") }))) return;
 
     const remainingProfiles = sameEngineProfiles.filter((item) => item.id !== profile.id);
     const nextActiveProfile = activeProfileIds[profile.engine] === profile.id ? remainingProfiles[0] : null;
@@ -1341,9 +1374,9 @@ function App() {
     if (nextActiveProfile) {
       setActiveProfileIds((current) => ({ ...current, [profile.engine]: nextActiveProfile.id }));
       applyProfileForm(nextActiveProfile);
-      setNotice(`已删除配置，并切换到 ${nextActiveProfile.name || "其他配置"}；保存后写入 config.local.json`);
+      setNotice(t("config.deletedSwitched", { name: nextActiveProfile.name || t("config.otherProfile") }));
     } else {
-      setNotice("已删除配置；保存后写入 config.local.json");
+      setNotice(t("config.deleted"));
     }
   }
 
@@ -1360,20 +1393,20 @@ function App() {
       const payload = (await response.json()) as DiagnosticsResult;
       setDiagnosticsResult(payload);
       if (payload.ok) {
-        setNotice("连接诊断通过：生图和聊天都可用");
+        setNotice(t("config.diagnosticsAllOk"));
       } else if (payload.warning) {
         setNotice(payload.warning);
       } else {
-        setNotice("连接诊断未通过");
+        setNotice(t("config.diagnosticsNotPassed"));
       }
     } catch (error) {
       setDiagnosticsResult({
         ok: false,
         engine: activeEngine,
-        warning: error instanceof Error ? error.message : "连接诊断失败",
+        warning: error instanceof Error ? error.message : t("config.diagnosticsFailed"),
         results: [],
       });
-      setNotice(error instanceof Error ? error.message : "连接诊断失败");
+      setNotice(error instanceof Error ? error.message : t("config.diagnosticsFailed"));
     } finally {
       setDiagnosticsRunning(false);
     }
@@ -1386,7 +1419,7 @@ function App() {
   function jumpToQueueJob(job: QueueJob) {
     setQueueOpen(false);
     if (!queueJobTargetExists(sessions, job)) {
-      setNotice("原会话内容已不存在，无法跳转");
+      setNotice(t("status.originalSessionMissingJump"));
       return;
     }
     if (job.sessionId !== activeSessionId) {
@@ -1406,7 +1439,7 @@ function App() {
     updateQueueJob(job.id, {
       status: "canceled",
       finishedAt,
-      error: "已取消生成",
+      error: t("status.generationCanceled"),
     });
     setSessions((current) =>
       current.map((session) =>
@@ -1420,7 +1453,7 @@ function App() {
                       ...turn,
                       status: "error",
                       finishedAt,
-                      error: "已取消生成",
+                      error: t("status.generationCanceled"),
                     }
                   : turn,
               ),
@@ -1428,7 +1461,7 @@ function App() {
           : session,
       ),
     );
-    setNotice("已取消队列任务");
+    setNotice(t("status.queueCanceled"));
   }
 
   function retryQueueJob(job: QueueJob) {
@@ -1446,7 +1479,7 @@ function App() {
       prompt: job.prompt,
     });
     if (!targetExists) {
-      setNotice("原会话已不存在，已在当前会话重试");
+      setNotice(t("status.retryInCurrentSession"));
     }
   }
 
@@ -1454,9 +1487,9 @@ function App() {
     setQueueOpen(false);
     const targetSessionId = sessions.some((session) => session.id === job.sessionId) ? job.sessionId : activeSessionId;
     if (targetSessionId !== job.sessionId) {
-      setNotice("原会话已不存在，已套用到当前会话");
+      setNotice(t("status.applyInCurrentSession"));
     } else {
-      setNotice("已套用队列任务提示词");
+      setNotice(t("status.queuePromptApplied"));
     }
     setActiveSessionId(targetSessionId);
     setActiveEngine(job.engine);
@@ -1512,9 +1545,9 @@ function App() {
       });
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
-      setNotice(`已保存到 ${payload.path || "config.local.json"}`);
+      setNotice(t("config.savedTo", { path: payload.path || "config.local.json" }));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "保存配置失败");
+      setNotice(error instanceof Error ? error.message : t("config.saveFailed"));
     }
   }
 
@@ -1526,7 +1559,7 @@ function App() {
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : []);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "读取历史失败");
+      setNotice(error instanceof Error ? error.message : t("history.loadFailed"));
     } finally {
       setHistoryLoading(false);
     }
@@ -1544,12 +1577,12 @@ function App() {
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : history);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "收藏失败");
+      setNotice(error instanceof Error ? error.message : t("history.favoriteFailed"));
     }
   }
 
   async function deleteHistory(entry: HistoryEntry) {
-    if (!confirm("删除这条历史记录？不会清空当前会话。")) return;
+    if (!confirm(t("history.deleteConfirm"))) return;
     try {
       const response = await fetch(`/api/history/${encodeURIComponent(entry.id)}?limit=160`, {
         method: "DELETE",
@@ -1558,7 +1591,7 @@ function App() {
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : history.filter((item) => item.id !== entry.id));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "删除失败");
+      setNotice(error instanceof Error ? error.message : t("history.deleteFailed"));
     }
   }
 
@@ -1688,7 +1721,7 @@ function App() {
       const nextSession = sessions.find((session) => session.id === nextSessionId);
       setPendingSessionSwitch({
         nextSessionId,
-        nextSessionTitle: nextSession?.title || "新对话",
+        nextSessionTitle: nextSession ? localizeSessionTitle(nextSession.title, t) : t("session.new"),
       });
       return;
     }
@@ -1696,7 +1729,7 @@ function App() {
   }
 
   function createSessionFromPrompt(prompt = "") {
-    const session = createEmptySession(prompt ? sessionTitleFromTurns([{ id: "draft", engine: activeEngine, prompt, createdAt: new Date().toISOString(), status: "success", images: [] }]) : `新对话 ${sessions.length + 1}`);
+    const session = createEmptySession(prompt ? sessionTitleFromTurns([{ id: "draft", engine: activeEngine, prompt, createdAt: new Date().toISOString(), status: "success", images: [] }], t("session.new")) : t("session.newNumber", { count: sessions.length + 1 }));
     setSessions((current) => sortSessionsNewestFirst([session, ...current]).slice(0, 80));
     setActiveSessionId(session.id);
     return session;
@@ -1704,11 +1737,11 @@ function App() {
 
   function deleteSession(sessionId: string) {
     if (hasActiveQueueJobForSession(queueJobs, sessionId)) {
-      setNotice("该会话还有生成任务进行中，请先取消或等待完成");
+      setNotice(t("status.sessionBusy"));
       return;
     }
     setSessions((current) => {
-      const resolution = resolveSessionDeletion(current, activeSessionId, sessionId, () => createEmptySession());
+      const resolution = resolveSessionDeletion(current, activeSessionId, sessionId, () => createEmptySession(t("session.new")));
       if (resolution.clearReferences) {
         setReferences([]);
       }
@@ -1759,32 +1792,34 @@ function App() {
         },
       }));
     }
-    setNotice("已套用历史参数，连接配置保持当前值");
+    setNotice(t("status.historyApplied"));
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
-  function appendReferenceFiles(files: File[], sourceLabel = "参考图") {
+  function appendReferenceFiles(files: File[], sourceLabel = t("reference.button")) {
     const incoming = files.filter((file) => file.type.startsWith("image/"));
     if (incoming.length === 0) {
-      setNotice("没有找到可添加的图片文件");
+      setNotice(t("status.noImageFiles"));
       return;
     }
     const limit = activeEngine === "banana" ? 14 : 16;
     const available = Math.max(0, limit - references.length);
     const added = Math.min(incoming.length, available);
     if (added === 0) {
-      setNotice(`参考图已达到 ${limit} 张上限`);
+      setNotice(t("status.referenceLimit", { limit }));
       return;
     }
     setReferences((current) => {
       const next = [...current, ...incoming].slice(0, limit);
       return next;
     });
-    setNotice(added < incoming.length ? `${sourceLabel}已加入 ${added} 张，已达到 ${limit} 张上限` : `${sourceLabel}已加入 ${incoming.length} 张`);
+    setNotice(added < incoming.length
+      ? t("status.referencesAddedLimited", { source: sourceLabel, count: added, limit })
+      : t("status.referencesAdded", { source: sourceLabel, count: incoming.length }));
   }
 
   function onReferenceChange(event: ChangeEvent<HTMLInputElement>) {
-    appendReferenceFiles(Array.from(event.target.files || []), "参考图");
+    appendReferenceFiles(Array.from(event.target.files || []), t("reference.button"));
     event.target.value = "";
   }
 
@@ -1932,7 +1967,7 @@ function App() {
             name: file.name || `reference-${index + 1}.png`,
             size: file.size,
             mime_type: file.type || "image/png",
-            src: await readFileAsDataUrl(file),
+            src: await readFileAsDataUrl(file, t("status.readReferenceFailed")),
           } satisfies ReferenceSnapshot;
         } catch {
           return {
@@ -1956,7 +1991,7 @@ function App() {
       next.splice(toIndex, 0, item);
       return next;
     });
-    setNotice(`参考图已移动到第 ${toIndex + 1} 位`);
+    setNotice(t("status.referenceMoved", { index: toIndex + 1 }));
   }
 
   function onReferenceDragStart(event: DragEvent<HTMLElement>, index: number) {
@@ -2030,7 +2065,7 @@ function App() {
     event.stopPropagation();
     dragDepthRef.current = 0;
     setDragActive(false);
-    appendReferenceFiles(Array.from(event.dataTransfer.files || []), "拖入图片");
+    appendReferenceFiles(Array.from(event.dataTransfer.files || []), t("reference.droppedSource"));
   }
 
   function closeOnEscape(event: KeyboardEvent<HTMLDivElement>) {
@@ -2061,7 +2096,7 @@ function App() {
 
   async function addOutputAsReference(src: string, name: string) {
     if (!isSameOriginOutput(src)) {
-      setNotice("只有同源 outputs 图片可以作为参考图继续生成");
+      setNotice(t("status.outputOnly"));
       return;
     }
     try {
@@ -2072,18 +2107,18 @@ function App() {
         type: blob.type || "image/png",
         lastModified: Date.now(),
       });
-      appendReferenceFiles([file], "outputs 图片");
+      appendReferenceFiles([file], "outputs");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "添加参考图失败");
+      setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed"));
     }
   }
 
   function selectEngine(engine: Engine) {
     setActiveEngine(engine);
-    const issues = configIssues(engine, gptForm, bananaForm);
+    const issues = configIssues(engine, gptForm, bananaForm, t);
     if (issues.length > 0) {
       setConnectionOpen(true);
-      setNotice(`请先补全 ${engineLabel(engine)} 配置：${issues.join("、")}`);
+      setNotice(t("config.completeEngineFirst", { engine: engineLabel(engine), items: listText(issues) }));
     }
   }
 
@@ -2125,15 +2160,15 @@ function App() {
   async function copyReferencesFromTurn(turn: ConversationTurn) {
     const snapshots = turn.referenceSnapshots || [];
     if (!snapshots.length) {
-      setNotice("这一轮没有可复制的参考图");
+      setNotice(t("status.noReferencesToCopy"));
       return;
     }
     const files = (await Promise.all(snapshots.map(referenceSnapshotToFile))).filter((file): file is File => Boolean(file));
     if (!files.length) {
-      setNotice("这轮参考图只保留了文件名，当前页面里没有可复用的图片数据");
+      setNotice(t("status.referenceOnlyNames"));
       return;
     }
-    appendReferenceFiles(files, "这轮参考图");
+    appendReferenceFiles(files, t("reference.turnSource"));
   }
 
   async function regenerateFromTurn(turn: ConversationTurn) {
@@ -2197,7 +2232,7 @@ function App() {
       updateQueueJob(jobId, {
         status: "canceled",
         finishedAt,
-        error: "任务已中断，请重新提交",
+        error: t("status.queueInterrupted"),
       });
       queueProcessingRef.current = null;
       return;
@@ -2227,7 +2262,7 @@ function App() {
           : session,
       ),
     );
-    setStatus(`${engineLabel(payload.engine)} 生成中`);
+    setStatus(t("status.generationRunning", { engine: engineLabel(payload.engine) }));
 
     try {
       const response = await fetch(`/api/generate/${payload.engine}`, {
@@ -2265,7 +2300,7 @@ function App() {
                         finishedAt,
                         elapsedSeconds: elapsed,
                         images,
-                        error: responsePayload.ok ? "" : "接口返回了结果，但没有拿到图片",
+                        error: responsePayload.ok ? "" : t("status.noImagesFromResponse"),
                         meta: {
                           ...(item.meta || {}),
                           ...(responsePayload.meta || {}),
@@ -2279,22 +2314,22 @@ function App() {
         ),
       );
       stickToConversationEndIfNearBottom();
-      setStatus(responsePayload.ok ? `返回 ${images.length} 张图片` : "请求完成但没有图片");
-      setNotice(responsePayload.ok ? "图片已保存到 outputs" : "请查看返回信息");
+      setStatus(responsePayload.ok ? t("status.generationReturned", { count: images.length }) : t("status.generationNoImages"));
+      setNotice(responsePayload.ok ? t("status.imagesSaved") : t("status.checkResponse"));
       updateQueueJob(jobId, {
         status: responsePayload.ok ? "success" : "error",
         finishedAt,
         elapsedSeconds: elapsed,
         images,
-        error: responsePayload.ok ? "" : "接口返回了结果，但没有拿到图片",
+        error: responsePayload.ok ? "" : t("status.noImagesFromResponse"),
       });
       if (responsePayload.history_entry) {
         void loadHistory();
       }
     } catch (error) {
       const message = error instanceof DOMException && error.name === "AbortError"
-        ? "已取消生成"
-        : error instanceof Error ? error.message : "生成失败";
+        ? t("status.generationCanceled")
+        : error instanceof Error ? error.message : t("status.generationFailed");
       const finishedAt = new Date().toISOString();
       setSessions((current) =>
         current.map((session) =>
@@ -2318,10 +2353,10 @@ function App() {
         ),
       );
       stickToConversationEndIfNearBottom();
-      setStatus(message === "已取消生成" ? "生成已取消" : "生成失败");
+      setStatus(message === t("status.generationCanceled") ? t("status.generationCanceled") : t("status.generationFailed"));
       setNotice(message);
       updateQueueJob(jobId, {
-        status: message === "已取消生成" ? "canceled" : "error",
+        status: message === t("status.generationCanceled") ? "canceled" : "error",
         finishedAt,
         elapsedSeconds: (performance.now() - startedAt) / 1000,
         error: message,
@@ -2343,7 +2378,7 @@ function App() {
     const currentGptForm = gptForm;
     const currentBananaForm = bananaForm;
     const currentReferences = overrides.references || references;
-    const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm);
+    const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm, t);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
     const generationCount = generationCountFor(currentEngine, currentGptForm, currentBananaForm);
     const draftOverride = overrides.draftOverride || {};
@@ -2353,7 +2388,7 @@ function App() {
     });
     const prompt = submissionDrafts.prompt.trim();
     if (!prompt) {
-      setNotice(currentMode === "chat" ? "请先输入要记录的聊天内容" : "请先填写提示词");
+      setNotice(currentMode === "chat" ? t("status.emptyChat") : t("status.emptyPrompt"));
       promptRef.current?.focus();
       return;
     }
@@ -2361,7 +2396,7 @@ function App() {
     if (currentMode !== "chat") {
       if (currentConfigIssues.length > 0) {
         setConnectionOpen(true);
-        setNotice(`请先补全接口配置：${currentConfigIssues.join("、")}`);
+        setNotice(t("config.completeFirst", { items: listText(currentConfigIssues) }));
         return;
       }
       if (generationCount > 1 && !overrides.skipMultiImageConfirm && !skipMultiImageConfirmForSession) {
@@ -2403,7 +2438,7 @@ function App() {
           session.id === targetSessionId
             ? {
                 ...session,
-                title: session.turns.length === 0 || session.title === "新对话" ? sessionTitleFromTurns([turn]) : session.title,
+                title: session.turns.length === 0 || isDefaultSessionTitle(session.title) ? sessionTitleFromTurns([turn], t("session.new")) : session.title,
                 updatedAt: createdAt,
                 turns: [...session.turns, turn].slice(-maxTurns),
               }
@@ -2414,11 +2449,11 @@ function App() {
       applyPrompt("", currentEngine);
       setTimeout(() => promptRef.current?.focus(), 0);
       setBusy(true);
-      setStatus(`${engineLabel(currentEngine)} 聊天中`);
+      setStatus(t("status.chatRunning", { engine: engineLabel(currentEngine) }));
       const startedAt = performance.now();
       try {
         const targetSession = sessions.find((session) => session.id === targetSessionId);
-        const chatContextMessages = buildChatContextMessages([...(targetSession?.turns || []), turn], turnId);
+        const chatContextMessages = buildChatContextMessages([...(targetSession?.turns || []), turn], turnId, t);
         const response = await fetch(`/api/chat/${currentEngine}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2426,7 +2461,7 @@ function App() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
-        const reply = typeof payload.reply === "string" && payload.reply.trim() ? payload.reply.trim() : "上游聊天接口没有返回文字。";
+        const reply = typeof payload.reply === "string" && payload.reply.trim() ? payload.reply.trim() : t("status.noChatReply");
         const elapsed = Number(payload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
         setSessions((current) =>
           current.map((session) =>
@@ -2451,10 +2486,10 @@ function App() {
           ),
         );
         stickToConversationEndIfNearBottom();
-        setStatus("聊天已回复");
-        setNotice(referenceSnapshots.length ? `聊天已回复，包含 ${referenceSnapshots.length} 张参考图快照` : "聊天已回复");
+        setStatus(t("status.chatReplied"));
+        setNotice(referenceSnapshots.length ? t("status.chatRepliedWithRefs", { count: referenceSnapshots.length }) : t("status.chatReplied"));
       } catch (error) {
-        const message = error instanceof Error ? error.message : "聊天失败";
+        const message = error instanceof Error ? error.message : t("status.chatFailed");
         setSessions((current) =>
           current.map((session) =>
             session.id === targetSessionId
@@ -2477,7 +2512,7 @@ function App() {
           ),
         );
         stickToConversationEndIfNearBottom();
-        setStatus("聊天失败");
+        setStatus(t("status.chatFailed"));
         setNotice(message);
       } finally {
         setBusy(false);
@@ -2488,7 +2523,10 @@ function App() {
     let submitGptForm = currentGptForm;
     if (currentEngine === "gpt-image-2") {
       const normalized = normalizeCustomSize(false);
-      if (normalized?.notice) setNotice(normalized.notice);
+      if (normalized?.notice) {
+        const notice = formatSizeAdjustmentNotice(normalized);
+        if (notice) setNotice(notice);
+      }
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
     }
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
@@ -2517,7 +2555,7 @@ function App() {
         session.id === targetSessionId
           ? {
               ...session,
-              title: session.turns.length === 0 || session.title === "新对话" ? sessionTitleFromTurns([turn]) : session.title,
+              title: session.turns.length === 0 || isDefaultSessionTitle(session.title) ? sessionTitleFromTurns([turn], t("session.new")) : session.title,
               updatedAt: createdAt,
               turns: [...session.turns, turn].slice(-maxTurns),
             }
@@ -2550,62 +2588,62 @@ function App() {
       posterText: submitPosterText,
     };
     setQueueOpen(true);
-    setStatus("已加入生图队列");
+    setStatus(t("status.queuedGeneration"));
   }
 
   async function openOutputs() {
     try {
       const response = await fetch("/api/open-outputs", { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
-      setNotice("已请求打开 outputs 文件夹");
+      setNotice(t("status.openOutputsRequested"));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "打开 outputs 失败");
+      setNotice(error instanceof Error ? error.message : t("status.openOutputsFailed"));
     }
   }
 
   function copyPrompt(prompt: string) {
     void navigator.clipboard?.writeText(prompt);
-    setNotice("提示词已复制");
+    setNotice(t("status.promptCopied"));
   }
 
   function clearCurrentSession() {
     if (hasActiveQueueJobForSession(queueJobs, activeSessionId)) {
-      setNotice("当前会话还有生成任务进行中，请先取消或等待完成");
+      setNotice(t("status.currentSessionBusy"));
       return;
     }
     updateActiveSession((session) => ({
       ...session,
-      title: "新对话",
+      title: t("session.new"),
       updatedAt: new Date().toISOString(),
       turns: [],
       drafts: emptySessionDrafts(),
     }));
     setReferences([]);
-    setStatus("就绪");
-    setNotice("已清空当前会话");
+    setStatus(t("status.ready"));
+    setNotice(t("status.sessionCleared"));
     setExpandedTurns({});
   }
 
   function startFreshSession() {
-    const session = createEmptySession(`新对话 ${sessions.length + 1}`);
+    const session = createEmptySession(t("session.newNumber", { count: sessions.length + 1 }));
     setSessions((current) => sortSessionsNewestFirst([session, ...current]).slice(0, 80));
     setActiveSessionId(session.id);
     setReferences([]);
-    setStatus("就绪");
+    setStatus(t("status.ready"));
     setSidebarMode("sessions");
-    setNotice("已新建对话");
+    setNotice(t("status.sessionCreated"));
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
   function openRenameSession() {
-    setSessionTitleDraft(activeSession.title || "新对话");
+    setSessionTitleDraft(localizeSessionTitle(activeSession.title, t));
     setRenameOpen(true);
   }
 
   function renameActiveSession() {
     const title = sessionTitleDraft.trim();
     if (!title) {
-      setNotice("会话名不能为空");
+      setNotice(t("status.sessionNameRequired"));
       return;
     }
     updateActiveSession((session) => ({
@@ -2614,7 +2652,7 @@ function App() {
       updatedAt: new Date().toISOString(),
     }));
     setRenameOpen(false);
-    setNotice("已修改会话名");
+    setNotice(t("status.sessionRenamed"));
   }
 
   function openPromptEditor() {
@@ -2632,22 +2670,22 @@ function App() {
   function draftGenerationFromContext(turn: ConversationTurn) {
     const turnIndex = turns.findIndex((item) => item.id === turn.id);
     const contextTurns = turnIndex >= 0 ? turns.slice(0, turnIndex + 1) : turns;
-    const contextPrompt = buildGenerationContextPrompt(contextTurns);
+    const contextPrompt = buildGenerationContextPrompt(contextTurns, t);
     if (!contextPrompt.trim()) {
-      setNotice("当前还没有可用于生图的文字上下文。");
+      setNotice(t("status.noContextForGeneration"));
       return;
     }
     const prompt = [
-      "请根据下面的当前会话上下文，生成一张新的图片。",
+      t("prompt.fromContextIntro"),
       "",
       contextPrompt,
       "",
-      "请延续已经确认的方向，整合用户最后一次修改意见，输出完整画面。"
+      t("prompt.fromContextOutro")
     ].join("\n");
     setActiveEngine(turn.engine);
     setSubmitMode("generate");
     applyPrompt(prompt, turn.engine);
-    setNotice("已根据聊天上下文整理成生图提示词，可以继续微调后生成。");
+    setNotice(t("status.contextPromptReady"));
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
@@ -2657,17 +2695,37 @@ function App() {
     void submit();
   }
 
+  function optionLabel(value: string) {
+    return t(`option.${value}`) === `option.${value}` ? value : t(`option.${value}`);
+  }
+
+  function bananaImageSizeLabel(value: string) {
+    return value === "无" ? t("option.noExtra") : value;
+  }
+
+  function formatSizeAdjustmentNotice(normalized: ReturnType<typeof normalizeCustomImageSize>) {
+    if (!normalized.notice) return "";
+    if (language !== "en") return normalized.notice;
+    const reasons: string[] = [];
+    if (normalized.clampedToMax) reasons.push(`side at most ${GPT_CUSTOM_SIZE_MAX}`);
+    if (normalized.roundedToMultiple) reasons.push("multiples of 16");
+    if (normalized.adjustedRatio) reasons.push(`ratio at most ${GPT_CUSTOM_SIZE_MAX_RATIO}:1`);
+    if (normalized.adjustedPixelRange === "max") reasons.push("total pixels at most 2880 x 2880");
+    if (normalized.adjustedPixelRange === "min") reasons.push(`total pixels at least ${GPT_CUSTOM_SIZE_MIN_PIXELS.toLocaleString("en-US")}`);
+    return `Size automatically adjusted to ${normalized.label}${reasons.length ? ` (${reasons.join(", ")})` : ""}`;
+  }
+
   function currentSizeLabel() {
     if (activeEngine === "banana") return `${bananaForm.aspect_ratio} · ${bananaForm.image_size}`;
-    if (gptSizeSelection.mode === "auto") return "自动";
+    if (gptSizeSelection.mode === "auto") return t("option.auto");
     if (gptSizeSelection.mode === "preset" && gptSizeSelection.tier && gptSizeSelection.aspect) {
       return `${gptSizeSelection.tier} · ${gptSizeSelection.aspect}`;
     }
-    return `自定义 ${gptSizeSelection.value}`;
+    return t("composer.customSize", { value: gptSizeSelection.value });
   }
 
   function currentQualityLabel() {
-    return gptQualityLabels[gptForm.quality] || gptForm.quality;
+    return optionLabel(gptForm.quality);
   }
 
   function generationCountFor(engine: Engine, gpt: GptForm, banana: BananaForm) {
@@ -2675,7 +2733,7 @@ function App() {
   }
 
   function currentCountLabel() {
-    return `数量 ${generationCountFor(activeEngine, gptForm, bananaForm)}张`;
+    return t("composer.count", { count: generationCountFor(activeEngine, gptForm, bananaForm) });
   }
 
   function setGenerationCount(engine: Engine, count: number) {
@@ -2704,11 +2762,15 @@ function App() {
   }
 
   function currentEditModeLabel() {
-    return gptEditModeLabels[gptForm.edit_mode] || gptForm.edit_mode;
+    return optionLabel(gptForm.edit_mode);
   }
 
   function currentStrengthLabel() {
     return `${Math.round(gptForm.reference_strength * 100)}%`;
+  }
+
+  function imageExpandLabel(count: number) {
+    return count === 1 ? t("image.expandOne", { count }) : t("image.expand", { count });
   }
 
   function applyGptComposerSize(tier: GptComposerSizeTier, aspect: GptComposerAspect = "1:1") {
@@ -2723,7 +2785,7 @@ function App() {
     customSizeDraftRef.current = nextDraft;
     setCustomSizeDraft(nextDraft);
     setGptForm({ ...gptForm, size: "custom", custom_size: normalized.value });
-    setSizeAdjustmentNotice(normalized.notice);
+    setSizeAdjustmentNotice(formatSizeAdjustmentNotice(normalized));
   }
 
   function isTurnExpanded(turn: ConversationTurn) {
@@ -2757,9 +2819,10 @@ function App() {
         custom_size: normalized.value,
       };
     });
-    if (normalized.notice) {
-      setSizeAdjustmentNotice(normalized.notice);
-      setNotice(normalized.notice);
+    const notice = formatSizeAdjustmentNotice(normalized);
+    if (notice) {
+      setSizeAdjustmentNotice(notice);
+      setNotice(notice);
     } else {
       setSizeAdjustmentNotice("");
     }
@@ -2835,7 +2898,7 @@ function App() {
     if (src) {
       void addOutputAsReference(src, name);
     }
-    setNotice(src ? "已把这轮作为继续编辑的上下文" : "已套用这一轮提示词");
+    setNotice(src ? t("reference.releaseAsContext") : t("reference.appliedPrompt"));
   }
 
   return (
@@ -2859,44 +2922,52 @@ function App() {
         <div className="drop-overlay" aria-hidden="true">
           <div>
             <ImagePlus size={24} />
-            <strong>松开添加为参考图</strong>
-            <span>支持拖入一张或多张图片到网页或输入区</span>
+            <strong>{t("reference.dropTitle")}</strong>
+            <span>{t("reference.dropHint")}</span>
           </div>
         </div>
       )}
+      {!historyCollapsed && (
+        <button
+          className="history-sidebar-backdrop"
+          type="button"
+          aria-label={t("app.closeSidebar")}
+          onClick={() => setHistoryCollapsed(true)}
+        />
+      )}
       <aside className={`history-sidebar ${historyCollapsed ? "is-collapsed" : ""}`}>
         <div className="sidebar-top">
-          <button className="icon-button" type="button" onClick={() => setHistoryCollapsed(!historyCollapsed)} aria-label="切换历史栏">
+          <button className="icon-button" type="button" onClick={() => setHistoryCollapsed(!historyCollapsed)} aria-label={t("app.toggleSidebar")}>
             {historyCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
           {!historyCollapsed && (
             <div>
-              <p>{sidebarMode === "sessions" ? "浏览器本地" : "本地历史文件"}</p>
-              <h1>{sidebarMode === "sessions" ? "对话" : "历史素材"}</h1>
+              <p>{sidebarMode === "sessions" ? t("app.subtitle.sessions") : t("app.subtitle.history")}</p>
+              <h1>{sidebarMode === "sessions" ? t("app.sessions") : t("app.historyAssets")}</h1>
             </div>
           )}
         </div>
         {!historyCollapsed && (
           <>
             <button className="new-session-button" type="button" onClick={startFreshSession}>
-              <MessageSquarePlus size={16} /> 新建会话
+              <MessageSquarePlus size={16} /> {t("app.newSession")}
             </button>
-            <div className="sidebar-tabs" role="tablist" aria-label="左侧列表">
+            <div className="sidebar-tabs" role="tablist" aria-label={t("app.leftList")}>
               <button type="button" className={sidebarMode === "sessions" ? "active" : ""} onClick={() => setSidebarMode("sessions")}>
-                会话
+                {t("app.sessions")}
               </button>
               <button type="button" className={sidebarMode === "history" ? "active" : ""} onClick={() => setSidebarMode("history")}>
-                历史
+                {t("app.history")}
               </button>
             </div>
             <div className="sidebar-actions">
               {sidebarMode === "history" ? (
                 <button type="button" onClick={() => void loadHistory()}>
-                  <RefreshCw size={15} /> 刷新
+                  <RefreshCw size={15} /> {t("app.refresh")}
                 </button>
               ) : (
                 <button type="button" onClick={startFreshSession}>
-                  <MessageSquarePlus size={15} /> 新对话
+                  <MessageSquarePlus size={15} /> {t("app.newChat")}
                 </button>
               )}
               <button type="button" onClick={() => void openOutputs()}>
@@ -2904,17 +2975,19 @@ function App() {
               </button>
             </div>
             <div className="history-count">
-              {sidebarMode === "sessions" ? `${sessions.length} 个会话` : historyLoading ? "读取中..." : `${history.length} 条历史`}
+              {sidebarMode === "sessions"
+                ? t("app.chats", { count: sessions.length })
+                : historyLoading ? t("app.loading") : t("app.historyCount", { count: history.length })}
             </div>
             {sidebarMode === "sessions" ? (
               <div className="session-list">
                 {sortedSessions.map((session) => (
                   <article className={session.id === activeSessionId ? "session-card active" : "session-card"} key={session.id}>
                     <button type="button" className="session-open" onClick={() => requestSessionSwitch(session.id)}>
-                      <span>{session.title || "新对话"}</span>
-                      <small>{formatTime(session.updatedAt)} · {session.turns.length} 轮</small>
+                      <span>{localizeSessionTitle(session.title, t)}</span>
+                      <small>{formatTime(session.updatedAt, language)} · {t("app.turns", { count: session.turns.length })}</small>
                     </button>
-                    <button type="button" title="删除会话" aria-label="删除会话" onClick={() => deleteSession(session.id)}>
+                    <button type="button" title={t("session.delete")} aria-label={t("session.delete")} onClick={() => deleteSession(session.id)}>
                       <Trash2 size={14} />
                     </button>
                   </article>
@@ -2923,7 +2996,7 @@ function App() {
             ) : (
               <div className="history-list">
                 {history.length === 0 ? (
-                  <div className="empty-history">生成成功后会出现在这里。</div>
+                  <div className="empty-history">{t("app.emptyHistory")}</div>
                 ) : (
                   history.map((entry) => {
                     const firstImage = entry.images?.[0];
@@ -2932,30 +3005,30 @@ function App() {
                       <article className="history-card" key={entry.id}>
                         <button className="history-open" type="button" onClick={() => setHistoryDetail(entry)}>
                           <span className="history-thumb" aria-hidden="true">
-                            {src ? <img src={src} alt="" loading="lazy" /> : <span>无图</span>}
+                            {src ? <img src={src} alt="" loading="lazy" /> : <span>{t("app.noImage")}</span>}
                           </span>
                           <span className="history-main">
                             <span className="history-row">
                               <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
-                              <span>{formatTime(entry.created_at)}</span>
+                              <span>{formatTime(entry.created_at, language)}</span>
                             </span>
-                            <span className="history-prompt">{entry.prompt || "没有提示词"}</span>
+                            <span className="history-prompt">{entry.prompt || t("history.noPrompt")}</span>
                           </span>
                         </button>
                         <div className="history-tools">
-                          <button type="button" onClick={() => openHistoryPreview(entry)} title="预览图片" disabled={!src}>
+                          <button type="button" onClick={() => openHistoryPreview(entry)} title={t("history.previewImage")} disabled={!src}>
                             <ExternalLink size={14} />
                           </button>
-                          <button type="button" onClick={() => applyHistory(entry)} title="套用参数">
+                          <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
                             <RotateCcw size={14} />
                           </button>
-                          <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? "取消收藏" : "收藏"}>
+                          <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}>
                             {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
                           </button>
-                          <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title="作为参考图" disabled={!src}>
+                          <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src}>
                             <ImagePlus size={14} />
                           </button>
-                          <button type="button" onClick={() => void deleteHistory(entry)} title="删除历史">
+                          <button type="button" onClick={() => void deleteHistory(entry)} title={t("history.delete")}>
                             <Trash2 size={14} />
                           </button>
                         </div>
@@ -2973,18 +3046,18 @@ function App() {
         <header className="workspace-header">
           <div className="workspace-title">
             <div className="workspace-kicker">
-              <span>本地会话</span>
-              <span>{turns.length} 轮</span>
+              <span>{t("app.localChat")}</span>
+              <span>{t("app.turns", { count: turns.length })}</span>
             </div>
             <div className="title-line">
-              <h2>{activeSession.title || "图片工作台"}</h2>
-              <button type="button" onClick={openRenameSession} title="修改会话名" aria-label="修改会话名">
+              <h2>{localizeSessionTitle(activeSession.title, t) || t("app.title")}</h2>
+              <button type="button" onClick={openRenameSession} title={t("session.rename")} aria-label={t("session.rename")}>
                 <PencilLine size={15} />
               </button>
             </div>
           </div>
           <div className="workspace-controls">
-            <div className="mode-tabs" role="tablist" aria-label="选择引擎">
+            <div className="mode-tabs" role="tablist" aria-label={t("app.selectEngine")}>
               <button type="button" className={activeEngine === "gpt-image-2" ? "active" : ""} onClick={() => selectEngine("gpt-image-2")}>
                 GPT Image 2
               </button>
@@ -2997,17 +3070,21 @@ function App() {
                 type="button"
                 className={hasCompleteConfig ? "connection-button configured" : "connection-button needs-config"}
                 onClick={() => setConnectionOpen(true)}
-                title={hasCompleteConfig ? `点击修改配置：${activeProfileName} · ${activeModel || "模型名"}` : `配置未完成：${activeConfigIssues.join("、")}`}
+                title={hasCompleteConfig ? t("config.editTitle", { name: activeProfileName, model: activeModel || t("config.modelName") }) : t("config.incompleteTitle", { items: listText(activeConfigIssues) })}
               >
                 <PencilLine size={15} />
                 <span className="connection-button-text">
                   <strong>{configButtonLabel}</strong>
-                  {hasCompleteConfig && <small>{activeModel || "模型名"}</small>}
+                  {hasCompleteConfig && <small>{activeModel || t("config.modelName")}</small>}
                 </span>
                 <ChevronDown size={14} />
               </button>
-              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
-              <button type="button" onClick={clearCurrentSession} disabled={turns.length === 0 && references.length === 0}>清空</button>
+              <div className="language-switcher" role="group" aria-label={t("language.switcher")}>
+                <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
+                <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
+              </div>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.save")}</button>
+              <button type="button" onClick={clearCurrentSession} disabled={turns.length === 0 && references.length === 0}>{t("app.clear")}</button>
             </div>
           </div>
         </header>
@@ -3016,13 +3093,13 @@ function App() {
           {queueJobs.length > 0 && (
             <div className="queue-anchor">
               {queueOpen && (
-                <div className="queue-popover" role="region" aria-label="生成队列" style={queuePopoverStyle}>
+                <div className="queue-popover" role="region" aria-label={t("queue.title")} style={queuePopoverStyle}>
                   <div className="queue-popover-head">
                     <div>
-                      <h3>任务队列</h3>
-                      <span>{activeQueueCount ? `${activeQueueCount} 个任务进行中` : `${queueJobs.length} 个任务已完成`}</span>
+                      <h3>{t("queue.title")}</h3>
+                      <span>{activeQueueCount ? t("queue.active", { count: activeQueueCount }) : t("queue.done", { count: queueJobs.length })}</span>
                     </div>
-                    <button type="button" onClick={() => setQueueJobs((items) => items.filter((job) => job.status === "queued" || job.status === "running"))}>清空已完成</button>
+                    <button type="button" onClick={() => setQueueJobs((items) => items.filter((job) => job.status === "queued" || job.status === "running"))}>{t("queue.clearCompleted")}</button>
                   </div>
                   <div className="queue-list">
                     {queueJobs.slice(0, 6).map((job) => {
@@ -3031,47 +3108,47 @@ function App() {
                       const firstImage = previewImages[0];
                       const thumbSrc = imageSrc(firstImage);
                       const thumbName = imageName(firstImage);
-                      const jobTitle = queueJobTitle(job);
+                      const jobTitle = queueJobTitle(job, t("queue.unnamed"));
                       const jobMeta = [job.configName, job.model].filter(Boolean).join(" / ");
-                      const jobElapsed = job.elapsedSeconds ? `${Math.round(job.elapsedSeconds)} 秒` : "";
+                      const jobElapsed = job.elapsedSeconds ? (language === "en" ? `${Math.round(job.elapsedSeconds)}s` : `${Math.round(job.elapsedSeconds)} 秒`) : "";
                       return (
                         <div className={`queue-job ${job.status}`} key={job.id}>
                           {thumbSrc ? (
-                            <button type="button" className={jobImages.length > 1 ? "queue-job-thumb multi" : "queue-job-thumb"} onClick={() => openPreviewImages(jobImages)} title={jobImages.length > 1 ? `查看 ${jobImages.length} 张图片` : "查看图片"}>
+                            <button type="button" className={jobImages.length > 1 ? "queue-job-thumb multi" : "queue-job-thumb"} onClick={() => openPreviewImages(jobImages)} title={jobImages.length > 1 ? t("queue.viewImages", { count: jobImages.length }) : t("queue.viewImage")}>
                               {previewImages.map((image, index) => {
                                 const src = imageSrc(image);
                                 const name = imageName(image, index);
                                 return src ? <img key={`${job.id}-${index}`} src={src} alt={name} loading="lazy" /> : null;
                               })}
-                              {jobImages.length > 1 && <span className="queue-job-thumb-count">{jobImages.length} 张</span>}
+                              {jobImages.length > 1 && <span className="queue-job-thumb-count">{language === "en" ? `${jobImages.length}` : `${jobImages.length} 张`}</span>}
                             </button>
                           ) : (
                             <span className="queue-job-icon">
                               {job.status === "running" ? <Loader2 size={18} className="spin" /> : job.status === "queued" ? <Clock3 size={18} /> : job.status === "error" || job.status === "canceled" ? <X size={18} /> : <Check size={18} />}
                             </span>
                           )}
-                          <button type="button" className="queue-job-main-button" onClick={() => jumpToQueueJob(job)} title="跳转到会话位置">
+                          <button type="button" className="queue-job-main-button" onClick={() => jumpToQueueJob(job)} title={t("queue.jump")}>
                             <strong>{jobTitle}</strong>
-                            <span>{job.status === "queued" ? `${jobMeta} · 排队中` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>
+                            <span>{job.status === "queued" ? `${jobMeta} · ${t("queue.queued")}` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>
                           </button>
                           <div className="queue-job-side">
-                            {thumbSrc ? <a href={thumbSrc} download={thumbName} title="下载图片"><Download size={14} /></a> : null}
+                            {thumbSrc ? <a href={thumbSrc} download={thumbName} title={t("preview.download")}><Download size={14} /></a> : null}
                           </div>
-                          <div className="queue-job-actions" aria-label="队列任务操作">
+                          <div className="queue-job-actions" aria-label={t("queue.actions")}>
                             {(job.status === "running" || job.status === "queued") && (
-                              <button type="button" onClick={() => cancelQueueJob(job)} aria-label={`取消任务 ${job.prompt || "生成图片"}`} title="取消">
+                              <button type="button" onClick={() => cancelQueueJob(job)} aria-label={`${t("queue.cancel")} ${job.prompt || t("submit.generate")}`} title={t("queue.cancel")}>
                                 <X size={13} />
                               </button>
                             )}
                             {(job.status === "success" || job.status === "error" || job.status === "canceled") && (
-                              <button type="button" onClick={() => retryQueueJob(job)} aria-label={`重试任务 ${job.prompt || "生成图片"}`} title="重试">
+                              <button type="button" onClick={() => retryQueueJob(job)} aria-label={`${t("queue.retry")} ${job.prompt || t("submit.generate")}`} title={t("queue.retry")}>
                                 <RefreshCw size={13} />
                               </button>
                             )}
-                            <button type="button" onClick={() => applyQueueJob(job)} aria-label={`套用任务提示词 ${job.prompt || "生成图片"}`} title="套用提示词">
+                            <button type="button" onClick={() => applyQueueJob(job)} aria-label={`${t("queue.applyPrompt")} ${job.prompt || t("submit.generate")}`} title={t("queue.applyPrompt")}>
                               <RotateCcw size={13} />
                             </button>
-                            <button type="button" onClick={() => removeQueueJob(job)} aria-label={`移除任务 ${job.prompt || "生成图片"}`} title={job.status === "queued" || job.status === "running" ? "取消并移除" : "移除"}>
+                            <button type="button" onClick={() => removeQueueJob(job)} aria-label={`${t("queue.remove")} ${job.prompt || t("submit.generate")}`} title={job.status === "queued" || job.status === "running" ? t("queue.cancelRemove") : t("queue.remove")}>
                               <Trash2 size={13} />
                             </button>
                           </div>
@@ -3082,8 +3159,8 @@ function App() {
                   <button
                     type="button"
                     className="queue-popover-resize-handle"
-                    aria-label="拖拽调整队列窗口宽高"
-                    title="拖拽调整宽高"
+                    aria-label={t("queue.resize")}
+                    title={t("queue.resize")}
                     onPointerDown={startQueuePopoverResize}
                     onPointerMove={dragQueuePopoverResize}
                     onPointerUp={endQueuePopoverResize}
@@ -3095,7 +3172,7 @@ function App() {
               )}
               <button type="button" className={`queue-capsule ${activeQueueCount ? "active" : ""}`.trim()} onClick={() => setQueueOpen((value) => !value)} aria-expanded={queueOpen}>
                 <span className={runningQueueCount ? "queue-capsule-dot running" : "queue-capsule-dot done"} aria-hidden="true" />
-                <span className="queue-capsule-label">队列</span>
+                <span className="queue-capsule-label">{t("queue.label")}</span>
                 <span className="queue-capsule-count">{queueJobs.length}</span>
               </button>
             </div>
@@ -3103,15 +3180,19 @@ function App() {
           {turns.length === 0 ? (
             <div className="empty-state">
               <Sparkles size={32} />
-              <h2>准备创作</h2>
-              <p>这是一个新的对话。写下第一条提示词后，后续修改会持续追加在这里。</p>
+              <h2>{t("app.readyToCreate")}</h2>
+              <p>{t("app.empty")}</p>
               <div className="prompt-examples">
-                {inspirationPrompts.map((item) => (
-                  <button type="button" key={item.title} onClick={() => applyPrompt(item.prompt)}>
-                    <strong>{item.title}</strong>
-                    <span>{item.prompt.slice(0, 56)}...</span>
+                {inspirationPromptKeys.map((key) => {
+                  const title = t(`inspiration.${key}.title`);
+                  const prompt = t(`inspiration.${key}.prompt`);
+                  return (
+                  <button type="button" key={key} onClick={() => applyPrompt(prompt)}>
+                    <strong>{title}</strong>
+                    <span>{prompt.slice(0, 56)}...</span>
                   </button>
-                ))}
+                );
+                })}
               </div>
             </div>
           ) : (
@@ -3119,12 +3200,12 @@ function App() {
               <article className="turn" id={`turn-${turn.id}`} key={turn.id}>
                 <div className="user-bubble">
                   <div className="bubble-meta">
-                    {formatTime(turn.createdAt)} · {turn.mode === "chat" ? "聊天" : engineLabel(turn.engine)}
-                    {turn.referenceSnapshots?.length ? ` · 参考图 ${turn.referenceSnapshots.length}` : ""}
+                    {formatTime(turn.createdAt, language)} · {turn.mode === "chat" ? t("submit.chat") : engineLabel(turn.engine)}
+                    {turn.referenceSnapshots?.length ? ` · ${t("reference.turnMeta", { count: turn.referenceSnapshots.length })}` : ""}
                   </div>
                   <p>{turn.prompt}</p>
                   {turn.referenceSnapshots?.length ? (
-                    <div className="turn-reference-strip" aria-label={`本轮参考图 ${turn.referenceSnapshots.length} 张`}>
+                    <div className="turn-reference-strip" aria-label={t("reference.turnCount", { count: turn.referenceSnapshots.length })}>
                       {turn.referenceSnapshots.map((reference, index) => (
                         reference.src ? (
                           <button
@@ -3144,24 +3225,24 @@ function App() {
                       ))}
                     </div>
                   ) : null}
-                  <div className="turn-user-actions" aria-label="本轮操作">
+                  <div className="turn-user-actions" aria-label={t("response.turnActions")}>
                     <button
                       type="button"
                       onClick={() => void regenerateFromTurn(turn)}
-                      title="再次生成"
-                      aria-label="再次生成"
+                      title={t("response.regenerate")}
+                      aria-label={t("response.regenerate")}
                       disabled={busy || turn.mode === "chat"}
                     >
                       <RefreshCw size={14} />
                     </button>
-                    <button type="button" onClick={() => copyPrompt(turn.prompt)} title="复制提示词" aria-label="复制提示词">
+                    <button type="button" onClick={() => copyPrompt(turn.prompt)} title={t("history.copyPrompt")} aria-label={t("history.copyPrompt")}>
                       <Copy size={14} />
                     </button>
                     <button
                       type="button"
                       onClick={() => void copyReferencesFromTurn(turn)}
-                      title="复制参考图"
-                      aria-label="复制参考图"
+                      title={t("reference.copy")}
+                      aria-label={t("reference.copy")}
                       disabled={!turn.referenceSnapshots?.some((reference) => reference.src)}
                     >
                       <ImagePlus size={14} />
@@ -3175,39 +3256,39 @@ function App() {
                       <strong>
                         {turn.mode === "chat"
                           ? turn.status === "running"
-                            ? "正在聊天"
+                            ? t("response.chatting")
                             : turn.status === "queued"
-                            ? "等待聊天"
+                            ? t("response.waitingChat")
                             : turn.status === "success"
-                            ? "聊天已回复"
-                            : "聊天失败"
+                            ? t("response.chatReplied")
+                            : t("response.chatFailed")
                           : turn.status === "queued"
-                          ? "排队中"
+                          ? t("queue.queued")
                           : turn.status === "running"
-                          ? "正在生成"
+                          ? t("response.generating")
                           : turn.status === "success"
-                          ? "生成完成"
-                          : "生成失败"}
+                          ? t("response.generationComplete")
+                          : t("response.generationFailed")}
                       </strong>
                       <div className="response-meta">
                         <span>{turn.meta?.model ? String(turn.meta.model) : engineLabel(turn.engine)}</span>
-                        {turn.elapsedSeconds ? <span>{turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒</span> : null}
+                        {turn.elapsedSeconds ? <span>{language === "en" ? `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)}s` : `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒`}</span> : null}
                         <span>#{turnIndex + 1}</span>
                       </div>
                     </div>
                     {(turn.status === "queued" || turn.status === "running") && (
                       <div className="loading-card">
                         {turn.status === "queued" ? <Clock3 size={20} /> : <Loader2 className="spin" size={20} />}
-                        {turn.status === "queued" ? queuedTurnMessage(turn) : runningTurnMessage(turn, nowMs)}
+                        {turn.status === "queued" ? (turn.mode === "chat" ? t("queue.waitingChat") : t("queue.waiting")) : runningTurnMessage(turn, nowMs, t)}
                       </div>
                     )}
-                    {turn.error && <div className="error-card">{turn.error}</div>}
+                    {turn.error && <div className="error-card">{formatStoredErrorMessage(t, turn.error)}</div>}
                     {turn.mode === "chat" && turn.reply && (
                       <div className="chat-reply-card">
                         <p>{turn.reply}</p>
                         <div className="chat-reply-actions">
                           <button type="button" onClick={() => draftGenerationFromContext(turn)}>
-                            <Sparkles size={14} /> 以上下文生图
+                            <Sparkles size={14} /> {t("composer.generateFromContext")}
                           </button>
                         </div>
                       </div>
@@ -3226,12 +3307,12 @@ function App() {
                               <figcaption>
                                 <span>{name}</span>
                                 <div>
-                                  <button type="button" title="复制提示词" onClick={() => copyPrompt(turn.prompt)}><Copy size={14} /></button>
-                                  <button type="button" title="套用提示词" onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /></button>
-                                  <button type="button" title="继续编辑" onClick={() => continueFromTurn(turn, image, index)}><MessageSquarePlus size={14} /></button>
-                                  <button type="button" title="作为参考图" onClick={() => void addOutputAsReference(src, name)}><ImagePlus size={14} /></button>
-                                  <a href={src} download={name} title="下载"><Download size={14} /></a>
-                                  <a href={src} target="_blank" rel="noreferrer" title="打开"><ExternalLink size={14} /></a>
+                                  <button type="button" title={t("image.copyPrompt")} onClick={() => copyPrompt(turn.prompt)}><Copy size={14} /></button>
+                                  <button type="button" title={t("image.applyPrompt")} onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /></button>
+                                  <button type="button" title={t("image.continueEdit")} onClick={() => continueFromTurn(turn, image, index)}><MessageSquarePlus size={14} /></button>
+                                  <button type="button" title={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)}><ImagePlus size={14} /></button>
+                                  <a href={src} download={name} title={t("image.download")}><Download size={14} /></a>
+                                  <a href={src} target="_blank" rel="noreferrer" title={t("image.open")}><ExternalLink size={14} /></a>
                                 </div>
                               </figcaption>
                             </figure>
@@ -3239,7 +3320,7 @@ function App() {
                         })}
                         </div>
                         <button type="button" className="image-toggle" onClick={() => toggleTurnExpanded(turn.id)}>
-                          {isTurnExpanded(turn) ? "收起图片" : `展开 ${turn.images.length} 张图片`}
+                          {isTurnExpanded(turn) ? t("image.collapse") : imageExpandLabel(turn.images.length)}
                         </button>
                       </div>
                     )}
@@ -3272,22 +3353,22 @@ function App() {
                       onDragOver={(event) => onReferenceDragOver(event, index)}
                       onDrop={(event) => onReferenceDrop(event, index)}
                       onDragEnd={onReferenceDragEnd}
-                      title="拖拽调整顺序"
+                      title={t("reference.dragReorder")}
                     >
                       <span
                         className="reference-drag-handle"
                         draggable
                         onDragStart={(event) => onReferenceDragStart(event, index)}
                         onDragEnd={onReferenceDragEnd}
-                        title="拖动排序"
+                        title={t("reference.dragSort")}
                       >
                         ⋮⋮
                       </span>
-                      <button type="button" className="reference-preview" onClick={() => previewReference(file)} title="预览参考图">
+                      <button type="button" className="reference-preview" onClick={() => previewReference(file)} title={t("reference.preview")}>
                         <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
                       </button>
                       <span>{file.name}</span>
-                      <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title="移除参考图">
+                      <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title={t("reference.remove")}>
                         <X size={13} />
                       </button>
                     </div>
@@ -3296,28 +3377,28 @@ function App() {
               </div>
             )}
             <div className="composer-toolbar" ref={composerToolsRef}>
-            <div className="submit-mode-switch" role="tablist" aria-label="发送模式">
+            <div className="submit-mode-switch" role="tablist" aria-label={t("submit.mode")}>
               <button
                 type="button"
                 className={submitMode === "generate" ? "active" : ""}
                 onClick={() => setSubmitMode("generate")}
                 aria-selected={submitMode === "generate"}
-                title="调用当前图片模型生成结果"
+                title={t("submit.generateTooltip")}
               >
-                生成
+                {t("submit.generate")}
               </button>
               <button
                 type="button"
                 className={submitMode === "chat" ? "active" : ""}
                 onClick={() => setSubmitMode("chat")}
                 aria-selected={submitMode === "chat"}
-                title="只把文字和参考图记录到本地会话，不调用生图接口"
+                title={t("submit.chatTooltip")}
               >
-                聊天
+                {t("submit.chat")}
               </button>
             </div>
-            <button type="button" onClick={() => fileInputRef.current?.click()} {...tooltipProps("添加参考图，也可以直接把图片拖到网页或输入框。")}>
-              <ImagePlus size={16} /> {references.length > 0 ? `参考图 ${references.length}` : "参考图"}
+            <button type="button" onClick={() => fileInputRef.current?.click()} {...tooltipProps(t("reference.addTooltip"))}>
+              <ImagePlus size={16} /> {references.length > 0 ? t("reference.count", { count: references.length }) : t("reference.button")}
             </button>
             <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={onReferenceChange} />
             <div className="composer-popover-wrap">
@@ -3326,15 +3407,15 @@ function App() {
                 className={composerPopover === "size" ? "active" : ""}
                 onClick={() => openComposerPopover("size")}
                 aria-expanded={composerPopover === "size"}
-                {...tooltipProps(`GPT Image 2 自定义尺寸：单边不超过 ${GPT_CUSTOM_SIZE_MAX}px，宽高都是 16 倍数，比例不超过 ${GPT_CUSTOM_SIZE_MAX_RATIO}:1，总像素不超过 2880 x 2880。输入时不打断，离开后自动校正。`)}
+                {...tooltipProps(t("composer.sizeTooltip", { max: GPT_CUSTOM_SIZE_MAX, ratio: GPT_CUSTOM_SIZE_MAX_RATIO }))}
               >
-                尺寸 {currentSizeLabel()}
+                {t("composer.size")} {currentSizeLabel()}
               </button>
               {composerPopover === "size" && (
-                <div className="composer-popover" role="dialog" aria-label="选择尺寸">
+                <div className="composer-popover" role="dialog" aria-label={t("composer.sizeDialog")}>
                   {activeEngine === "banana" ? (
                     <>
-                      <Field label="比例">
+                      <Field label={t("composer.aspect")}>
                         <select value={bananaForm.aspect_ratio} onChange={(event) => setBananaForm({ ...bananaForm, aspect_ratio: event.target.value })}>
                           {bananaAspectOptions.map((item) => <option key={item}>{item}</option>)}
                         </select>
@@ -3346,16 +3427,16 @@ function App() {
                           </button>
                         ))}
                       </div>
-                      <Field label="图像分辨率">
+                      <Field label={t("composer.resolution")}>
                         <select value={bananaForm.image_size} onChange={(event) => setBananaForm({ ...bananaForm, image_size: event.target.value })}>
-                          {bananaImageSizeOptions.map((item) => <option key={item}>{item}</option>)}
+                          {bananaImageSizeOptions.map((item) => <option key={item} value={item}>{bananaImageSizeLabel(item)}</option>)}
                         </select>
                       </Field>
                     </>
                   ) : (
                     <>
                       <div className="size-preset-section">
-                        <div className="preset-row size-tier-row" role="group" aria-label="选择清晰度">
+                        <div className="preset-row size-tier-row" role="group" aria-label={t("composer.clarity")}>
                           {gptComposerSizeTiers.map((tier) => (
                             <button
                               type="button"
@@ -3363,11 +3444,11 @@ function App() {
                               className={gptSizeSelection.tier === tier ? "selected" : ""}
                               onClick={() => applyGptComposerSize(tier)}
                             >
-                              {tier === "auto" ? "自动" : tier}
+                              {tier === "auto" ? t("option.auto") : tier}
                             </button>
                           ))}
                         </div>
-                        <div className="preset-row aspect-row" role="group" aria-label="选择比例">
+                        <div className="preset-row aspect-row" role="group" aria-label={t("composer.aspect")}>
                           {gptComposerAspectOptions.map((aspect) => (
                             <button
                               type="button"
@@ -3385,7 +3466,7 @@ function App() {
                       </div>
                       <div className="custom-size-row">
                         <label>
-                          <span>宽</span>
+                          <span>{t("composer.width")}</span>
                           <input
                             inputMode="numeric"
                             min={GPT_CUSTOM_SIZE_MIN}
@@ -3397,7 +3478,7 @@ function App() {
                         </label>
                         <span className="size-separator">x</span>
                         <label>
-                          <span>高</span>
+                          <span>{t("composer.height")}</span>
                           <input
                             inputMode="numeric"
                             min={GPT_CUSTOM_SIZE_MIN}
@@ -3412,11 +3493,17 @@ function App() {
                           className={`${gptSizeSelection.mode === "custom" ? "selected " : ""}primary-action`}
                           onClick={() => normalizeCustomSize()}
                         >
-                          应用
+                          {t("composer.apply")}
                         </button>
                       </div>
                       <div className={sizeAdjustmentNotice ? "size-adjustment-note active" : "size-adjustment-note"} role="status">
-                        {sizeAdjustmentNotice || `自定义尺寸单边 ${GPT_CUSTOM_SIZE_MIN}-${GPT_CUSTOM_SIZE_MAX}px，比例不超过 ${GPT_CUSTOM_SIZE_MAX_RATIO}:1，总像素 ${GPT_CUSTOM_SIZE_MIN_PIXELS.toLocaleString("zh-CN")}-${GPT_CUSTOM_SIZE_MAX_PIXELS.toLocaleString("zh-CN")}。离开输入后会自动校正。`}
+                        {sizeAdjustmentNotice || t("composer.customSizeHelp", {
+                          min: GPT_CUSTOM_SIZE_MIN,
+                          max: GPT_CUSTOM_SIZE_MAX,
+                          ratio: GPT_CUSTOM_SIZE_MAX_RATIO,
+                          minPixels: GPT_CUSTOM_SIZE_MIN_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
+                          maxPixels: GPT_CUSTOM_SIZE_MAX_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
+                        })}
                       </div>
                     </>
                   )}
@@ -3430,12 +3517,12 @@ function App() {
                   className={composerPopover === "quality" ? "active" : ""}
                   onClick={() => openComposerPopover("quality")}
                   aria-expanded={composerPopover === "quality"}
-                  {...tooltipProps("控制生成质量和推理成本。高质量更慢，自动由上游模型决定。")}
+                  {...tooltipProps(t("composer.qualityTooltip"))}
                 >
-                  质量 {currentQualityLabel()}
+                  {t("composer.quality")} {currentQualityLabel()}
                 </button>
                 {composerPopover === "quality" && (
-                  <div className="composer-popover compact" role="dialog" aria-label="选择质量">
+                  <div className="composer-popover compact" role="dialog" aria-label={t("composer.qualityDialog")}>
                     <div className="choice-grid quality">
                       {gptQualityOptions.map((item) => (
                         <button
@@ -3444,7 +3531,7 @@ function App() {
                           className={gptForm.quality === item ? "selected" : ""}
                           onClick={() => setGptForm({ ...gptForm, quality: item })}
                         >
-                          {gptQualityLabels[item] || item}
+                          {optionLabel(item)}
                         </button>
                       ))}
                     </div>
@@ -3460,12 +3547,12 @@ function App() {
                     className={composerPopover === "edit" ? "active" : ""}
                     onClick={() => openComposerPopover("edit")}
                     aria-expanded={composerPopover === "edit"}
-                    {...tooltipProps("生成用于纯文本出图；参考会更重视参考图；扩图用于向外补全画面。")}
+                    {...tooltipProps(t("composer.editTooltip"))}
                   >
-                    编辑 {currentEditModeLabel()}
+                    {t("composer.editMode")} {currentEditModeLabel()}
                   </button>
                   {composerPopover === "edit" && (
-                    <div className="composer-popover compact" role="dialog" aria-label="选择编辑模式">
+                    <div className="composer-popover compact" role="dialog" aria-label={t("composer.editDialog")}>
                       <div className="choice-grid quality">
                         {gptEditModeOptions.map((item) => (
                           <button
@@ -3474,7 +3561,7 @@ function App() {
                             className={gptForm.edit_mode === item ? "selected" : ""}
                             onClick={() => setGptForm({ ...gptForm, edit_mode: item })}
                           >
-                            {gptEditModeLabels[item] || item}
+                            {optionLabel(item)}
                           </button>
                         ))}
                       </div>
@@ -3487,13 +3574,13 @@ function App() {
                     className={composerPopover === "strength" ? "active" : ""}
                     onClick={() => openComposerPopover("strength")}
                     aria-expanded={composerPopover === "strength"}
-                    {...tooltipProps("有参考图时控制模型跟随参考图的力度。越高越贴近参考图，越低越听提示词。")}
+                    {...tooltipProps(t("composer.strengthTooltip"))}
                   >
-                    参考强度 {currentStrengthLabel()}
+                    {t("composer.referenceStrength")} {currentStrengthLabel()}
                   </button>
                   {composerPopover === "strength" && (
-                    <div className="composer-popover compact" role="dialog" aria-label="设置参考强度">
-                      <Field label="参考强度">
+                    <div className="composer-popover compact" role="dialog" aria-label={t("composer.strengthDialog")}>
+                      <Field label={t("composer.referenceStrength")}>
                         <input
                           type="range"
                           min={0}
@@ -3525,13 +3612,13 @@ function App() {
                 className={`count-trigger ${generationCountFor(activeEngine, gptForm, bananaForm) > 1 ? "count-trigger-alert" : ""} ${composerPopover === "count" ? "active" : ""}`.trim()}
                 onClick={() => openComposerPopover("count")}
                 aria-expanded={composerPopover === "count"}
-                {...tooltipProps("一次请求生成的图片数量。数量越多等待越久，失败重试成本也更高。")}
+                {...tooltipProps(t("composer.countTooltip"))}
               >
                 {currentCountLabel()}
               </button>
               {composerPopover === "count" && (
-                <div className="composer-popover compact" role="dialog" aria-label="选择数量">
-                  <Field label="生成数量">
+                <div className="composer-popover compact" role="dialog" aria-label={t("composer.countDialog")}>
+                  <Field label={t("composer.countField")}>
                     {activeEngine === "banana" ? (
                       <input type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setGenerationCount("banana", Number(event.target.value))} />
                     ) : (
@@ -3556,8 +3643,8 @@ function App() {
                 </div>
               )}
             </div>
-            <button type="button" onClick={() => { hideTooltip(); setAdvancedOpen(true); }} {...tooltipProps("打开较少使用的生成控制，例如负面提示词、种子、风格、返回格式和超时。")}>
-              高级参数
+            <button type="button" onClick={() => { hideTooltip(); setAdvancedOpen(true); }} {...tooltipProps(t("composer.advancedTooltip"))}>
+              {t("composer.advanced")}
             </button>
             </div>
           </div>
@@ -3568,8 +3655,8 @@ function App() {
             onPointerMove={dragComposerResize}
             onPointerUp={endComposerResize}
             onPointerCancel={endComposerResize}
-            title="拖拽调整输入区高度"
-            aria-label="拖拽调整输入区高度"
+            title={t("composer.resize")}
+            aria-label={t("composer.resize")}
           >
             <span />
           </button>
@@ -3577,8 +3664,8 @@ function App() {
             type="button"
             className="composer-reset-button"
             onClick={resetPromptHeight}
-            title="恢复输入区高度"
-            aria-label="恢复输入区高度"
+            title={t("composer.resetHeight")}
+            aria-label={t("composer.resetHeight")}
           >
             <FoldVertical size={15} />
           </button>
@@ -3588,7 +3675,7 @@ function App() {
                 ref={promptRef}
                 rows={3}
                 value={activePrompt}
-                placeholder={submitMode === "chat" ? "先聊想法、记录方向、改 prompt；这次不会调用生图接口" : "描述主体、构图、风格、光线、材质和你想保留的细节"}
+                placeholder={submitMode === "chat" ? t("composer.chatPlaceholder") : t("composer.generatePlaceholder")}
                 onChange={(event) => applyPrompt(event.target.value, activeEngine)}
                 onKeyDown={submitFromComposerKey}
               />
@@ -3597,20 +3684,27 @@ function App() {
                   type="button"
                   className={sessionPromptSummary ? "session-prompt-button has-content" : "session-prompt-button"}
                   onClick={openSessionPromptEditor}
-                  aria-label="打开会话提示"
-                  title={sessionPromptSummary || "固定、负面、画面文字都还没设置"}
+                  aria-label={t("composer.openSessionPrompt")}
+                  title={sessionPromptSummary || t("composer.sessionPromptEmptyTitle")}
                 >
-                  <span className="session-prompt-button-title">会话提示</span>
-                  <span className="session-prompt-button-summary">{sessionPromptSummary || "未设置"}</span>
+                  <span className="session-prompt-button-title">
+                    <span className="session-prompt-label-full">{t("composer.sessionPrompt")}</span>
+                    <span className="session-prompt-label-short">{t("composer.sessionPromptShort")}</span>
+                  </span>
+                  <span className="session-prompt-button-summary">
+                    <span className="session-prompt-summary-full">{sessionPromptSummary || t("composer.sessionPromptUnset")}</span>
+                    <span className="session-prompt-summary-short">{sessionPromptSummary || t("composer.sessionPromptUnsetShort")}</span>
+                  </span>
                 </button>
                 <button
                   className="prompt-expand-button"
                   type="button"
                   onClick={openPromptEditor}
-                  title="展开编辑提示词"
-                  aria-label="展开编辑提示词"
+                  title={t("composer.expandPrompt")}
+                  aria-label={t("composer.expandPrompt")}
                 >
-                  展开编辑
+                  <span className="prompt-expand-label-full">{t("composer.expandPrompt")}</span>
+                  <span className="prompt-expand-label-short">{t("composer.expandPromptShort")}</span>
                 </button>
               </div>
             </div>
@@ -3618,8 +3712,8 @@ function App() {
               className="submit-button"
               disabled={busy}
               type="submit"
-              title={submitMode === "chat" ? "发送聊天" : "开始生成"}
-              aria-label={submitMode === "chat" ? "发送聊天" : "开始生成"}
+              title={submitMode === "chat" ? t("submit.sendChat") : t("submit.startGenerate")}
+              aria-label={submitMode === "chat" ? t("submit.sendChat") : t("submit.startGenerate")}
             >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
@@ -3629,23 +3723,23 @@ function App() {
 
       {pendingSessionSwitch && (
         <div className="drawer-shell reference-switch-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭切换会话确认" onClick={() => setPendingSessionSwitch(null)} />
-          <section className="drawer reference-switch-drawer" role="dialog" aria-modal="true" aria-label="切换会话前确认参考图" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("session.switchClose")} onClick={() => setPendingSessionSwitch(null)} />
+          <section className="drawer reference-switch-drawer" role="dialog" aria-modal="true" aria-label={t("session.switchReferenceTitle")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>当前参考图不会按会话保存</p>
-                <h2>切换到 {pendingSessionSwitch.nextSessionTitle}</h2>
+                <p>{t("session.switchReferenceHint")}</p>
+                <h2>{t("session.switchTo", { title: pendingSessionSwitch.nextSessionTitle })}</h2>
               </div>
-              <button type="button" onClick={() => setPendingSessionSwitch(null)} aria-label="关闭切换会话确认" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setPendingSessionSwitch(null)} aria-label={t("session.switchClose")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="config-warning" role="alert">
               <AlertCircle size={16} />
-              <span>当前工作区还有 {references.length} 张参考图。请选择切换时保留还是清空。</span>
+              <span>{t("session.switchWarning", { count: references.length })}</span>
             </div>
             <div className="drawer-actions">
-              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "preserve")}>保留参考图并切换</button>
-              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "clear")}>清空参考图并切换</button>
-              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "cancel")}>取消</button>
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "preserve")}>{t("session.switchKeep")}</button>
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "clear")}>{t("session.switchClear")}</button>
+              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "cancel")}>{t("common.cancel")}</button>
             </div>
           </section>
         </div>
@@ -3653,27 +3747,27 @@ function App() {
 
       {pendingMultiImageConfirm && (
         <div className="drawer-shell multi-image-confirm-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭多张生成确认" onClick={() => setPendingMultiImageConfirm(null)} />
-          <section className="drawer multi-image-confirm-drawer" role="dialog" aria-modal="true" aria-label="多张生成确认" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("multiImage.close")} onClick={() => setPendingMultiImageConfirm(null)} />
+          <section className="drawer multi-image-confirm-drawer" role="dialog" aria-modal="true" aria-label={t("multiImage.aria")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>当前不是单张生成</p>
-                <h2>确认生成 {pendingMultiImageConfirm.count} 张图片？</h2>
+                <p>{t("multiImage.subtitle")}</p>
+                <h2>{t("multiImage.title", { count: pendingMultiImageConfirm.count })}</h2>
               </div>
-              <button type="button" onClick={() => setPendingMultiImageConfirm(null)} aria-label="关闭多张生成确认" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setPendingMultiImageConfirm(null)} aria-label={t("multiImage.close")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="config-warning" role="alert">
               <AlertCircle size={16} />
-              <span>多张生成会增加等待时间和消耗。</span>
+              <span>{t("multiImage.warning")}</span>
             </div>
             <label className="multi-image-confirm-check">
               <input type="checkbox" checked={skipMultiImageConfirmChecked} onChange={(event) => setSkipMultiImageConfirmChecked(event.target.checked)} />
-              <span>本次会话不再提醒</span>
+              <span>{t("multiImage.skipThisSession")}</span>
             </label>
             <div className="drawer-actions">
-              <button type="button" className="primary-action" onClick={confirmMultiImageGeneration}>生成 {pendingMultiImageConfirm.count} 张</button>
-              <button type="button" onClick={resetMultiImageCount}>改回 1 张</button>
-              <button type="button" onClick={() => setPendingMultiImageConfirm(null)}>取消</button>
+              <button type="button" className="primary-action" onClick={confirmMultiImageGeneration}>{t("multiImage.confirm", { count: pendingMultiImageConfirm.count })}</button>
+              <button type="button" onClick={resetMultiImageCount}>{t("multiImage.reset")}</button>
+              <button type="button" onClick={() => setPendingMultiImageConfirm(null)}>{t("common.cancel")}</button>
             </div>
           </section>
         </div>
@@ -3681,14 +3775,14 @@ function App() {
 
       {renameOpen && (
         <div className="drawer-shell rename-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭会话重命名" onClick={() => setRenameOpen(false)} />
-          <section className="drawer rename-drawer" role="dialog" aria-modal="true" aria-label="修改会话名" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("session.rename")} onClick={() => setRenameOpen(false)} />
+          <section className="drawer rename-drawer" role="dialog" aria-modal="true" aria-label={t("session.rename")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>浏览器本地会话</p>
-                <h2>修改会话名</h2>
+                <p>{t("session.local")}</p>
+                <h2>{t("session.rename")}</h2>
               </div>
-              <button type="button" onClick={() => setRenameOpen(false)} aria-label="关闭会话重命名" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setRenameOpen(false)} aria-label={t("session.rename")} title={t("common.close")}><X size={18} /></button>
             </div>
             <form
               className="rename-form"
@@ -3697,12 +3791,12 @@ function App() {
                 renameActiveSession();
               }}
             >
-              <Field label="会话名">
+              <Field label={t("session.name")}>
                 <input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} />
               </Field>
               <div className="drawer-actions">
-                <button type="submit" className="primary-action">保存</button>
-                <button type="button" onClick={() => setRenameOpen(false)}>取消</button>
+                <button type="submit" className="primary-action">{t("common.save")}</button>
+                <button type="button" onClick={() => setRenameOpen(false)}>{t("common.cancel")}</button>
               </div>
             </form>
           </section>
@@ -3711,14 +3805,14 @@ function App() {
 
       {promptEditorOpen && (
         <div className="drawer-shell prompt-editor-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭提示词编辑" onClick={() => setPromptEditorOpen(false)} />
-          <section className="drawer prompt-editor-drawer" role="dialog" aria-modal="true" aria-label="编辑提示词" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("composer.promptEditorClose")} onClick={() => setPromptEditorOpen(false)} />
+          <section className="drawer prompt-editor-drawer" role="dialog" aria-modal="true" aria-label={t("composer.promptEditor")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>{submitMode === "chat" ? "聊天内容" : "生成提示词"}</p>
-                <h2>编辑提示词</h2>
+                <p>{submitMode === "chat" ? t("composer.chatContent") : t("composer.generatePrompt")}</p>
+                <h2>{t("composer.promptEditor")}</h2>
               </div>
-              <button type="button" onClick={() => setPromptEditorOpen(false)} aria-label="关闭提示词编辑" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setPromptEditorOpen(false)} aria-label={t("composer.promptEditorClose")} title={t("common.close")}><X size={18} /></button>
             </div>
             <textarea
               className="prompt-editor-textarea"
@@ -3727,8 +3821,8 @@ function App() {
               onChange={(event) => setPromptEditorDraft(event.target.value)}
             />
             <div className="drawer-actions">
-              <button type="button" className="primary-action" onClick={applyPromptEditor}>应用</button>
-              <button type="button" onClick={() => setPromptEditorOpen(false)}>取消</button>
+              <button type="button" className="primary-action" onClick={applyPromptEditor}>{t("common.apply")}</button>
+              <button type="button" onClick={() => setPromptEditorOpen(false)}>{t("common.cancel")}</button>
             </div>
           </section>
         </div>
@@ -3736,26 +3830,26 @@ function App() {
 
       {sessionPromptOpen && (
         <div className="drawer-shell prompt-editor-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭会话提示" onClick={() => setSessionPromptOpen(false)} />
-          <section className="drawer session-prompt-drawer" role="dialog" aria-modal="true" aria-label="会话提示" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("composer.sessionPrompt")} onClick={() => setSessionPromptOpen(false)} />
+          <section className="drawer session-prompt-drawer" role="dialog" aria-modal="true" aria-label={t("composer.sessionPrompt")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>当前会话专用，不跟其他会话串值</p>
-                <h2>会话提示</h2>
+                <p>{t("sessionPrompt.subtitle")}</p>
+                <h2>{t("composer.sessionPrompt")}</h2>
               </div>
-              <button type="button" onClick={() => setSessionPromptOpen(false)} aria-label="关闭会话提示" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setSessionPromptOpen(false)} aria-label={t("composer.sessionPrompt")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="session-prompt-drawer-note">
-              把不想每次重写、但又不适合塞进主提示词的内容放在这里。固定提示词只在生成时附加，不影响聊天。
+              {t("sessionPrompt.note")}
             </div>
             <div className="session-prompt-fields">
-              <Field label="固定提示词" help="会话级，仅生成。会通过 context_prompt 提交，不会直接拼进主提示词文本。">
+              <Field label={t("sessionPrompt.fixed")} help={t("sessionPrompt.fixedHelp")}>
                 <textarea value={sessionPromptDraft.fixed_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: event.target.value }))} />
               </Field>
-              <Field label="负面提示词" help="会话级，仅 GPT 生效。用于描述不希望出现在画面里的元素或风格。">
+              <Field label={t("sessionPrompt.negative")} help={t("sessionPrompt.negativeHelp")}>
                 <textarea value={sessionPromptDraft.negative_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, negative_prompt: event.target.value }))} />
               </Field>
-              <Field label="画面文字" help="会话级，仅 GPT 生效。适合海报标题、技能名、画面内中文标注等场景。">
+              <Field label={t("sessionPrompt.posterText")} help={t("sessionPrompt.posterTextHelp")}>
                 <input value={sessionPromptDraft.poster_text} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, poster_text: event.target.value }))} />
               </Field>
             </div>
@@ -3764,16 +3858,16 @@ function App() {
                 type="button"
                 onClick={() => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: "" }))}
               >
-                清空固定提示词
+                {t("sessionPrompt.clearFixed")}
               </button>
               <button
                 type="button"
                 onClick={() => setSessionPromptDraft((current) => ({ ...current, negative_prompt: "", poster_text: "" }))}
               >
-                清空负面和画面文字
+                {t("sessionPrompt.clearGpt")}
               </button>
-              <button type="button" className="primary-action" onClick={applySessionPromptEditor}>应用</button>
-              <button type="button" onClick={() => setSessionPromptOpen(false)}>取消</button>
+              <button type="button" className="primary-action" onClick={applySessionPromptEditor}>{t("common.apply")}</button>
+              <button type="button" onClick={() => setSessionPromptOpen(false)}>{t("common.cancel")}</button>
             </div>
           </section>
         </div>
@@ -3781,17 +3875,17 @@ function App() {
 
       {connectionOpen && (
         <div className="drawer-shell connection-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭接口配置" onClick={closeConnectionDrawer} />
-          <section className="drawer connection-drawer" role="dialog" aria-modal="true" aria-label="接口配置" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("config.drawerAria")} onClick={closeConnectionDrawer} />
+          <section className="drawer connection-drawer" role="dialog" aria-modal="true" aria-label={t("config.drawerAria")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>配置 Profile + API 请求地址 + Key + 模型</p>
-                <h2>多配置管理</h2>
+                <p>{t("config.drawerHint")}</p>
+                <h2>{t("config.drawerTitle")}</h2>
               </div>
-              <button type="button" onClick={closeConnectionDrawer} aria-label="关闭接口配置" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={closeConnectionDrawer} aria-label={t("config.drawerAria")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="connection-layout">
-              <aside className="profile-list" aria-label="配置列表">
+              <aside className="profile-list" aria-label={t("config.profileList")}>
                 {activeEngineProfiles.map((profile) => {
                   const selected = profile.id === activeProfileIds[activeEngine];
                   const canDeleteProfile = activeEngineProfiles.length > 1;
@@ -3813,8 +3907,8 @@ function App() {
                         className="profile-delete-button"
                         onClick={() => deleteConfigProfile(profile)}
                         disabled={!canDeleteProfile}
-                        aria-label={`删除配置 ${profile.name || "未命名配置"}`}
-                        title={canDeleteProfile ? "删除配置" : "至少保留一个配置"}
+                        aria-label={t("config.deleteProfileAria", { name: profile.name || t("queue.unnamed") })}
+                        title={canDeleteProfile ? t("config.delete") : t("config.keepOne")}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -3823,20 +3917,20 @@ function App() {
                 })}
                 <button type="button" className="profile-add-button" onClick={addConfigProfile}>
                   <Plus size={15} />
-                  <span>新增配置</span>
+                  <span>{t("config.add")}</span>
                 </button>
               </aside>
               <div className="connection-fields">
                 {!hasCompleteConfig && (
                   <div className="config-warning" role="alert">
                     <AlertCircle size={16} />
-                    <span>当前缺少 {activeConfigIssues.join("、")}，保存前请补全。</span>
+                    <span>{t("config.missing", { items: listText(activeConfigIssues) })}</span>
                   </div>
                 )}
                 {diagnosticsResult && (
                   <div className={diagnosticsResult.ok ? "diagnostics-panel ok" : "diagnostics-panel warning"}>
                     <div className="diagnostics-panel-head">
-                      <strong>{diagnosticsResult.ok ? "连接诊断通过" : "连接诊断需要处理"}</strong>
+                      <strong>{diagnosticsResult.ok ? t("config.diagnosticsOk") : t("config.diagnosticsWarn")}</strong>
                       {diagnosticsResult.warning && <span>{diagnosticsResult.warning}</span>}
                     </div>
                     {diagnosticsResult.results.length > 0 && (
@@ -3844,10 +3938,10 @@ function App() {
                         {diagnosticsResult.results.map((item) => (
                           <div className={item.ok ? "diagnostics-card ok" : "diagnostics-card warning"} key={item.capability}>
                             <div className="diagnostics-card-title">
-                              <strong>{item.capability === "generation" ? "生图" : "聊天"}</strong>
-                              <span>{item.ok ? "通过" : "失败"}</span>
+                              <strong>{item.capability === "generation" ? t("config.generation") : t("config.chat")}</strong>
+                              <span>{item.ok ? t("config.pass") : t("config.fail")}</span>
                             </div>
-                            <small>{item.model || "模型未返回"} · {item.latency_ms ?? 0}ms</small>
+                            <small>{item.model || t("config.noModel")} · {item.latency_ms ?? 0}ms</small>
                             {item.endpoint && <code>{item.endpoint}</code>}
                             {item.error && <p>{item.error}</p>}
                           </div>
@@ -3856,20 +3950,20 @@ function App() {
                     )}
                   </div>
                 )}
-                <Field label="配置名称"><input placeholder={activeProfileName} value={activeProfile?.name || ""} onChange={(event) => updateActiveProfileName(event.target.value)} /></Field>
+                <Field label={t("config.name")}><input placeholder={activeProfileName} value={activeProfile?.name || ""} onChange={(event) => updateActiveProfileName(event.target.value)} /></Field>
                 {activeEngine === "gpt-image-2" ? (
                   <>
-                    <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
+                    <Field label="API Key" help={t("config.apiKeyHelp")}>
                       <div className="secret-input">
                         <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={gptForm.api_key} onChange={(event) => updateGptConnectionForm({ api_key: event.target.value })} />
-                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
+                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? t("config.hideApiKey") : t("config.showApiKey")} title={apiKeyVisible ? t("config.hideApiKey") : t("config.showApiKey")}>
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
                     </Field>
-                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => updateGptConnectionForm({ base_url: event.target.value })} /></Field>
-                    <Field label="生图模型"><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} /></Field>
-                    <Field label="聊天模型">
+                    <Field label={t("config.baseUrl")}><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => updateGptConnectionForm({ base_url: event.target.value })} /></Field>
+                    <Field label={t("config.imageModel")}><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} /></Field>
+                    <Field label={t("config.chatModel")}>
                       <div className="stacked-field">
                         <select
                           value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
@@ -3881,40 +3975,40 @@ function App() {
                           <option value="gpt-5.5">gpt-5.5</option>
                           <option value="gpt-5.4">gpt-5.4</option>
                           <option value="gpt-5.2">gpt-5.2</option>
-                          <option value="custom">自定义</option>
+                          <option value="custom">{t("config.custom")}</option>
                         </select>
-                        <input placeholder="自定义聊天模型" value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
+                        <input placeholder={t("config.customChatModel")} value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
                       </div>
                     </Field>
-                    <Field label="思考强度">
+                    <Field label={t("config.reasoning")}>
                       <select value={gptForm.reasoning_effort} onChange={(event) => updateGptConnectionForm({ reasoning_effort: event.target.value })}>
-                        {gptReasoningOptions.map((item) => <option key={item} value={item}>{gptReasoningLabels[item]}</option>)}
+                        {gptReasoningOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
                       </select>
                     </Field>
                   </>
                 ) : (
                   <>
-                    <Field label="API Key" help="默认隐藏；每次打开配置窗口都会重新隐藏。">
+                    <Field label="API Key" help={t("config.apiKeyHelp")}>
                       <div className="secret-input">
                         <input type={apiKeyVisible ? "text" : "password"} placeholder="sk-..." value={bananaForm.api_key} onChange={(event) => updateBananaConnectionForm({ api_key: event.target.value })} />
-                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"} title={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}>
+                        <button type="button" onClick={() => setApiKeyVisible((value) => !value)} aria-label={apiKeyVisible ? t("config.hideApiKey") : t("config.showApiKey")} title={apiKeyVisible ? t("config.hideApiKey") : t("config.showApiKey")}>
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
                     </Field>
-                    <Field label="API 请求地址"><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => updateBananaConnectionForm({ api_base_url: event.target.value })} /></Field>
-                    <Field label="模型名"><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => updateBananaConnectionForm({ model_type: event.target.value })} /></Field>
+                    <Field label={t("config.baseUrl")}><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => updateBananaConnectionForm({ api_base_url: event.target.value })} /></Field>
+                    <Field label={t("config.modelName")}><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => updateBananaConnectionForm({ model_type: event.target.value })} /></Field>
                   </>
                 )}
               </div>
             </div>
             <div className="drawer-actions">
-              <button type="button" onClick={() => void loadDefaults()}>读取默认值</button>
+              <button type="button" onClick={() => void loadDefaults()}>{t("config.loadDefaults")}</button>
               <button type="button" onClick={() => void runDiagnostics()} disabled={diagnosticsRunning || !hasCompleteConfig}>
-                {diagnosticsRunning ? "测试中..." : "测试连接"}
+                {diagnosticsRunning ? t("config.testing") : t("config.testConnection")}
               </button>
-              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存配置</button>
-              <button type="button" onClick={closeConnectionDrawer}>关闭</button>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.save")}</button>
+              <button type="button" onClick={closeConnectionDrawer}>{t("config.close")}</button>
             </div>
           </section>
         </div>
@@ -3922,23 +4016,23 @@ function App() {
 
       {advancedOpen && (
         <div className="drawer-shell">
-          <button className="drawer-backdrop" type="button" aria-label="关闭参数面板" onClick={() => setAdvancedOpen(false)} />
-          <section className="drawer" role="dialog" aria-modal="true" aria-label="高级参数" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="drawer-backdrop" type="button" aria-label={t("drawer.advancedClose")} onClick={() => setAdvancedOpen(false)} />
+          <section className="drawer" role="dialog" aria-modal="true" aria-label={t("composer.advanced")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
-                <p>生成控制</p>
-                <h2>高级参数</h2>
+                <p>{t("drawer.advancedSubtitle")}</p>
+                <h2>{t("composer.advanced")}</h2>
               </div>
-              <button type="button" onClick={() => setAdvancedOpen(false)} aria-label="关闭参数面板" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setAdvancedOpen(false)} aria-label={t("drawer.advancedClose")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="drawer-actions">
-              <button type="button" onClick={() => void loadDefaults()}>读取默认值</button>
-              <button type="button" className="primary-action" onClick={() => void saveConfig()}>保存到 config.local.json</button>
+              <button type="button" onClick={() => void loadDefaults()}>{t("config.loadDefaults")}</button>
+              <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.saveToLocal")}</button>
             </div>
             {activeEngine === "gpt-image-2" ? (
-              <GptSettings form={gptForm} onChange={setGptForm} />
+              <GptSettings form={gptForm} onChange={setGptForm} t={t} optionLabel={optionLabel} />
             ) : (
-              <BananaSettings form={bananaForm} onChange={setBananaForm} />
+              <BananaSettings form={bananaForm} onChange={setBananaForm} t={t} imageSizeLabel={bananaImageSizeLabel} />
             )}
           </section>
         </div>
@@ -3946,35 +4040,35 @@ function App() {
 
       {historyDetail && (
         <div className="history-detail-shell">
-          <button className="history-detail-backdrop" type="button" aria-label="关闭历史详情" onClick={() => setHistoryDetail(null)} />
-          <section className="history-detail" role="dialog" aria-modal="true" aria-label="历史上下文" tabIndex={-1} onKeyDown={closeOnEscape}>
+          <button className="history-detail-backdrop" type="button" aria-label={t("history.context")} onClick={() => setHistoryDetail(null)} />
+          <section className="history-detail" role="dialog" aria-modal="true" aria-label={t("history.context")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="history-detail-head">
               <div>
-                <p>{formatTime(historyDetail.created_at)} · {engineLabel(historyDetail.engine || "gpt-image-2")}</p>
-                <h2>历史上下文</h2>
+                <p>{formatTime(historyDetail.created_at, language)} · {engineLabel(historyDetail.engine || "gpt-image-2")}</p>
+                <h2>{t("history.context")}</h2>
               </div>
-              <button type="button" onClick={() => setHistoryDetail(null)} aria-label="关闭历史详情" title="关闭"><X size={18} /></button>
+              <button type="button" onClick={() => setHistoryDetail(null)} aria-label={t("history.context")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="history-detail-body">
               <section className="detail-section">
-                <h3>提示词</h3>
-                <p className="detail-prompt">{historyDetail.prompt || "没有提示词"}</p>
+                <h3>{t("history.prompt")}</h3>
+                <p className="detail-prompt">{historyDetail.prompt || t("history.noPrompt")}</p>
                 {String(historyDetail.form_state?.context_prompt || "") && (
                   <>
-                    <h3>固定提示词</h3>
+                    <h3>{t("history.fixedPrompt")}</h3>
                     <p className="detail-prompt muted">{String(historyDetail.form_state?.context_prompt || "")}</p>
                   </>
                 )}
                 {historyDetail.negative_prompt && (
                   <>
-                    <h3>负面提示词</h3>
+                    <h3>{t("history.negativePrompt")}</h3>
                     <p className="detail-prompt muted">{historyDetail.negative_prompt}</p>
                   </>
                 )}
               </section>
               {historyDetail.images?.length ? (
                 <section className="detail-section">
-                  <h3>结果图</h3>
+                  <h3>{t("history.resultImages")}</h3>
                   <div className="detail-images">
                     {historyDetail.images.map((image, index) => {
                       const src = imageSrc(image);
@@ -3990,22 +4084,22 @@ function App() {
                 </section>
               ) : null}
               <section className="detail-section">
-                <h3>生成参数</h3>
-                <KeyValueGrid value={historyDetail.form_state || {}} />
+                <h3>{t("history.params")}</h3>
+                <KeyValueGrid value={historyDetail.form_state || {}} emptyLabel={t("history.emptyParams")} />
               </section>
               {historyDetail.meta && Object.keys(historyDetail.meta).length > 0 && (
                 <section className="detail-section">
-                  <h3>返回信息</h3>
-                  <KeyValueGrid value={historyDetail.meta} />
+                  <h3>{t("history.response")}</h3>
+                  <KeyValueGrid value={historyDetail.meta} emptyLabel={t("history.emptyParams")} />
                 </section>
               )}
             </div>
             <div className="history-detail-actions">
               <button type="button" onClick={() => applyHistory(historyDetail)}>
-                <RotateCcw size={15} /> 套用参数
+                <RotateCcw size={15} /> {t("history.apply")}
               </button>
               <button type="button" onClick={() => copyPrompt(historyDetail.prompt || "")} disabled={!historyDetail.prompt}>
-                <Copy size={15} /> 复制提示词
+                <Copy size={15} /> {t("history.copyPrompt")}
               </button>
               <button
                 type="button"
@@ -4016,7 +4110,7 @@ function App() {
                 }}
                 disabled={!imageSrc(historyDetail.images?.[0])}
               >
-                <ImagePlus size={15} /> 作为参考图
+                <ImagePlus size={15} /> {t("history.useReference")}
               </button>
             </div>
           </section>
@@ -4025,14 +4119,14 @@ function App() {
 
       {previewImage && (
         <div className="lightbox">
-          <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label="关闭预览" />
+          <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
           <div className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
             <div>
               <strong>{previewImage.gallery && previewImage.gallery.length > 1 ? `${previewImage.name} · ${(previewImage.galleryIndex || 0) + 1}/${previewImage.gallery.length}` : previewImage.name}</strong>
               <span>
-                <a href={previewImage.src} download={previewImage.name} title="下载图片"><Download size={18} /></a>
-                <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title="作为参考图"><ImagePlus size={18} /></button>
-                <button type="button" onClick={closePreviewImage} aria-label="关闭预览" title="关闭预览"><X size={18} /></button>
+                <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
+                <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")}><ImagePlus size={18} /></button>
+                <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>
             <div
@@ -4047,15 +4141,15 @@ function App() {
             >
               {previewImage.gallery && previewImage.gallery.length > 1 && (
                 <>
-                  <button type="button" className="lightbox-gallery-button previous" onClick={() => shiftPreviewImage(-1)} aria-label="上一张图片" title="上一张图片"><ChevronLeft size={22} /></button>
-                  <button type="button" className="lightbox-gallery-button next" onClick={() => shiftPreviewImage(1)} aria-label="下一张图片" title="下一张图片"><ChevronRight size={22} /></button>
+                  <button type="button" className="lightbox-gallery-button previous" onClick={() => shiftPreviewImage(-1)} aria-label={t("preview.previous")} title={t("preview.previous")}><ChevronLeft size={22} /></button>
+                  <button type="button" className="lightbox-gallery-button next" onClick={() => shiftPreviewImage(1)} aria-label={t("preview.next")} title={t("preview.next")}><ChevronRight size={22} /></button>
                 </>
               )}
-              <div className="lightbox-zoom-tools" aria-label="图片缩放控制">
-                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label="缩小图片" title="缩小图片"><ZoomOut size={18} /></button>
-                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label="放大图片" title="放大图片"><ZoomIn size={18} /></button>
-                <button type="button" onClick={resetPreviewCanvas} title="适配窗口">适配</button>
-                <button type="button" onClick={() => setPreviewZoomLevel(1)} title="原始大小">100%</button>
+              <div className="lightbox-zoom-tools" aria-label={t("preview.zoomControls")}>
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label={t("preview.zoomOut")} title={t("preview.zoomOut")}><ZoomOut size={18} /></button>
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label={t("preview.zoomIn")} title={t("preview.zoomIn")}><ZoomIn size={18} /></button>
+                <button type="button" onClick={resetPreviewCanvas} title={t("preview.fit")}>{t("preview.fit")}</button>
+                <button type="button" onClick={() => setPreviewZoomLevel(1)} title={t("preview.original")}>100%</button>
               </div>
               <img
                 src={previewImage.src}
@@ -4161,10 +4255,10 @@ function Toggle({ label, help, checked, onChange }: { label: string; help?: stri
   );
 }
 
-function KeyValueGrid({ value }: { value: Record<string, unknown> }) {
+function KeyValueGrid({ value, emptyLabel }: { value: Record<string, unknown>; emptyLabel: string }) {
   const entries = Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== "");
   if (entries.length === 0) {
-    return <div className="detail-empty">没有记录额外参数。</div>;
+    return <div className="detail-empty">{emptyLabel}</div>;
   }
   return (
     <dl className="key-value-grid">
@@ -4178,70 +4272,70 @@ function KeyValueGrid({ value }: { value: Record<string, unknown> }) {
   );
 }
 
-function GptSettings({ form, onChange }: { form: GptForm; onChange: (value: GptForm) => void }) {
+function GptSettings({ form, onChange, t, optionLabel }: { form: GptForm; onChange: (value: GptForm) => void; t: Translator; optionLabel: (value: string) => string }) {
   const update = <K extends keyof GptForm>(key: K, value: GptForm[K]) => {
     const next = { ...form, [key]: value };
     onChange(key === "custom_size" ? next : normalizeGptForm(next));
   };
   return (
     <div className="settings-grid">
-      <Field label="尺寸" help={`选择预设尺寸；自定义尺寸会按官方规则校正：单边不超过 ${GPT_CUSTOM_SIZE_MAX}px，比例不超过 ${GPT_CUSTOM_SIZE_MAX_RATIO}:1，总像素不超过 2880 x 2880。`}>
+      <Field label={t("settings.size")} help={t("settings.sizeHelp", { max: GPT_CUSTOM_SIZE_MAX, ratio: GPT_CUSTOM_SIZE_MAX_RATIO })}>
         <select value={form.size} onChange={(event) => update("size", event.target.value)}>
-          {gptSizeOptions.map((item) => <option key={item}>{item}</option>)}
+          {gptSizeOptions.map((item) => <option key={item} value={item}>{item === "auto" ? t("option.auto") : item === "custom" ? t("config.custom") : item}</option>)}
         </select>
       </Field>
-      <Field label="自定义尺寸" help="格式为 宽x高，例如 1536x864。提交前会自动修正到 16 倍数和官方尺寸范围。"><input value={form.custom_size} onChange={(event) => update("custom_size", event.target.value)} /></Field>
-      <Field label="质量" help="控制生成质量和耗时；高质量更慢，自动则交给上游模型决定。">
+      <Field label={t("settings.customSize")} help={t("settings.customSizeHelp")}><input value={form.custom_size} onChange={(event) => update("custom_size", event.target.value)} /></Field>
+      <Field label={t("settings.quality")} help={t("settings.qualityHelp")}>
         <select value={form.quality} onChange={(event) => update("quality", event.target.value)}>
-          {gptQualityOptions.map((item) => <option key={item}>{item}</option>)}
+          {gptQualityOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
         </select>
       </Field>
-      <Field label="数量" help="一次请求生成的图片数量。数量越多等待越久，也更容易触发上游限制。"><input type="number" min={1} max={10} value={form.n} onChange={(event) => update("n", Number(event.target.value))} /></Field>
-      <Field label="随机种子" help="-1 表示随机；固定种子可帮助复现相近构图，但不保证完全一致。"><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
-      <Field label="风格预设" help="给提示词之外再补一层风格倾向；none 表示不额外指定。">
+      <Field label={t("settings.count")} help={t("settings.countHelp")}><input type="number" min={1} max={10} value={form.n} onChange={(event) => update("n", Number(event.target.value))} /></Field>
+      <Field label={t("settings.seed")} help={t("settings.seedHelp")}><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
+      <Field label={t("settings.stylePreset")} help={t("settings.stylePresetHelp")}>
         <select value={form.style_preset} onChange={(event) => update("style_preset", event.target.value)}>
           {["none", "photographic", "digital-art", "anime", "3d-render", "oil-painting", "watercolor", "sketch"].map((item) => <option key={item}>{item}</option>)}
         </select>
       </Field>
-      <Field label="接口类型" help="auto 会由后端按参考图和配置选择接口；仅在你明确知道上游兼容接口时手动指定。">
+      <Field label={t("settings.endpoint")} help={t("settings.endpointHelp")}>
         <select value={form.api_endpoint} onChange={(event) => update("api_endpoint", event.target.value)}>
           {["auto", "/v1/images/generations", "/v1/images/edits", "/v1/responses"].map((item) => <option key={item}>{item}</option>)}
         </select>
       </Field>
-      <Field label="返回格式" help="auto 保持默认；url 适合上游返回链接，b64_json 适合直接返回图片数据。">
+      <Field label={t("settings.responseFormat")} help={t("settings.responseFormatHelp")}>
         <select value={form.response_format} onChange={(event) => update("response_format", event.target.value)}>
           {["auto", "url", "b64_json"].map((item) => <option key={item}>{item}</option>)}
         </select>
       </Field>
-      <Field label="超时" help="单次请求最长等待秒数。网络慢或大图生成可适当调高。"><input type="number" min={1} max={3600} value={form.timeout} onChange={(event) => update("timeout", Number(event.target.value))} /></Field>
-      <Toggle label="增强提示词" help="开启后后端会附加更完整的生成提示辅助，适合普通创作；精确提示词可关闭。" checked={form.enhance_prompt} onChange={(value) => update("enhance_prompt", value)} />
-      <Toggle label="安全检查" help="保留本地安全检查开关，避免发送明显不合规内容。" checked={form.safety_check} onChange={(value) => update("safety_check", value)} />
-      <Toggle label="无限等待" help="开启后不按普通超时中断，适合很慢的上游；失败时可能需要手动刷新。" checked={form.infinite_timeout} onChange={(value) => update("infinite_timeout", value)} />
+      <Field label={t("settings.timeout")} help={t("settings.timeoutHelp")}><input type="number" min={1} max={3600} value={form.timeout} onChange={(event) => update("timeout", Number(event.target.value))} /></Field>
+      <Toggle label={t("settings.enhancePrompt")} help={t("settings.enhancePromptHelp")} checked={form.enhance_prompt} onChange={(value) => update("enhance_prompt", value)} />
+      <Toggle label={t("settings.safetyCheck")} help={t("settings.safetyCheckHelp")} checked={form.safety_check} onChange={(value) => update("safety_check", value)} />
+      <Toggle label={t("settings.infiniteTimeout")} help={t("settings.infiniteTimeoutHelp")} checked={form.infinite_timeout} onChange={(value) => update("infinite_timeout", value)} />
     </div>
   );
 }
 
-function BananaSettings({ form, onChange }: { form: BananaForm; onChange: (value: BananaForm) => void }) {
+function BananaSettings({ form, onChange, t, imageSizeLabel }: { form: BananaForm; onChange: (value: BananaForm) => void; t: Translator; imageSizeLabel: (value: string) => string }) {
   const update = <K extends keyof BananaForm>(key: K, value: BananaForm[K]) => onChange({ ...form, [key]: value });
   return (
     <div className="settings-grid">
-      <Field label="批量数量" help="Banana 单次请求生成数量。数量越大等待越久，也更容易触发上游限制。"><input type="number" min={1} max={8} value={form.batch_size} onChange={(event) => update("batch_size", Number(event.target.value))} /></Field>
-      <Field label="比例" help="选择输出画面比例。Auto 由上游按提示词判断。">
+      <Field label={t("settings.batchSize")} help={t("settings.batchSizeHelp")}><input type="number" min={1} max={8} value={form.batch_size} onChange={(event) => update("batch_size", Number(event.target.value))} /></Field>
+      <Field label={t("composer.aspect")} help={t("settings.aspectHelp")}>
         <select value={form.aspect_ratio} onChange={(event) => update("aspect_ratio", event.target.value)}>
           {bananaAspectOptions.map((item) => <option key={item}>{item}</option>)}
         </select>
       </Field>
-      <Field label="图像分辨率" help="选择 Banana 输出分辨率档位；无表示不额外指定。">
+      <Field label={t("composer.resolution")} help={t("settings.imageSizeHelp")}>
         <select value={form.image_size} onChange={(event) => update("image_size", event.target.value)}>
-          {bananaImageSizeOptions.map((item) => <option key={item}>{item}</option>)}
+          {bananaImageSizeOptions.map((item) => <option key={item} value={item}>{imageSizeLabel(item)}</option>)}
         </select>
       </Field>
-      <Field label="随机种子" help="-1 表示随机；固定种子可帮助生成相近结果。"><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
-      <Field label="Top-P" help="控制采样范围，数值越低越保守。通常保持默认即可。"><input type="number" min={0} max={1} step={0.01} value={form.top_p} onChange={(event) => update("top_p", Number(event.target.value))} /></Field>
-      <Field label="超时" help="Banana 请求最长等待秒数。模型慢时可适当调高。"><input type="number" min={60} max={1800} value={form.timeout_seconds} onChange={(event) => update("timeout_seconds", Number(event.target.value))} /></Field>
-      <Toggle label="无限等待" help="开启后不按普通超时中断，适合很慢的上游响应。" checked={form.infinite_timeout} onChange={(value) => update("infinite_timeout", value)} />
-      <Toggle label="绕过代理" help="让请求跳过本地代理配置，仅在网络环境需要时打开。" checked={form.bypass_proxy} onChange={(value) => update("bypass_proxy", value)} />
-      <Toggle label="禁用 SSL 校验" help="仅用于兼容自签名或异常证书环境；正常公网接口建议关闭。" checked={form.disable_ssl} onChange={(value) => update("disable_ssl", value)} />
+      <Field label={t("settings.seed")} help={t("settings.bananaSeedHelp")}><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
+      <Field label="Top-P" help={t("settings.topPHelp")}><input type="number" min={0} max={1} step={0.01} value={form.top_p} onChange={(event) => update("top_p", Number(event.target.value))} /></Field>
+      <Field label={t("settings.timeout")} help={t("settings.bananaTimeoutHelp")}><input type="number" min={60} max={1800} value={form.timeout_seconds} onChange={(event) => update("timeout_seconds", Number(event.target.value))} /></Field>
+      <Toggle label={t("settings.infiniteTimeout")} help={t("settings.bananaInfiniteTimeoutHelp")} checked={form.infinite_timeout} onChange={(value) => update("infinite_timeout", value)} />
+      <Toggle label={t("settings.bypassProxy")} help={t("settings.bypassProxyHelp")} checked={form.bypass_proxy} onChange={(value) => update("bypass_proxy", value)} />
+      <Toggle label={t("settings.disableSsl")} help={t("settings.disableSslHelp")} checked={form.disable_ssl} onChange={(value) => update("disable_ssl", value)} />
     </div>
   );
 }

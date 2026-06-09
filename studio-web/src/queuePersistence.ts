@@ -1,5 +1,6 @@
 export type QueueJobStatus = "queued" | "running" | "success" | "error" | "canceled";
 export type QueueJobEngine = "gpt-image-2" | "banana";
+export const REFRESH_INTERRUPTED_QUEUE_ERROR = "__refresh_interrupted__";
 
 export type PersistentQueueImage = {
   id?: string;
@@ -71,7 +72,7 @@ function normalizeQueueJob(value: unknown): PersistentQueueJob | null {
     finishedAt: String(item.finishedAt || (interrupted ? new Date().toISOString() : "")) || undefined,
     elapsedSeconds: Number.isFinite(elapsedSeconds) && elapsedSeconds > 0 ? elapsedSeconds : undefined,
     images: images.length ? images : undefined,
-    error: interrupted ? "页面刷新，任务已中断" : String(item.error || "") || undefined,
+    error: interrupted ? REFRESH_INTERRUPTED_QUEUE_ERROR : String(item.error || "") || undefined,
   };
 }
 

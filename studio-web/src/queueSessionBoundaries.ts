@@ -23,7 +23,12 @@ type SessionLike<Turn extends TurnLike = TurnLike> = {
 };
 
 const activeQueueStatuses = new Set<QueueStatus>(["queued", "running"]);
-const refreshInterruptedMessage = "页面刷新，任务已中断";
+const refreshInterruptedMessage = "__refresh_interrupted__";
+const legacyRefreshInterruptedMessage = "页面刷新，任务已中断";
+
+function isRefreshInterruptedError(error?: string) {
+  return error === refreshInterruptedMessage || error === legacyRefreshInterruptedMessage;
+}
 
 export function hasActiveQueueJobForSession(jobs: QueueJobLike[], sessionId: string) {
   return jobs.some((job) => job.sessionId === sessionId && activeQueueStatuses.has(job.status));
@@ -38,7 +43,7 @@ export function queueJobTargetExists(sessions: SessionLike[], job: Pick<QueueJob
 export function reconcileInterruptedQueueTurns<Session extends SessionLike>(sessions: Session[], jobs: QueueJobLike[]) {
   const interruptedByTurn = new Map<string, QueueJobLike>();
   jobs.forEach((job) => {
-    if (job.status === "canceled" && job.error === refreshInterruptedMessage) {
+    if (job.status === "canceled" && isRefreshInterruptedError(job.error)) {
       interruptedByTurn.set(`${job.sessionId}:${job.turnId}`, job);
     }
   });
@@ -59,7 +64,7 @@ export function reconcileInterruptedQueueTurns<Session extends SessionLike>(sess
       };
     });
     if (!changed) return session;
-    const latestInterrupted = turns.find((turn) => turn.error === refreshInterruptedMessage);
+    const latestInterrupted = turns.find((turn) => isRefreshInterruptedError(turn.error));
     return {
       ...session,
       updatedAt: latestInterrupted?.finishedAt || session.updatedAt,

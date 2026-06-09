@@ -71,6 +71,26 @@ test("interrupted queue jobs reconcile matching running turns after refresh", ()
         sessionId: "session-1",
         turnId: "turn-1",
         status: "canceled",
+        error: "__refresh_interrupted__",
+        finishedAt: "2026-05-26T10:05:00.000Z",
+      },
+    ],
+  );
+
+  assert.equal(sessions[0].turns[0].status, "error");
+  assert.equal(sessions[0].turns[0].error, "__refresh_interrupted__");
+  assert.equal(sessions[0].turns[0].finishedAt, "2026-05-26T10:05:00.000Z");
+});
+
+test("interrupted queue reconciliation keeps legacy stored Chinese markers compatible", () => {
+  const sessions = reconcileInterruptedQueueTurns(
+    [baseSession],
+    [
+      {
+        id: "job-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        status: "canceled",
         error: "页面刷新，任务已中断",
         finishedAt: "2026-05-26T10:05:00.000Z",
       },
@@ -78,6 +98,5 @@ test("interrupted queue jobs reconcile matching running turns after refresh", ()
   );
 
   assert.equal(sessions[0].turns[0].status, "error");
-  assert.equal(sessions[0].turns[0].error, "页面刷新，任务已中断");
-  assert.equal(sessions[0].turns[0].finishedAt, "2026-05-26T10:05:00.000Z");
+  assert.equal(sessions[0].turns[0].error, "__refresh_interrupted__");
 });
