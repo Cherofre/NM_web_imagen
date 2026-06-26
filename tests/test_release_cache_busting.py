@@ -43,7 +43,21 @@ class ReleaseCacheBustingTests(unittest.TestCase):
         self.assertRegex(
             script,
             re.compile(
-                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*if\s*\(\(Test-StudioAssets\) -and \(Test-RequiredApiRoutes\)\)",
+                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*if\s*\(\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and \(Test-RequiredApiRoutes\)\)",
+                re.DOTALL,
+            ),
+        )
+
+    def test_start_script_validates_backend_version_before_reusing_server(self) -> None:
+        script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("function Test-BackendVersion", script)
+        self.assertIn("$HealthPayload = $Response.Content | ConvertFrom-Json", script)
+        self.assertIn("$HealthPayload.version -eq $AppVersion", script)
+        self.assertRegex(
+            script,
+            re.compile(
+                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*if\s*\(\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and \(Test-RequiredApiRoutes\)\)",
                 re.DOTALL,
             ),
         )
@@ -78,6 +92,14 @@ class ReleaseCacheBustingTests(unittest.TestCase):
 
         self.assertNotIn('type="module"', html)
         self.assertRegex(html, r'<script defer src="\./assets/[^"]+\.js"></script>')
+
+    def test_release_keeps_v104_hashed_assets_as_cache_fallbacks(self) -> None:
+        assets_dir = ROOT / "static" / "studio" / "assets"
+        fallback_script = (ROOT / "studio-web" / "scripts" / "keep-asset-fallbacks.mjs").read_text(encoding="utf-8")
+
+        for asset_name in ["index-CnP0RvwW.js", "index-Dr4xysUg.css"]:
+            self.assertTrue((assets_dir / asset_name).exists(), asset_name)
+            self.assertIn(asset_name, fallback_script)
 
     def test_one_click_release_runs_checks_before_sync(self) -> None:
         script = (ROOT / "release_one_click.ps1").read_text(encoding="utf-8")

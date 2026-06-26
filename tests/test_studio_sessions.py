@@ -159,6 +159,75 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual("console.log('studio asset');\n", response.text.replace("\r\n", "\n"))
 
+    def test_legacy_output_history_ids_are_unique_per_filename(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "same.png").write_bytes(b"png")
+        (self.outputs / "same.jpg").write_bytes(b"jpg")
+
+        response = self.client.get("/api/history", params={"limit": "20"})
+
+        self.assertEqual(200, response.status_code)
+        entries = response.json()["entries"]
+        legacy_ids = {
+            entry["images"][0]["name"]: entry["id"]
+            for entry in entries
+            if entry.get("legacy") and entry.get("images")
+        }
+        self.assertEqual({"same.png", "same.jpg"}, set(legacy_ids))
+        self.assertNotEqual(legacy_ids["same.png"], legacy_ids["same.jpg"])
+
+    def test_legacy_output_delete_removes_only_the_requested_file(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        same_png = self.outputs / "same.png"
+        same_jpg = self.outputs / "same.jpg"
+        same_png.write_bytes(b"png")
+        same_jpg.write_bytes(b"jpg")
+        history_response = self.client.get("/api/history", params={"limit": "20"})
+        entries = history_response.json()["entries"]
+        png_entry = next(
+            entry
+            for entry in entries
+            if entry.get("legacy") and entry.get("images", [{}])[0].get("name") == "same.png"
+        )
+
+        response = self.client.delete(
+            f"/api/history/{png_entry['id']}",
+            params={"delete_files": "true", "legacy_path": "outputs/same.png"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertFalse(same_png.exists())
+        self.assertTrue(same_jpg.exists())
+        self.assertEqual(["outputs/same.png"], response.json()["deleted_files"])
+
+    def test_legacy_output_delete_rejects_forged_legacy_path(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        target = self.outputs / "other.png"
+        target.write_bytes(b"png")
+
+        response = self.client.delete(
+            "/api/history/legacy-forged",
+            params={"delete_files": "true", "legacy_path": "outputs/other.png"},
+        )
+
+        self.assertEqual(404, response.status_code)
+        self.assertTrue(target.exists())
+
+    def test_legacy_output_delete_rejects_matching_id_for_nested_outputs_file(self) -> None:
+        nested_dir = self.outputs / "session_refs"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        target = nested_dir / "secret.png"
+        target.write_bytes(b"png")
+        forged_id = webapp.legacy_output_entry_id("secret.png")
+
+        response = self.client.delete(
+            f"/api/history/{forged_id}",
+            params={"delete_files": "true", "legacy_path": "outputs/session_refs/secret.png"},
+        )
+
+        self.assertEqual(404, response.status_code)
+        self.assertTrue(target.exists())
+
     def test_studio_sessions_persist_reference_files_outside_json(self) -> None:
         references = [
             {

@@ -1600,8 +1600,9 @@ button.primary-action:focus-visible,
   top: calc(100% + 6px);
   left: 50%;
   z-index: 2;
+  width: min(180px, calc(100% - 8px));
   display: grid;
-  grid-template-columns: repeat(6, 26px);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   justify-content: center;
   gap: 3px;
   padding: 4px;
@@ -1617,7 +1618,7 @@ button.primary-action:focus-visible,
 }
 
 .turn-images.collapsed .image-actions {
-  grid-template-columns: repeat(6, 24px);
+  width: min(142px, calc(100% - 6px));
   gap: 2px;
   top: calc(100% + 6px);
   padding: 3px;
@@ -1635,7 +1636,8 @@ button.primary-action:focus-visible,
 .image-actions a {
   display: inline-grid;
   place-items: center;
-  width: 26px;
+  width: 100%;
+  min-width: 0;
   height: 26px;
   border: 0;
   border-radius: 999px;
@@ -1654,7 +1656,8 @@ button.primary-action:focus-visible,
 
 .turn-images.collapsed .image-actions button,
 .turn-images.collapsed .image-actions a {
-  width: 24px;
+  width: 100%;
+  min-width: 0;
   height: 24px;
 }
 
@@ -3756,6 +3759,25 @@ button.primary-action:focus-visible,
   .history-detail {
     width: calc(100vw - 12px);
     max-height: calc(100vh - 12px);
+  }
+
+  .history-browser {
+    width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+  }
+
+  .history-browser-list .history-browser-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .history-browser-list .history-browser-preview {
+    width: 64px;
+  }
+
+  .history-browser-list .history-browser-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 
   .composer-popover {

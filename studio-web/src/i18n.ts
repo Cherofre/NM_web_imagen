@@ -27,7 +27,7 @@ export const messages: Record<AppLanguage, MessageMap> = {
     "app.emptyHistory": "生成成功后会出现在这里。",
     "app.noImage": "无图",
     "app.outputFolder": "存图夹",
-    "app.openOutputFolder": "打开 outputs 存图夹",
+    "app.openOutputFolder": "打开存图夹",
     "app.toggleSidebar": "切换历史栏",
     "app.closeSidebar": "关闭历史栏",
     "app.leftList": "左侧列表",

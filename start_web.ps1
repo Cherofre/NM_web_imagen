@@ -54,6 +54,20 @@ function Test-LocalServer {
   }
 }
 
+function Test-BackendVersion {
+  try {
+    $Response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 1
+    if ($Response.StatusCode -lt 200 -or $Response.StatusCode -ge 500) {
+      return $false
+    }
+
+    $HealthPayload = $Response.Content | ConvertFrom-Json
+    return $HealthPayload.version -eq $AppVersion
+  } catch {
+    return $false
+  }
+}
+
 function Resolve-StudioAssetUrl {
   param([string]$Reference)
 
@@ -404,14 +418,14 @@ if (-not (Test-Path -LiteralPath $RequirementsPath)) {
 }
 
 if (Test-LocalServer) {
-  if ((Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
+  if ((Test-BackendVersion) -and (Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
     Write-Host "Backend service is already running. Opening:"
     Write-Host $OpenUrl
     Start-Process $OpenUrl
     exit 0
   }
 
-  Write-Host "Backend service responded, but current Studio assets or API routes did not load."
+  Write-Host "Backend service responded, but current version, Studio assets, or API routes did not match."
   Write-Host "Restarting current web tool service..."
   $Stopped = Stop-ExistingWebToolProcesses
   if ($Stopped -eq 0) {

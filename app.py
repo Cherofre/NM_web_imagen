@@ -1112,31 +1112,83 @@ def history_output_path(image: Dict[str, Any]) -> Optional[Path]:
     return resolved
 
 
+def root_relative_path(path: Path) -> str:
+    return str(path.resolve().relative_to(ROOT_DIR.resolve())).replace("\\", "/")
+
+
+def legacy_output_entry_id(path_or_name: Path | str) -> str:
+    name = Path(path_or_name).name
+    token = base64.urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"legacy-file-{token}"
+
+
+def legacy_output_path(raw_path: str) -> Optional[Path]:
+    value = str(raw_path or "").strip()
+    if not value:
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = ROOT_DIR / candidate
+    try:
+        resolved = candidate.resolve()
+        outputs_root = OUTPUTS_DIR.resolve()
+        if resolved == outputs_root or outputs_root not in resolved.parents:
+            return None
+    except Exception:
+        return None
+    return resolved
+
+
+def is_legacy_output_file(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        outputs_root = OUTPUTS_DIR.resolve()
+    except Exception:
+        return False
+    return (
+        resolved.parent == outputs_root
+        and resolved.is_file()
+        and resolved.name not in {HISTORY_FILE.name, "history.tmp"}
+        and resolved.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+    )
+
+
+def delete_legacy_output_entry(entry_id: str, legacy_path: str) -> Tuple[bool, List[str]]:
+    target_id = str(entry_id or "").strip()
+    target_path = legacy_output_path(legacy_path)
+
+    if target_path is None and target_id.startswith("legacy-") and not target_id.startswith("legacy-file-"):
+        stem = target_id.removeprefix("legacy-")
+        matches = [path for path in OUTPUTS_DIR.iterdir() if path.is_file() and path.stem == stem] if OUTPUTS_DIR.exists() else []
+        if len(matches) == 1:
+            target_path = matches[0]
+
+    if target_path is None or not is_legacy_output_file(target_path):
+        return False, []
+
+    if target_id.startswith("legacy-file-"):
+        if target_id != legacy_output_entry_id(target_path.name):
+            return False, []
+    elif target_id.startswith("legacy-"):
+        if target_path.stem != target_id.removeprefix("legacy-"):
+            return False, []
+    else:
+        return False, []
+
+    try:
+        target_path.unlink()
+        return True, [root_relative_path(target_path)]
+    except Exception:
+        return False, []
+
+
 def delete_history_entry(entry_id: str, *, delete_files: bool = False, legacy_path: str = "") -> Tuple[bool, List[str]]:
     target_id = str(entry_id or "").strip()
     if not target_id:
         return False, []
 
     if target_id.startswith("legacy-") and delete_files:
-        stem = target_id.removeprefix("legacy-")
-        deleted_files: List[str] = []
-        legacy_candidates: List[Path] = []
-        if legacy_path:
-            legacy_candidates.append(ROOT_DIR / legacy_path)
-        for path in OUTPUTS_DIR.iterdir() if OUTPUTS_DIR.exists() else []:
-            if path.is_file() and path.stem == stem:
-                legacy_candidates.append(path)
-        for path in legacy_candidates:
-            try:
-                resolved = path.resolve()
-                outputs_root = OUTPUTS_DIR.resolve()
-                if not resolved.is_file() or outputs_root not in resolved.parents:
-                    continue
-                resolved.unlink()
-                deleted_files.append(str(resolved.relative_to(ROOT_DIR)).replace("\\", "/"))
-            except Exception:
-                continue
-        return bool(deleted_files), deleted_files
+        return delete_legacy_output_entry(target_id, legacy_path)
 
     entries = read_history_entries()
     removed_entries = [entry for entry in entries if str(entry.get("id") or "") == target_id]
@@ -1155,7 +1207,7 @@ def delete_history_entry(entry_id: str, *, delete_files: bool = False, legacy_pa
                     continue
                 try:
                     path.unlink()
-                    deleted_files.append(str(path.relative_to(ROOT_DIR)).replace("\\", "/"))
+                    deleted_files.append(root_relative_path(path))
                 except Exception:
                     continue
 
@@ -1245,7 +1297,7 @@ def legacy_output_entries(known_names: set[str]) -> List[Dict[str, Any]]:
         created_at = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
         entries.append(
             {
-                "id": f"legacy-{path.stem}",
+                "id": legacy_output_entry_id(path.name),
                 "created_at": created_at,
                 "engine": engine,
                 "legacy": True,

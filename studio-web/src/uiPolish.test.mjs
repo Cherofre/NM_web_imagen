@@ -61,6 +61,8 @@ test("release package keeps previous hashed assets as cache fallbacks", () => {
   assert.ok(fs.existsSync(path.join(assetsDir, "index-BiyMHVvw.js")));
   assert.ok(fs.existsSync(path.join(assetsDir, "index-D6wyuxyS.css")));
   assert.ok(fs.existsSync(path.join(assetsDir, "index-DjJyEBb1.js")));
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-Dr4xysUg.css")));
+  assert.ok(fs.existsSync(path.join(assetsDir, "index-CnP0RvwW.js")));
 });
 
 test("floating tooltip uses stronger readable styling", () => {
@@ -337,13 +339,13 @@ test("result image actions use a persistent floating toolbar below the image", (
   assert.match(css, /(?:^|\n)\.image-preview\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*border:\s*1px solid var\(--line\);[\s\S]*border-radius:\s*18px;/);
   assert.match(css, /(?:^|\n)\.image-card figcaption\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*padding:\s*48px 10px 10px;/);
   assert.match(cssBlock(".image-preview-wrap"), /position:\s*relative;[\s\S]*overflow:\s*visible;/);
-  assert.match(cssBlock(".image-actions"), /position:\s*absolute;[\s\S]*top:\s*calc\(100% \+ 6px\);[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*repeat\(6, 26px\);[\s\S]*opacity:\s*1;[\s\S]*pointer-events:\s*auto;/);
+  assert.match(cssBlock(".image-actions"), /position:\s*absolute;[\s\S]*top:\s*calc\(100% \+ 6px\);[\s\S]*width:\s*min\(180px, calc\(100% - 8px\)\);[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\);[\s\S]*opacity:\s*1;[\s\S]*pointer-events:\s*auto;/);
   assert.doesNotMatch(cssBlock(".image-actions"), /bottom:/);
   assert.doesNotMatch(cssBlock(".image-actions"), /pointer-events:\s*none;/);
   assert.doesNotMatch(css, /\.image-card:hover \.image-actions,\s*\.image-card:focus-within \.image-actions\s*\{/);
-  assert.match(css, /\.image-actions button,\s*\.image-actions a\s*\{[\s\S]*width:\s*26px;[\s\S]*height:\s*26px;/);
+  assert.match(css, /\.image-actions button,\s*\.image-actions a\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*height:\s*26px;/);
   assert.match(cssBlock(".turn-images.collapsed .image-card figcaption"), /padding:\s*40px 7px 8px;/);
-  assert.match(cssBlock(".turn-images.collapsed .image-actions"), /grid-template-columns:\s*repeat\(6, 24px\);[\s\S]*top:\s*calc\(100% \+ 6px\);/);
+  assert.match(cssBlock(".turn-images.collapsed .image-actions"), /width:\s*min\(142px, calc\(100% - 6px\)\);[\s\S]*top:\s*calc\(100% \+ 6px\);/);
   assert.doesNotMatch(cssBlock(".turn-images.collapsed .image-actions"), /bottom:/);
 });
 
@@ -369,6 +371,9 @@ test("history browser supports list grid filters and destructive delete copy", (
   assert.match(appSource, /query\.set\("delete_files", "true"\)/);
   assert.match(cssBlock(".history-browser"), /width:\s*min\(1120px, calc\(100vw - 32px\)\);/);
   assert.match(cssBlock(".history-browser-grid"), /grid-template-columns:\s*repeat\(auto-fill, minmax\(150px, 1fr\)\);/);
+  const phone = mediaBlock("max-width: 560px");
+  assert.match(phone, /\.history-browser-list \.history-browser-card\s*\{[\s\S]*grid-template-columns:\s*64px minmax\(0, 1fr\);/);
+  assert.match(phone, /\.history-browser-list \.history-browser-actions\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*justify-content:\s*flex-start;/);
 });
 
 test("history browser keeps heavy lists responsive and closes from Escape", () => {
@@ -376,6 +381,7 @@ test("history browser keeps heavy lists responsive and closes from Escape", () =
   const keyHandlerEnd = appSource.indexOf("window.addEventListener(\"keydown\", onKeyDown)", keyHandlerStart);
   assert.notEqual(keyHandlerStart, -1, "Missing global Escape handler");
   assert.notEqual(keyHandlerEnd, -1, "Missing global Escape registration");
+  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /if \(previewImage\) \{[\s\S]*closePreviewImage\(\);[\s\S]*return;/);
   assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /setHistoryBrowserOpen\(false\);/);
   assert.match(appSource, /const HISTORY_BROWSER_PAGE_SIZE = 80;/);
   assert.match(appSource, /const \[historyBrowserLimit, setHistoryBrowserLimit\] = useState\(HISTORY_BROWSER_PAGE_SIZE\);/);
@@ -411,7 +417,7 @@ test("history delete actions are visually distinct", () => {
 
 test("outputs entry uses localized finished-image folder copy", () => {
   assert.match(i18nSource, /"app\.outputFolder": "存图夹"/);
-  assert.match(i18nSource, /"app\.openOutputFolder": "打开 outputs 存图夹"/);
+  assert.match(i18nSource, /"app\.openOutputFolder": "打开存图夹"/);
   assert.match(i18nSource, /"history\.browser": "历史窗"/);
   assert.match(i18nSource, /"history\.closeBrowser": "关闭历史窗"/);
   assert.match(i18nSource, /"history\.allEngines": "全部模型"/);
@@ -423,6 +429,12 @@ test("outputs entry uses localized finished-image folder copy", () => {
   assert.match(appSource, /t\("app\.openOutputFolder"\)/);
   assert.match(appSource, /<FolderOpen size=\{15\} \/> \{t\("app\.outputFolder"\)\}/);
   assert.doesNotMatch(appSource, /<FolderOpen size=\{15\} \/> outputs/);
+});
+
+test("banana history exposes requested image size and aspect ratio", () => {
+  assert.match(appSource, /const bananaSize = String\(entry\.meta\?\.image_size \|\| entry\.form_state\?\.image_size \|\| ""\)\.trim\(\);/);
+  assert.match(appSource, /const bananaAspect = String\(entry\.meta\?\.aspect_ratio \|\| entry\.form_state\?\.aspect_ratio \|\| ""\)\.trim\(\);/);
+  assert.match(appSource, /return \[bananaSize, bananaAspect\]\.filter\(\(item\) => item && item !== "auto" && item !== "无"\)\.join\(" \/ "\);/);
 });
 
 test("history sidebar actions read as a compact tool group", () => {

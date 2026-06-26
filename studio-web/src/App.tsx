@@ -457,7 +457,10 @@ function requestedSizeLabel(entry: HistoryEntry) {
   const formSize = String(entry.form_state?.size || "").trim();
   const customSize = String(entry.form_state?.custom_size || "").trim();
   const value = metaSize && metaSize !== "auto" ? metaSize : formSize === "custom" ? customSize : formSize;
-  return value && value !== "auto" ? value.replace(/x/i, " x ") : "";
+  if (value && value !== "auto") return value.replace(/x/i, " x ");
+  const bananaSize = String(entry.meta?.image_size || entry.form_state?.image_size || "").trim();
+  const bananaAspect = String(entry.meta?.aspect_ratio || entry.form_state?.aspect_ratio || "").trim();
+  return [bananaSize, bananaAspect].filter((item) => item && item !== "auto" && item !== "无").join(" / ");
 }
 
 function dimensionMismatchLabel(entry: HistoryEntry, image?: GeneratedImage | null) {
@@ -1282,6 +1285,11 @@ function App() {
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (previewImage) {
+        event.preventDefault();
+        closePreviewImage();
+        return;
+      }
       setAdvancedOpen(false);
       closeConnectionDrawer();
       setRenameOpen(false);
@@ -1294,7 +1302,7 @@ function App() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [previewImage]);
 
   useEffect(() => {
     setComposerPopover(null);
