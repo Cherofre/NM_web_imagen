@@ -15,6 +15,7 @@ import {
   FoldVertical,
   Heart,
   ImagePlus,
+  ListX,
   Loader2,
   MessageSquarePlus,
   PanelLeftClose,
@@ -111,6 +112,7 @@ type GeneratedImage = {
   data_url?: string;
   b64_json?: string;
   mime_type?: string;
+  dimensions?: { width?: number; height?: number };
 };
 
 type HistoryEntry = {
@@ -300,10 +302,17 @@ const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
 type PreviewImage = {
   src: string;
   name: string;
+  dimensions?: { width?: number; height?: number };
+  requestedSize?: string;
   objectUrl?: boolean;
   gallery?: PreviewImage[];
   galleryIndex?: number;
 };
+
+type HistoryViewMode = "list" | "grid";
+type HistoryFavoriteFilter = "all" | "favorite";
+type HistoryDateFilter = "all" | "today" | "7d" | "30d";
+type HistoryEngineFilter = "all" | Engine;
 
 type PendingSessionSwitch = {
   nextSessionId: string;
@@ -326,6 +335,7 @@ const QUEUE_POPOVER_MAX_WIDTH = 560;
 const QUEUE_POPOVER_MIN_HEIGHT = 220;
 const QUEUE_POPOVER_MAX_HEIGHT = 520;
 const SIDEBAR_NARROW_QUERY = "(max-width: 920px)";
+const HISTORY_BROWSER_PAGE_SIZE = 80;
 
 type SessionPromptEditorDraft = {
   fixed_prompt: string;
@@ -436,6 +446,57 @@ function imageName(image?: GeneratedImage, index = 0) {
   return image?.saved_name || image?.name || `image-${index + 1}.png`;
 }
 
+function imageDimensionsLabel(image?: GeneratedImage | null) {
+  const width = Number(image?.dimensions?.width || 0);
+  const height = Number(image?.dimensions?.height || 0);
+  return width > 0 && height > 0 ? `${width} x ${height}` : "";
+}
+
+function requestedSizeLabel(entry: HistoryEntry) {
+  const metaSize = String(entry.meta?.size || "").trim();
+  const formSize = String(entry.form_state?.size || "").trim();
+  const customSize = String(entry.form_state?.custom_size || "").trim();
+  const value = metaSize && metaSize !== "auto" ? metaSize : formSize === "custom" ? customSize : formSize;
+  if (value && value !== "auto") return value.replace(/x/i, " x ");
+  const bananaSize = String(entry.meta?.image_size || entry.form_state?.image_size || "").trim();
+  const bananaAspect = String(entry.meta?.aspect_ratio || entry.form_state?.aspect_ratio || "").trim();
+  return [bananaSize, bananaAspect].filter((item) => item && item !== "auto" && item !== "无").join(" / ");
+}
+
+function dimensionMismatchLabel(entry: HistoryEntry, image?: GeneratedImage | null) {
+  const actual = imageDimensionsLabel(image);
+  const requested = requestedSizeLabel(entry);
+  return actual && requested && actual !== requested ? `${requested} -> ${actual}` : "";
+}
+
+function filteredHistoryEntries(
+  entries: HistoryEntry[],
+  favoriteFilter: HistoryFavoriteFilter,
+  dateFilter: HistoryDateFilter,
+  engineFilter: HistoryEngineFilter,
+) {
+  const now = Date.now();
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const minTime = dateFilter === "today"
+    ? startOfToday.getTime()
+    : dateFilter === "7d"
+      ? now - 7 * 24 * 60 * 60 * 1000
+      : dateFilter === "30d"
+        ? now - 30 * 24 * 60 * 60 * 1000
+        : 0;
+
+  return entries.filter((entry) => {
+    if (favoriteFilter === "favorite" && !entry.favorite) return false;
+    if (engineFilter !== "all" && entry.engine !== engineFilter) return false;
+    if (minTime > 0) {
+      const timestamp = entry.created_at ? new Date(entry.created_at).getTime() : 0;
+      if (!Number.isFinite(timestamp) || timestamp < minTime) return false;
+    }
+    return true;
+  });
+}
+
 function compactGeneratedImage(image: GeneratedImage): GeneratedImage {
   const compact: GeneratedImage = {
     id: image.id,
@@ -445,6 +506,7 @@ function compactGeneratedImage(image: GeneratedImage): GeneratedImage {
     saved_path: image.saved_path,
     url: image.url,
     mime_type: image.mime_type,
+    dimensions: image.dimensions,
   };
   return Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined && value !== "")) as GeneratedImage;
 }
@@ -928,6 +990,12 @@ function App() {
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "history">("sessions");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyBrowserOpen, setHistoryBrowserOpen] = useState(false);
+  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>("grid");
+  const [historyFavoriteFilter, setHistoryFavoriteFilter] = useState<HistoryFavoriteFilter>("all");
+  const [historyDateFilter, setHistoryDateFilter] = useState<HistoryDateFilter>("all");
+  const [historyEngineFilter, setHistoryEngineFilter] = useState<HistoryEngineFilter>("all");
+  const [historyBrowserLimit, setHistoryBrowserLimit] = useState(HISTORY_BROWSER_PAGE_SIZE);
   const [historyCollapsed, setHistoryCollapsed] = useState(() => shouldStartHistoryCollapsed());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -1009,6 +1077,8 @@ function App() {
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
+  const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
+  const visibleHistory = filteredHistory.slice(0, historyBrowserLimit);
   const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm, t);
   const hasCompleteConfig = activeConfigIssues.length === 0;
   const configButtonLabel = hasCompleteConfig ? `${t("config.label")} · ${activeProfileName}` : t("config.check");
@@ -1129,14 +1199,14 @@ function App() {
 
   useEffect(() => {
     if (!sessionsHydratedRef.current) return undefined;
-    try {
-      localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
-    } catch {
-      localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
-      setNotice(t("status.sessionTooLarge"));
-    }
     if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
     sessionSaveTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
+      } catch {
+        localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
+        setNotice(t("status.sessionTooLarge"));
+      }
       void fetch("/api/studio/sessions", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1209,20 +1279,30 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (historyBrowserOpen) setHistoryBrowserLimit(HISTORY_BROWSER_PAGE_SIZE);
+  }, [historyBrowserOpen, historyFavoriteFilter, historyDateFilter, historyEngineFilter, historyViewMode]);
+
+  useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (previewImage) {
+        event.preventDefault();
+        closePreviewImage();
+        return;
+      }
       setAdvancedOpen(false);
       closeConnectionDrawer();
       setRenameOpen(false);
       setSessionPromptOpen(false);
       setPendingMultiImageConfirm(null);
       setHistoryDetail(null);
+      setHistoryBrowserOpen(false);
       closePreviewImage();
       setComposerPopover(null);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [previewImage]);
 
   useEffect(() => {
     setComposerPopover(null);
@@ -1581,15 +1661,28 @@ function App() {
     }
   }
 
-  async function deleteHistory(entry: HistoryEntry) {
-    if (!confirm(t("history.deleteConfirm"))) return;
+  async function openHistoryBrowser() {
+    setHistoryBrowserOpen(true);
+    if (history.length === 0) {
+      await loadHistory();
+    }
+  }
+
+  async function deleteHistory(entry: HistoryEntry, deleteFiles = false) {
+    if (!confirm(deleteFiles ? t("history.deleteFilesConfirm") : t("history.removeRecordConfirm"))) return;
     try {
-      const response = await fetch(`/api/history/${encodeURIComponent(entry.id)}?limit=160`, {
+      const firstImage = entry.images?.[0];
+      const legacyPath = entry.legacy ? String(firstImage?.saved_path || "") : "";
+      const query = new URLSearchParams({ limit: "160" });
+      if (deleteFiles) query.set("delete_files", "true");
+      if (legacyPath) query.set("legacy_path", legacyPath);
+      const response = await fetch(`/api/history/${encodeURIComponent(entry.id)}?${query.toString()}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : history.filter((item) => item.id !== entry.id));
+      if (historyDetail?.id === entry.id) setHistoryDetail(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("history.deleteFailed"));
     }
@@ -1838,9 +1931,9 @@ function App() {
 
   function openPreviewImages(images: GeneratedImage[], index = 0) {
     const gallery = images
-      .map((image, imageIndex) => {
+      .map<PreviewImage | null>((image, imageIndex) => {
         const src = imageSrc(image);
-        return src ? { src, name: imageName(image, imageIndex) } : null;
+        return src ? { src, name: imageName(image, imageIndex), dimensions: image.dimensions } : null;
       })
       .filter((image): image is PreviewImage => Boolean(image));
     const galleryIndex = Math.min(Math.max(index, 0), Math.max(gallery.length - 1, 0));
@@ -2887,7 +2980,7 @@ function App() {
     const firstImage = entry.images?.[0];
     const src = imageSrc(firstImage);
     if (src) {
-      openPreviewImage({ src, name: imageName(firstImage) });
+      openPreviewImage({ src, name: imageName(firstImage), dimensions: firstImage?.dimensions, requestedSize: requestedSizeLabel(entry) });
     }
   }
 
@@ -2962,16 +3055,21 @@ function App() {
             </div>
             <div className="sidebar-actions">
               {sidebarMode === "history" ? (
-                <button type="button" onClick={() => void loadHistory()}>
-                  <RefreshCw size={15} /> {t("app.refresh")}
-                </button>
+                <>
+                  <button type="button" onClick={() => void loadHistory()} title={t("app.refresh")}>
+                    <RefreshCw size={15} /> {t("app.refresh")}
+                  </button>
+                  <button type="button" onClick={() => void openHistoryBrowser()} title={t("history.browser")}>
+                    <ExternalLink size={15} /> {t("history.browser")}
+                  </button>
+                </>
               ) : (
                 <button type="button" onClick={startFreshSession}>
                   <MessageSquarePlus size={15} /> {t("app.newChat")}
                 </button>
               )}
-              <button type="button" onClick={() => void openOutputs()}>
-                <FolderOpen size={15} /> outputs
+              <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}>
+                <FolderOpen size={15} /> {t("app.outputFolder")}
               </button>
             </div>
             <div className="history-count">
@@ -3028,7 +3126,10 @@ function App() {
                           <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src}>
                             <ImagePlus size={14} />
                           </button>
-                          <button type="button" onClick={() => void deleteHistory(entry)} title={t("history.delete")}>
+                          <button className="history-tool-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}>
+                            <ListX size={14} />
+                          </button>
+                          <button className="history-tool-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}>
                             <Trash2 size={14} />
                           </button>
                         </div>
@@ -3299,21 +3400,25 @@ function App() {
                         {turn.images.map((image, index) => {
                           const src = imageSrc(image);
                           const name = imageName(image, index);
+                          const dimensions = imageDimensionsLabel(image);
                           return (
                             <figure className="image-card" key={`${turn.id}-${index}`}>
-                              <button type="button" className="image-preview" onClick={() => openPreviewImage({ src, name })}>
-                                <img src={src} alt={name} loading="lazy" />
-                              </button>
+                              <div className="image-preview-wrap">
+                                <button type="button" className="image-preview" onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })}>
+                                  <img src={src} alt={name} loading="lazy" />
+                                </button>
+                                <div className="image-actions">
+                                  <button type="button" aria-label={t("image.copyPrompt")} onClick={() => copyPrompt(turn.prompt)} {...tooltipProps(t("image.copyPrompt"))}><Copy size={14} /></button>
+                                  <button type="button" aria-label={t("image.applyPrompt")} onClick={() => applyPrompt(turn.prompt)} {...tooltipProps(t("image.applyPrompt"))}><RotateCcw size={14} /></button>
+                                  <button type="button" aria-label={t("image.continueEdit")} onClick={() => continueFromTurn(turn, image, index)} {...tooltipProps(t("image.continueEdit"))}><MessageSquarePlus size={14} /></button>
+                                  <button type="button" aria-label={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)} {...tooltipProps(t("reference.addAsReference"))}><ImagePlus size={14} /></button>
+                                  <a href={src} download={name} aria-label={t("image.download")} {...tooltipProps(t("image.download"))}><Download size={14} /></a>
+                                  <a href={src} target="_blank" rel="noreferrer" aria-label={t("image.open")} {...tooltipProps(t("image.open"))}><ExternalLink size={14} /></a>
+                                </div>
+                              </div>
                               <figcaption>
                                 <span>{name}</span>
-                                <div>
-                                  <button type="button" title={t("image.copyPrompt")} onClick={() => copyPrompt(turn.prompt)}><Copy size={14} /></button>
-                                  <button type="button" title={t("image.applyPrompt")} onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /></button>
-                                  <button type="button" title={t("image.continueEdit")} onClick={() => continueFromTurn(turn, image, index)}><MessageSquarePlus size={14} /></button>
-                                  <button type="button" title={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)}><ImagePlus size={14} /></button>
-                                  <a href={src} download={name} title={t("image.download")}><Download size={14} /></a>
-                                  <a href={src} target="_blank" rel="noreferrer" title={t("image.open")}><ExternalLink size={14} /></a>
-                                </div>
+                                {dimensions && <small className="image-dimensions">{dimensions}</small>}
                               </figcaption>
                             </figure>
                           );
@@ -3493,7 +3598,7 @@ function App() {
                           className={`${gptSizeSelection.mode === "custom" ? "selected " : ""}primary-action`}
                           onClick={() => normalizeCustomSize()}
                         >
-                          {t("composer.apply")}
+                          {t("composer.applyCustomSize")}
                         </button>
                       </div>
                       <div className={sizeAdjustmentNotice ? "size-adjustment-note active" : "size-adjustment-note"} role="status">
@@ -3703,7 +3808,7 @@ function App() {
                   title={t("composer.expandPrompt")}
                   aria-label={t("composer.expandPrompt")}
                 >
-                  <span className="prompt-expand-label-full">{t("composer.expandPrompt")}</span>
+                  <span className="prompt-expand-label-full">{t("composer.expandPromptShort")}</span>
                   <span className="prompt-expand-label-short">{t("composer.expandPromptShort")}</span>
                 </button>
               </div>
@@ -4073,10 +4178,12 @@ function App() {
                     {historyDetail.images.map((image, index) => {
                       const src = imageSrc(image);
                       const name = imageName(image, index);
+                      const dimensions = imageDimensionsLabel(image);
                       return (
-                        <button type="button" key={`${historyDetail.id}-${index}`} onClick={() => openPreviewImage({ src, name })}>
+                        <button type="button" key={`${historyDetail.id}-${index}`} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions, requestedSize: requestedSizeLabel(historyDetail) })}>
                           <img src={src} alt={name} loading="lazy" />
                           <span>{name}</span>
+                          {dimensions && <small>{dimensions}</small>}
                         </button>
                       );
                     })}
@@ -4117,12 +4224,106 @@ function App() {
         </div>
       )}
 
+      {historyBrowserOpen && (
+        <div className="history-detail-shell">
+          <button className="history-detail-backdrop" type="button" aria-label={t("history.closeBrowser")} onClick={() => setHistoryBrowserOpen(false)} />
+          <section className="history-browser" role="dialog" aria-modal="true" aria-label={t("history.browser")} tabIndex={-1} onKeyDown={closeOnEscape}>
+            <div className="history-detail-head">
+              <div>
+                <p>{t("app.historyCount", { count: filteredHistory.length })}</p>
+                <h2>{t("history.browser")}</h2>
+              </div>
+              <button type="button" onClick={() => setHistoryBrowserOpen(false)} aria-label={t("history.closeBrowser")} title={t("common.close")}><X size={18} /></button>
+            </div>
+            <div className="history-browser-toolbar">
+              <div className="segmented-control" role="group" aria-label={t("history.viewMode")}>
+                <button type="button" className={historyViewMode === "list" ? "active" : ""} onClick={() => setHistoryViewMode("list")}>{t("history.listMode")}</button>
+                <button type="button" className={historyViewMode === "grid" ? "active" : ""} onClick={() => setHistoryViewMode("grid")}>{t("history.gridMode")}</button>
+              </div>
+              <select value={historyFavoriteFilter} onChange={(event) => setHistoryFavoriteFilter(event.target.value as HistoryFavoriteFilter)} aria-label={t("history.favoriteFilter")}>
+                <option value="all">{t("history.allItems")}</option>
+                <option value="favorite">{t("history.onlyFavorites")}</option>
+              </select>
+              <select value={historyDateFilter} onChange={(event) => setHistoryDateFilter(event.target.value as HistoryDateFilter)} aria-label={t("history.dateFilter")}>
+                <option value="all">{t("history.allDates")}</option>
+                <option value="today">{t("history.today")}</option>
+                <option value="7d">{t("history.last7Days")}</option>
+                <option value="30d">{t("history.last30Days")}</option>
+              </select>
+              <select value={historyEngineFilter} onChange={(event) => setHistoryEngineFilter(event.target.value as HistoryEngineFilter)} aria-label={t("history.engineFilter")}>
+                <option value="all">{t("history.allEngines")}</option>
+                <option value="gpt-image-2">GPT Image 2</option>
+                <option value="banana">Banana Gemini</option>
+              </select>
+              <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}><FolderOpen size={15} /> {t("app.outputFolder")}</button>
+            </div>
+            <div className={historyViewMode === "grid" ? "history-browser-grid" : "history-browser-list"}>
+              {filteredHistory.length === 0 ? (
+                <div className="empty-history">{t("history.noFilteredItems")}</div>
+              ) : visibleHistory.map((entry) => {
+                const firstImage = entry.images?.[0];
+                const src = imageSrc(firstImage);
+                const name = imageName(firstImage);
+                const actualDimensions = imageDimensionsLabel(firstImage);
+                const requestedSize = requestedSizeLabel(entry);
+                const mismatch = dimensionMismatchLabel(entry, firstImage);
+                return (
+                  <article className="history-browser-card" key={entry.id}>
+                    <button type="button" className="history-browser-preview" onClick={() => src && openPreviewImage({ src, name, dimensions: firstImage?.dimensions, requestedSize })} disabled={!src} title={t("history.previewImage")}>
+                      {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                    </button>
+                    <div className="history-browser-card-main">
+                      <div className="history-browser-meta">
+                        <span>{formatTime(entry.created_at, language)}</span>
+                        <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
+                      </div>
+                      <strong>{entry.prompt || t("history.noPrompt")}</strong>
+                      <div className="history-browser-dimensions">
+                        {actualDimensions && <span>{actualDimensions}</span>}
+                        {mismatch ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : requestedSize && !actualDimensions ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : null}
+                      </div>
+                    </div>
+                    <div className="history-browser-actions">
+                      <button type="button" onClick={() => setHistoryDetail(entry)} title={t("history.context")}><ExternalLink size={14} /></button>
+                      <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}><RotateCcw size={14} /></button>
+                      <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")} disabled={entry.legacy}>
+                        {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
+                      </button>
+                      <button type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src}><ImagePlus size={14} /></button>
+                      <button className="history-browser-action-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}><X size={14} /></button>
+                      <button className="history-browser-action-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}><Trash2 size={14} /></button>
+                    </div>
+                  </article>
+                );
+              })}
+              {visibleHistory.length < filteredHistory.length && (
+                <button
+                  type="button"
+                  className="history-browser-more"
+                  onClick={() => setHistoryBrowserLimit((limit) => Math.min(limit + HISTORY_BROWSER_PAGE_SIZE, filteredHistory.length))}
+                >
+                  {t("history.loadMore")}
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
       {previewImage && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
           <div className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
             <div>
-              <strong>{previewImage.gallery && previewImage.gallery.length > 1 ? `${previewImage.name} · ${(previewImage.galleryIndex || 0) + 1}/${previewImage.gallery.length}` : previewImage.name}</strong>
+              <strong>
+                {previewImage.gallery && previewImage.gallery.length > 1 ? `${previewImage.name} · ${(previewImage.galleryIndex || 0) + 1}/${previewImage.gallery.length}` : previewImage.name}
+                {(previewImage.dimensions || previewImage.requestedSize) && (
+                  <small className="preview-title-meta">
+                    {previewImage.dimensions ? `${previewImage.dimensions.width} x ${previewImage.dimensions.height}` : ""}
+                    {previewImage.requestedSize ? ` · ${t("history.requestedSize", { value: previewImage.requestedSize })}` : ""}
+                  </small>
+                )}
+              </strong>
               <span>
                 <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
                 <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")}><ImagePlus size={18} /></button>

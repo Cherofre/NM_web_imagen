@@ -29,6 +29,8 @@ const fallbacks = [
   { source: jsAsset, fallback: "index-BiyMHVvw.js" },
   { source: cssAsset, fallback: "index-D6wyuxyS.css" },
   { source: jsAsset, fallback: "index-DjJyEBb1.js" },
+  { source: cssAsset, fallback: "index-Dr4xysUg.css" },
+  { source: jsAsset, fallback: "index-CnP0RvwW.js" },
 ];
 
 for (const { source, fallback } of fallbacks) {

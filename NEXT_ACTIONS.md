@@ -1,25 +1,24 @@
 # Next Actions
 
 ## Now
-- [x] v1.0.2 is merged/tagged/released/synced, v1.0.3 direction is captured, and white-screen package audit/startup asset probing is already handled.
-- [x] Implemented v1.0.3 core scope: multi-config profiles, editable config entry, key eye toggle, floating queue capsule/popover, queue controls, completed thumbnails/downloads, preview zoom/pan, and browser-local queue persistence.
-- [x] Completed subagent review hardening: queue/session orphan handling, refresh-interrupted turn reconciliation, diagnostics endpoint redaction, strict stale-process recognition, profile-switch edit preservation, and current built asset inclusion.
-- [x] Finalized v1.0.3 sync/package strategy: mirror only a clean package extraction to G:, remove local runtime/config/output artifacts from the sync folder, and update only `NM_web_imagen-v1.0.3.zip` in the share root.
-- [x] Added and verified one-click release: `一键发布.bat` runs tests, build, backend checks, package sync, and release preflight.
-- [x] Fixed queue execution semantics and re-ran one-click release: later jobs wait in `queued`, one generation request runs at a time, and the synced G: folder/versioned package include the serialized queue build.
-- [x] Fixed GPT multi-image behavior for gateways that ignore `n`; user confirmed locally, then final one-click release sync updated the G: clean folder and `NM_web_imagen-v1.0.3.zip`.
+- [x] v1.0.5 result/history UI polish is implemented on `codex/v1.0.5-results-history` in commit `c1b55f0`, and `VERSION` is bumped to `1.0.5`.
+- [x] Initial subagent compatibility review covered other computers / colleague machines / browser differences, packaging/G: sync, stale backend/cache reuse, and history/output deletion safety.
+- [x] Fixed the release-blocking compatibility findings: startup reuse now checks backend version, v1.0.4 hashed Studio assets are retained as fallbacks, legacy output deletion is scoped to exact top-level output image files, narrow result/history controls are more responsive, Esc closes the top preview before the history window, and Banana history displays requested `image_size/aspect_ratio`.
+- [x] Final post-fix subagent review found a nested-output forged deletion path; it is fixed and covered by `test_legacy_output_delete_rejects_matching_id_for_nested_outputs_file`.
+- [x] `release_one_click.ps1` passed again on 2026-06-26 16:43 +08:00; local and G: packages share SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`, include current assets plus v1.0.4 fallback assets, and exclude `config.local.json` / `outputs/`.
+- [ ] Commit the v1.0.5 hardening changes.
+- [ ] Decide whether to merge/tag/push/publish v1.0.5.
 
 ## Handoff Notes
-- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.3`; v1.0.2 is released at tag `v1.0.2` / commit `17f79c2`.
-- Synced copy: `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.5-results-history`.
+- Synced copy on this machine: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
+- Current v1.0.5 packages: local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip`, share `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
 - Verify next after changes:
-  - `node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs` from `studio-web`
-  - `npm run build` from `studio-web`
-  - `$env:PYTHONUTF8='1'; python -m py_compile .\app.py`
-  - `$env:PYTHONUTF8='1'; python -m unittest tests.test_studio_sessions tests.test_release_cache_busting`
-- Do not claim: v1.0.3 is committed, merged, or pushed.
-- Current review evidence: full frontend test set including queue/session boundary tests passed, build passed, backend tests passed, py_compile passed, browser smoke loaded the new `index-CsE45KWn.js`/`index-CdRuknBN.css` without new console errors, `git diff --check` passed with only expected LF/CRLF warnings, and ledger check passed on 2026-05-26 20:45 +08:00. Rerun `git diff --check` after this ledger update.
+  - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`
+  - `git status --short --branch`
+- Do not claim: v1.0.5 is merged to `main`, tagged, pushed, or published as a GitHub Release.
+- Current review evidence: final one-click release passed on 2026-06-26 16:43 +08:00; `git diff --check` passed with only expected LF/CRLF warnings before the last ledger update; local and G: zips share SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`; final post-fix subagent Important finding is fixed.
 - Current queue bug evidence: the stuck second task was a real upstream request that eventually timed out, not just stale UI; the fix adds `generationQueue.ts`, queued turn rendering, active-job-preserving trimming, and active-remove-as-cancel so only one generation request runs at a time.
 - Current multi-image evidence: `n=2` was already sent and recorded, but the active GPT gateway returned one image; backend now compensates by requesting the missing remainder.
 - Watch out for: `outputs/`, `config.local.json`, `.runtime/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, generated screenshots, and temporary zip files must remain out of commits and sync packages.

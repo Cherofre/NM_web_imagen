@@ -1,6 +1,8 @@
 # Decisions
 
 ## Active Decisions
+- 2026-06-26: v1.0.5 is a result/history UI polish release. Before merge/tag/publish, run compatibility review for colleague PCs, G: clean package behavior, stale backend/cache reuse, Windows PowerShell 5.1 launchers, Firefox/Chromium layout behavior, and history/output deletion safety.
+- 2026-06-26: v1.0.5 startup reuse must validate `/api/health.version` against local `VERSION` before reusing an existing service, and Studio builds must keep the previous v1.0.4 hashed JS/CSS as fallback files. Legacy output deletion must be scoped to the exact generated legacy file id / `legacy_path` pair instead of scanning every file with the same stem.
 - 2026-05-26: Queue jobs own a live `sessionId/turnId` reference only while that target exists. Running/queued jobs block deleting or clearing their session, refresh-interrupted jobs reconcile their matching turn to an error state, and queue actions guard missing targets instead of silently switching to deleted sessions.
 - 2026-05-26: Diagnostics may show endpoints for troubleshooting, but endpoints must be sanitized for URL userinfo and sensitive query parameters before returning to the UI.
 - 2026-05-26: Startup stale-process cleanup must only stop processes whose command line includes this repository's resolved `app.py`; loose `app.py` matching is too risky on shared Windows machines.
