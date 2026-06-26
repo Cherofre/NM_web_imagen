@@ -5,6 +5,7 @@ import path from "node:path";
 
 const css = fs.readFileSync(path.resolve("src/styles.css"), "utf8");
 const appSource = fs.readFileSync(path.resolve("src/App.tsx"), "utf8");
+const i18nSource = fs.readFileSync(path.resolve("src/i18n.ts"), "utf8");
 
 function cssBlock(selector) {
   const escaped = selector
@@ -185,6 +186,22 @@ test("queue jobs persist in browser storage across refreshes", () => {
   assert.match(appSource, /localStorage\.setItem\(queueStorageKey, serializeQueueJobs\(queueJobs\)\)/);
 });
 
+test("session persistence defers heavy storage work while typing", () => {
+  const effectStart = appSource.indexOf("if (!sessionsHydratedRef.current) return undefined;");
+  const timerStart = appSource.indexOf("sessionSaveTimerRef.current = window.setTimeout", effectStart);
+  const cleanupStart = appSource.indexOf("return () =>", timerStart);
+  assert.notEqual(effectStart, -1, "Missing session persistence effect");
+  assert.notEqual(timerStart, -1, "Missing debounced session persistence timer");
+  assert.notEqual(cleanupStart, -1, "Missing session persistence cleanup");
+
+  const beforeTimer = appSource.slice(effectStart, timerStart);
+  const timerBody = appSource.slice(timerStart, cleanupStart);
+  assert.doesNotMatch(beforeTimer, /compactSessionsForStorage\(sessions\)/);
+  assert.doesNotMatch(beforeTimer, /localStorage\.setItem\(sessionsStorageKey/);
+  assert.match(timerBody, /localStorage\.setItem\(sessionsStorageKey, JSON\.stringify\(compactSessionsForStorage\(sessions\)\)\)/);
+  assert.match(timerBody, /fetch\("\/api\/studio\/sessions"/);
+});
+
 test("generation queue does not block additional generation submissions", () => {
   const chatBranchStart = appSource.indexOf('if (currentMode === "chat")');
   const generateBranchStart = appSource.indexOf("let submitGptForm = currentGptForm", chatBranchStart);
@@ -296,6 +313,124 @@ test("save-like actions are visually primary and clear", () => {
   assert.match(appSource, /t\("sessionPrompt\.clearGpt"\)/);
 });
 
+test("results actions expose stable tooltips and output dimensions", () => {
+  assert.match(appSource, /function imageDimensionsLabel\(image\?: GeneratedImage \| null\)/);
+  assert.match(appSource, /function requestedSizeLabel\(entry: HistoryEntry\)/);
+  assert.match(appSource, /function dimensionMismatchLabel\(entry: HistoryEntry, image\?: GeneratedImage \| null\)/);
+  assert.match(appSource, /tooltipProps\(t\("image\.copyPrompt"\)\)/);
+  assert.match(appSource, /tooltipProps\(t\("image\.applyPrompt"\)\)/);
+  assert.match(appSource, /tooltipProps\(t\("image\.continueEdit"\)\)/);
+  assert.match(appSource, /tooltipProps\(t\("reference\.addAsReference"\)\)/);
+  assert.match(appSource, /tooltipProps\(t\("image\.download"\)\)/);
+  assert.match(appSource, /tooltipProps\(t\("image\.open"\)\)/);
+  assert.match(appSource, /className="image-dimensions"/);
+  assert.match(appSource, /className="preview-title-meta"/);
+  assert.match(cssBlock(".image-actions"), /overflow:\s*visible;/);
+  assert.match(cssBlock(".image-card"), /overflow:\s*visible;/);
+});
+
+test("result image actions use a persistent floating toolbar below the image", () => {
+  assert.match(appSource, /className="image-preview-wrap"/);
+  assert.doesNotMatch(appSource, /className="image-more-menu"/);
+  assert.doesNotMatch(appSource, /MoreHorizontal/);
+  assert.match(cssBlock(".image-card"), /border:\s*0;[\s\S]*background:\s*transparent;[\s\S]*box-shadow:\s*none;/);
+  assert.match(css, /(?:^|\n)\.image-preview\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*border:\s*1px solid var\(--line\);[\s\S]*border-radius:\s*18px;/);
+  assert.match(css, /(?:^|\n)\.image-card figcaption\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*padding:\s*48px 10px 10px;/);
+  assert.match(cssBlock(".image-preview-wrap"), /position:\s*relative;[\s\S]*overflow:\s*visible;/);
+  assert.match(cssBlock(".image-actions"), /position:\s*absolute;[\s\S]*top:\s*calc\(100% \+ 6px\);[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*repeat\(6, 26px\);[\s\S]*opacity:\s*1;[\s\S]*pointer-events:\s*auto;/);
+  assert.doesNotMatch(cssBlock(".image-actions"), /bottom:/);
+  assert.doesNotMatch(cssBlock(".image-actions"), /pointer-events:\s*none;/);
+  assert.doesNotMatch(css, /\.image-card:hover \.image-actions,\s*\.image-card:focus-within \.image-actions\s*\{/);
+  assert.match(css, /\.image-actions button,\s*\.image-actions a\s*\{[\s\S]*width:\s*26px;[\s\S]*height:\s*26px;/);
+  assert.match(cssBlock(".turn-images.collapsed .image-card figcaption"), /padding:\s*40px 7px 8px;/);
+  assert.match(cssBlock(".turn-images.collapsed .image-actions"), /grid-template-columns:\s*repeat\(6, 24px\);[\s\S]*top:\s*calc\(100% \+ 6px\);/);
+  assert.doesNotMatch(cssBlock(".turn-images.collapsed .image-actions"), /bottom:/);
+});
+
+test("composer labels clarify custom size apply and keep expand copy short", () => {
+  assert.match(appSource, /\{t\("composer\.applyCustomSize"\)\}/);
+  assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPromptShort"\)\}/);
+  assert.doesNotMatch(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPrompt"\)\}/);
+});
+
+test("history browser supports list grid filters and destructive delete copy", () => {
+  assert.match(appSource, /const \[historyBrowserOpen, setHistoryBrowserOpen\]/);
+  assert.match(appSource, /const \[historyViewMode, setHistoryViewMode\]/);
+  assert.match(appSource, /const \[historyFavoriteFilter, setHistoryFavoriteFilter\]/);
+  assert.match(appSource, /const \[historyDateFilter, setHistoryDateFilter\]/);
+  assert.match(appSource, /const \[historyEngineFilter, setHistoryEngineFilter\]/);
+  assert.match(appSource, /function filteredHistoryEntries\(/);
+  assert.match(appSource, /className=\{historyViewMode === "grid" \? "history-browser-grid" : "history-browser-list"\}/);
+  assert.match(appSource, /t\("history\.browser"\)/);
+  assert.match(appSource, /t\("history\.listMode"\)/);
+  assert.match(appSource, /t\("history\.gridMode"\)/);
+  assert.match(appSource, /t\("history\.removeRecord"\)/);
+  assert.match(appSource, /t\("history\.deleteFiles"\)/);
+  assert.match(appSource, /query\.set\("delete_files", "true"\)/);
+  assert.match(cssBlock(".history-browser"), /width:\s*min\(1120px, calc\(100vw - 32px\)\);/);
+  assert.match(cssBlock(".history-browser-grid"), /grid-template-columns:\s*repeat\(auto-fill, minmax\(150px, 1fr\)\);/);
+});
+
+test("history browser keeps heavy lists responsive and closes from Escape", () => {
+  const keyHandlerStart = appSource.indexOf("function onKeyDown(event: globalThis.KeyboardEvent)");
+  const keyHandlerEnd = appSource.indexOf("window.addEventListener(\"keydown\", onKeyDown)", keyHandlerStart);
+  assert.notEqual(keyHandlerStart, -1, "Missing global Escape handler");
+  assert.notEqual(keyHandlerEnd, -1, "Missing global Escape registration");
+  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /setHistoryBrowserOpen\(false\);/);
+  assert.match(appSource, /const HISTORY_BROWSER_PAGE_SIZE = 80;/);
+  assert.match(appSource, /const \[historyBrowserLimit, setHistoryBrowserLimit\] = useState\(HISTORY_BROWSER_PAGE_SIZE\);/);
+  assert.match(appSource, /const visibleHistory = filteredHistory\.slice\(0, historyBrowserLimit\);/);
+  assert.match(appSource, /if \(historyBrowserOpen\) setHistoryBrowserLimit\(HISTORY_BROWSER_PAGE_SIZE\);/);
+  assert.match(appSource, /visibleHistory\.map\(\(entry\) =>/);
+  assert.doesNotMatch(appSource, /filteredHistory\.map\(\(entry\) =>/);
+  assert.match(appSource, /className="history-browser-more"/);
+  assert.match(appSource, /t\("history\.loadMore"\)/);
+  assert.match(cssBlock(".history-browser-more"), /justify-self:\s*center;/);
+  assert.match(i18nSource, /"history\.loadMore": "加载更多"/);
+  assert.match(i18nSource, /"history\.loadMore": "Load more"/);
+});
+
+test("modal shells share direct center placement", () => {
+  assert.match(css, /\.drawer-shell,\s*\.history-detail-shell,\s*\.lightbox\s*\{[\s\S]*display:\s*grid;[\s\S]*place-items:\s*center;/);
+  assert.doesNotMatch(cssBlock(".drawer-shell"), /place-items:\s*center;/);
+  assert.doesNotMatch(cssBlock(".history-detail-shell"), /place-items:\s*center;/);
+  assert.match(css, /(?:^|\n)\.lightbox\s*\{\s*z-index:\s*60;\s*\}/);
+});
+
+test("history delete actions are visually distinct", () => {
+  assert.match(appSource, /className="history-tool-remove"/);
+  assert.match(appSource, /className="history-tool-danger"/);
+  assert.match(appSource, /<ListX size=\{14\} \/>/);
+  assert.match(appSource, /className="history-browser-action-remove"/);
+  assert.match(appSource, /className="history-browser-action-remove"[\s\S]*<X size=\{14\} \/>/);
+  assert.match(appSource, /className="history-browser-action-danger"/);
+  assert.match(cssBlock(".history-tool-remove"), /color:\s*var\(--muted-strong\);/);
+  assert.match(cssBlock(".history-tool-danger"), /border-color:\s*rgba\(180, 35, 24, 0\.22\);[\s\S]*background:\s*#fff5f5;[\s\S]*color:\s*var\(--danger\);/);
+  assert.match(cssBlock(".history-browser-action-danger"), /border-color:\s*rgba\(180, 35, 24, 0\.22\);[\s\S]*background:\s*#fff5f5;[\s\S]*color:\s*var\(--danger\);/);
+});
+
+test("outputs entry uses localized finished-image folder copy", () => {
+  assert.match(i18nSource, /"app\.outputFolder": "存图夹"/);
+  assert.match(i18nSource, /"app\.openOutputFolder": "打开 outputs 存图夹"/);
+  assert.match(i18nSource, /"history\.browser": "历史窗"/);
+  assert.match(i18nSource, /"history\.closeBrowser": "关闭历史窗"/);
+  assert.match(i18nSource, /"history\.allEngines": "全部模型"/);
+  assert.match(i18nSource, /"history\.engineFilter": "模型筛选"/);
+  assert.match(i18nSource, /"history\.allEngines": "All models"/);
+  assert.match(i18nSource, /"history\.engineFilter": "Model filter"/);
+  assert.doesNotMatch(i18nSource, /成图目录|浏览历史|历史浏览器/);
+  assert.match(appSource, /t\("app\.outputFolder"\)/);
+  assert.match(appSource, /t\("app\.openOutputFolder"\)/);
+  assert.match(appSource, /<FolderOpen size=\{15\} \/> \{t\("app\.outputFolder"\)\}/);
+  assert.doesNotMatch(appSource, /<FolderOpen size=\{15\} \/> outputs/);
+});
+
+test("history sidebar actions read as a compact tool group", () => {
+  assert.match(cssBlock(".sidebar-actions"), /display:\s*flex;[\s\S]*gap:\s*6px;/);
+  assert.match(cssBlock(".sidebar-actions button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*34px;[\s\S]*border-radius:\s*999px;/);
+  assert.doesNotMatch(css, /\.sidebar-action-output\s*\{/);
+});
+
 test("narrow layout keeps sessions as a left drawer and pins composer to the bottom", () => {
   const tablet = mediaBlock("max-width: 920px");
   const phone = mediaBlock("max-width: 560px");
@@ -323,7 +458,7 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlock(".session-prompt-label-short,\n.session-prompt-summary-short"), /display:\s*none;/);
   assert.match(cssBlockIn(phone, ".session-prompt-label-full,\n  .session-prompt-summary-full"), /display:\s*none;/);
   assert.match(cssBlockIn(phone, ".session-prompt-label-short,\n  .session-prompt-summary-short"), /display:\s*inline;/);
-  assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPrompt"\)\}/);
+  assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPromptShort"\)\}/);
   assert.match(appSource, /className="prompt-expand-label-short">\{t\("composer\.expandPromptShort"\)\}/);
   assert.match(cssBlock(".prompt-expand-label-short"), /display:\s*none;/);
   assert.match(cssBlockIn(phone, ".prompt-expand-label-full"), /display:\s*none;/);
