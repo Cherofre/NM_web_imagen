@@ -6,17 +6,19 @@
 - [x] Fixed the release-blocking compatibility findings: startup reuse now checks backend version, v1.0.4 hashed Studio assets are retained as fallbacks, legacy output deletion is scoped to exact top-level output image files, narrow result/history controls are more responsive, Esc closes the top preview before the history window, and Banana history displays requested `image_size/aspect_ratio`.
 - [x] Final post-fix subagent review found a nested-output forged deletion path; it is fixed and covered by `test_legacy_output_delete_rejects_matching_id_for_nested_outputs_file`.
 - [x] `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00; local and G: packages share SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`, include current assets plus v1.0.4 fallback assets, and exclude `config.local.json` / `outputs/`.
-- [ ] Commit the post-merge test-helper and ledger update, then tag/push/create GitHub Release `v1.0.5`.
+- [x] `main` and tag `v1.0.5` are pushed to `origin`, and GitHub Release `v1.0.5` is published with `NM_web_imagen-v1.0.5.zip`.
+- [ ] Next version planning can start from the Later list below.
 
 ## Handoff Notes
-- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `codex/v1.0.5-results-history`.
+- Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
 - Synced copy on this machine: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Current v1.0.5 packages: local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip`, share `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
+- GitHub Release: `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.5`.
 - Do not redo: Studio frontend scaffold, `/classic` fallback, real chat endpoints, backend Studio session persistence, GPT chat-model controls, reference snapshot display, and user-turn action buttons are already implemented and committed.
 - Verify next after changes:
   - `python "C:\Users\mumengfei\.cc-switch\skills\project-ledger-loop\scripts\check_ledger.py" "I:\AI\Vibe Coding\NM_web_imagen"`
   - `git status --short --branch`
-- Do not claim: v1.0.5 is merged to `main`, tagged, pushed, or published as a GitHub Release.
+- Do not claim: v1.0.5 feature branch was deleted locally or remotely; it is preserved for now.
 - Current review evidence: final one-click release passed on `main` on 2026-06-26 17:33 +08:00; local and G: zips share SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`; final post-fix subagent Important finding is fixed.
 - Current queue bug evidence: the stuck second task was a real upstream request that eventually timed out, not just stale UI; the fix adds `generationQueue.ts`, queued turn rendering, active-job-preserving trimming, and active-remove-as-cancel so only one generation request runs at a time.
 - Current multi-image evidence: `n=2` was already sent and recorded, but the active GPT gateway returned one image; backend now compensates by requesting the missing remainder.

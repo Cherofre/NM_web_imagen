@@ -1,14 +1,14 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-06-26 16:44 +08:00
-- Phase: v1.0.5 release candidate - compatibility fixes verified and packaged
-- Branch: codex/v1.0.5-results-history
+- Last Updated: 2026-06-26 17:37 +08:00
+- Phase: v1.0.5 released
+- Branch: main
 - Goal: Ship the v1.0.5 result-action and history-browser polish while keeping Windows one-click packaging, G: clean sync, older-machine startup reuse, and cross-browser teammate usage reliable.
-- Current Focus: v1.0.5 UI/history work is merged to `main`; release hardening adds startup backend-version validation, v1.0.4 hashed asset fallbacks, safer top-level legacy output deletion, narrow-screen toolbar/list fixes, Banana requested-size display, and top-layer Esc behavior. Final post-fix subagent review found one forged nested-output deletion path, which is fixed and covered by regression test. `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00. The release produced local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip` and G: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, both SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. Current built Studio assets are `index-Beqa6WRY.js` and `index-BQpJH9G2.css`; cache fallback assets include v1.0.4 `index-CnP0RvwW.js` and `index-Dr4xysUg.css`.
+- Current Focus: v1.0.5 UI/history work is merged to `main`, tagged as `v1.0.5`, pushed to `origin`, and published as a GitHub Release with `NM_web_imagen-v1.0.5.zip`. Release hardening adds startup backend-version validation, v1.0.4 hashed asset fallbacks, safer top-level legacy output deletion, narrow-screen toolbar/list fixes, Banana requested-size display, and top-layer Esc behavior. Final post-fix subagent review found one forged nested-output deletion path, which is fixed and covered by regression test. `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00. The release produced local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip` and G: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, both SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. GitHub Release: `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.5`.
 
 ## Resume Here
-- Start with: `git status --short --branch` on `codex/v1.0.5-results-history`.
+- Start with: `git status --short --branch` on `main`.
 - Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
 - Sync target after local commits: this machine uses `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; scripts also allow the older `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` mount if that anchor exists.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
