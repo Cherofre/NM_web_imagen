@@ -5,11 +5,11 @@
 - Phase: v1.0.5 release candidate - compatibility fixes verified and packaged
 - Branch: codex/v1.0.5-results-history
 - Goal: Ship the v1.0.5 result-action and history-browser polish while keeping Windows one-click packaging, G: clean sync, older-machine startup reuse, and cross-browser teammate usage reliable.
-- Current Focus: v1.0.5 UI/history work is implemented in commit `c1b55f0`; release hardening now adds startup backend-version validation, v1.0.4 hashed asset fallbacks, safer top-level legacy output deletion, narrow-screen toolbar/list fixes, Banana requested-size display, and top-layer Esc behavior. Final post-fix subagent review found one forged nested-output deletion path, which is fixed and covered by regression test. `release_one_click.ps1` passed on 2026-06-26 16:43 +08:00. The release produced local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip` and G: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, both SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`. Current built Studio assets are `index-Beqa6WRY.js` and `index-BQpJH9G2.css`; cache fallback assets include v1.0.4 `index-CnP0RvwW.js` and `index-Dr4xysUg.css`.
+- Current Focus: v1.0.5 UI/history work is merged to `main`; release hardening adds startup backend-version validation, v1.0.4 hashed asset fallbacks, safer top-level legacy output deletion, narrow-screen toolbar/list fixes, Banana requested-size display, and top-layer Esc behavior. Final post-fix subagent review found one forged nested-output deletion path, which is fixed and covered by regression test. `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00. The release produced local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip` and G: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, both SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. Current built Studio assets are `index-Beqa6WRY.js` and `index-BQpJH9G2.css`; cache fallback assets include v1.0.4 `index-CnP0RvwW.js` and `index-Dr4xysUg.css`.
 
 ## Resume Here
 - Start with: `git status --short --branch` on `codex/v1.0.5-results-history`.
-- Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`.
+- Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
 - Sync target after local commits: this machine uses `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; scripts also allow the older `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` mount if that anchor exists.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
 - Current-project rule: after every update, sync a clean copy to the G: target above, but do not sync internal ledger files `AGENTS.md`, `PROJECT_STATUS.md`, `NEXT_ACTIONS.md`, or `DECISIONS.md`.
@@ -99,8 +99,8 @@
   - `python -m unittest tests.test_release_cache_busting tests.test_studio_sessions`: passed, 44 tests.
   - `node --test .\src\uiPolish.test.mjs` from `studio-web`: passed, 28 tests.
   - Final post-fix subagent review found a nested `outputs/session_refs` forged legacy deletion path; added `test_legacy_output_delete_rejects_matching_id_for_nested_outputs_file`, restricted legacy deletion to top-level output image files, and re-ran backend tests successfully.
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\release_one_click.ps1`: passed on 2026-06-26 16:43 +08:00; frontend tests 61/61, frontend build passed, backend checks passed, clean package created, G: clean sync updated, and release preflight passed.
-  - Release preflight reported local and G: package SHA256 `336f67c3c0e56407023945b76c4dbdd7cfd9a289e3ba7d4de2751cf7a31ce8b6`, current Studio assets `index-Beqa6WRY.js` / `index-BQpJH9G2.css`, and version `1.0.5`.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\release_one_click.ps1`: passed on `main` on 2026-06-26 17:33 +08:00; frontend tests 61/61, frontend build passed, backend checks passed, clean package created, G: clean sync updated, and release preflight passed.
+  - Release preflight reported local and G: package SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`, current Studio assets `index-Beqa6WRY.js` / `index-BQpJH9G2.css`, and version `1.0.5`.
   - Manual zip/G: checks confirmed `VERSION=1.0.5`, current assets and v1.0.4 fallback assets `index-CnP0RvwW.js` / `index-Dr4xysUg.css` are present, and `config.local.json` / `outputs/` are absent.
   - `git diff --check`: passed with only expected LF/CRLF warnings.
 - Latest v1.0.3 profile/queue slice verification:

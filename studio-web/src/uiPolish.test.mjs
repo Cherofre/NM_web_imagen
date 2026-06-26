@@ -25,7 +25,10 @@ function mediaBlock(query) {
 }
 
 function cssBlockIn(source, selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = selector
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s*");
   const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
   assert.ok(match, `Missing CSS block for ${selector}`);
   return match[1];
