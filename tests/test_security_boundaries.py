@@ -11,6 +11,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app as webapp
+import image_safety as image_safety_module
 from image_safety import (
     ALLOWED_RASTER_MIMES,
     REFERENCE_IMAGE_MAX_BYTES,
@@ -33,6 +34,8 @@ RASTER_SAMPLES = {
 }
 PNG_RAW = RASTER_SAMPLES["image/png"]
 PNG_BASE64 = base64.b64encode(PNG_RAW).decode("ascii")
+WEBP_RAW = RASTER_SAMPLES["image/webp"]
+WEBP_BASE64 = base64.b64encode(WEBP_RAW).decode("ascii")
 
 
 def session_payload(reference_src: str) -> dict:
@@ -80,6 +83,12 @@ class FakeGenerationResponse:
 
 
 class ImageSafetyTests(unittest.TestCase):
+    def test_raster_extension_is_deterministic_and_empty_for_unknown_mime(self) -> None:
+        self.assertEqual(".png", image_safety_module.raster_extension("image/png"))
+        self.assertEqual(".jpg", image_safety_module.raster_extension("image/jpeg"))
+        self.assertEqual(".webp", image_safety_module.raster_extension("image/webp"))
+        self.assertEqual("", image_safety_module.raster_extension("text/plain"))
+
     def test_public_limits_and_allowed_raster_mimes(self) -> None:
         self.assertEqual(25 * 1024 * 1024, REFERENCE_IMAGE_MAX_BYTES)
         self.assertEqual(150 * 1024 * 1024, REFERENCE_REQUEST_MAX_BYTES)
@@ -349,6 +358,33 @@ class SecurityBoundaryApiTests(unittest.TestCase):
 
         self.assertEqual(404, response.status_code)
 
+    def test_generated_webp_uses_webp_extension_and_remains_served(self) -> None:
+        image = {
+            "src": f"data:image/webp;base64,{WEBP_BASE64}",
+            "mime_type": "image/webp",
+        }
+
+        saved_count = webapp.save_generated_images("test", [image])
+
+        self.assertEqual(1, saved_count)
+        self.assertTrue(image["saved_name"].endswith(".webp"))
+        response = self.client.get(image["saved_url"])
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("image/webp", response.headers["content-type"])
+
+    def test_session_webp_uses_webp_extension_and_remains_served(self) -> None:
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=session_payload(f"data:image/webp;base64,{WEBP_BASE64}"),
+        )
+
+        self.assertEqual(200, response.status_code)
+        snapshot = response.json()["sessions"][0]["turns"][0]["referenceSnapshots"][0]
+        self.assertTrue(snapshot["src"].endswith(".webp"))
+        served = self.client.get(snapshot["src"])
+        self.assertEqual(200, served.status_code)
+        self.assertEqual("image/webp", served.headers["content-type"])
+
     def test_session_reference_accepts_encoded_local_output_raster(self) -> None:
         self.outputs.mkdir(parents=True, exist_ok=True)
         filename = "中文 空格.png"
@@ -442,6 +478,30 @@ class SecurityBoundaryApiTests(unittest.TestCase):
 
         self.assertEqual(413, response.status_code)
         self.assertFalse((self.outputs / "studio_sessions.json").exists())
+
+    def test_local_output_reference_rejects_single_file_over_reference_limit(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "large.png").write_bytes(PNG_RAW + b"x" * 32)
+
+        with patch.object(webapp, "REFERENCE_IMAGE_MAX_BYTES", 64):
+            response = self.client.put(
+                "/api/studio/sessions",
+                json=session_payload("/outputs/large.png"),
+            )
+
+        self.assertEqual(413, response.status_code)
+        self.assertFalse((self.outputs / "studio_sessions.json").exists())
+        self.assertFalse((self.outputs / "session_refs").exists())
+
+    def test_inspect_local_output_reference_enforces_single_file_limit(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "large.png").write_bytes(PNG_RAW + b"x" * 32)
+
+        with patch.object(webapp, "REFERENCE_IMAGE_MAX_BYTES", 64):
+            with self.assertRaises(ImageSafetyError) as error:
+                webapp.inspect_studio_reference_source("/outputs/large.png")
+
+        self.assertEqual(413, error.exception.status_code)
 
     def test_gpt_upload_rejects_fake_png_before_upstream(self) -> None:
         common = {
@@ -561,6 +621,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.chunk_size = None
+                self.close_calls = 0
 
             def raise_for_status(self) -> None:
                 return None
@@ -569,6 +630,10 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 self.chunk_size = chunk_size
                 yield PNG_RAW[:8]
                 yield PNG_RAW[8:]
+
+            def close(self) -> None:
+                self.close_calls += 1
+                raise RuntimeError("close failed")
 
             @property
             def content(self):
@@ -582,6 +647,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         self.assertEqual("image/png", downloaded["mime_type"])
         self.assertEqual(64 * 1024, remote.chunk_size)
         self.assertTrue(remote_get.call_args.kwargs["stream"])
+        self.assertEqual(1, remote.close_calls)
 
     def test_extract_image_bytes_accepts_only_strict_data_urls(self) -> None:
         valid = webapp.extract_image_bytes(
@@ -613,6 +679,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.iterated = False
+                self.close_calls = 0
 
             def raise_for_status(self) -> None:
                 return None
@@ -622,18 +689,25 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 self.iterated = True
                 yield PNG_RAW
 
+            def close(self) -> None:
+                self.close_calls += 1
+
         remote = OversizedResponse()
         with patch.object(webapp.requests, "get", return_value=remote):
             downloaded = webapp.download_remote_image("https://example.com/image.png")
 
         self.assertIsNone(downloaded)
         self.assertFalse(remote.iterated)
+        self.assertEqual(1, remote.close_calls)
 
     def test_download_remote_image_rejects_chunk_overflow(self) -> None:
         class ChunkedResponse:
             status_code = 200
             headers = {"Content-Type": "image/png"}
             content = PNG_RAW
+
+            def __init__(self) -> None:
+                self.close_calls = 0
 
             def raise_for_status(self) -> None:
                 return None
@@ -643,13 +717,18 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 yield PNG_RAW[:8]
                 yield b"x" * 16
 
+            def close(self) -> None:
+                self.close_calls += 1
+
+        remote = ChunkedResponse()
         with (
             patch.object(webapp, "REMOTE_RESULT_MAX_BYTES", 16, create=True),
-            patch.object(webapp.requests, "get", return_value=ChunkedResponse()),
+            patch.object(webapp.requests, "get", return_value=remote),
         ):
             downloaded = webapp.download_remote_image("https://example.com/image.png")
 
         self.assertIsNone(downloaded)
+        self.assertEqual(1, remote.close_calls)
 
     def test_non_raster_remote_results_are_not_counted_as_images(self) -> None:
         class HtmlResponse:

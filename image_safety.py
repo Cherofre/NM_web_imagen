@@ -30,6 +30,11 @@ class ImageSafetyError(ValueError):
         self.status_code = status_code
 
 
+def raster_extension(mime_type: str) -> str:
+    normalized = str(mime_type or "").split(";", 1)[0].strip().lower()
+    return ALLOWED_RASTER_MIMES.get(normalized, "")
+
+
 def detect_raster_mime(raw: bytes) -> str:
     if raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"

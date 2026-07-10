@@ -30,6 +30,7 @@ from image_safety import (
     ImageSafetyError,
     decode_raster_data_url,
     detect_raster_mime,
+    raster_extension,
     read_limited_chunks,
     resolve_output_image,
     validate_raster_bytes,
@@ -208,6 +209,9 @@ def response_json_utf8_first(response: requests.Response) -> Any:
 
 
 def guess_extension(mime_type: str) -> str:
+    extension = raster_extension(mime_type)
+    if extension:
+        return extension
     extension = mimetypes.guess_extension(mime_type or "")
     if extension:
         return extension
@@ -868,12 +872,15 @@ def inspect_studio_reference_source(
             raise ImageSafetyError("参考图输出路径无效")
         relative_path = existing_path.relative_to(OUTPUTS_DIR.resolve())
         validated_path = resolve_output_image(OUTPUTS_DIR, str(relative_path))
+        actual_size = validated_path.stat().st_size
+        if actual_size > REFERENCE_IMAGE_MAX_BYTES:
+            raise ImageSafetyError("参考图超过单图容量限制", 413)
         with validated_path.open("rb") as handle:
             detected_mime_type = detect_raster_mime(handle.read(16))
         return (
             None,
             detected_mime_type,
-            validated_path.stat().st_size,
+            actual_size,
             validated_path,
         )
 
@@ -1420,6 +1427,7 @@ def get_history_payload(limit: int = 120) -> List[Dict[str, Any]]:
 
 
 def download_remote_image(url: str) -> Optional[Dict[str, str]]:
+    response = None
     try:
         response = requests.get(
             url,
@@ -1459,6 +1467,13 @@ def download_remote_image(url: str) -> Optional[Dict[str, str]]:
         }
     except Exception:
         return None
+    finally:
+        close_response = getattr(response, "close", None)
+        if callable(close_response):
+            try:
+                close_response()
+            except Exception:
+                pass
 
 
 def is_image_url(value: str) -> bool:
