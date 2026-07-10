@@ -8,6 +8,7 @@ const {
   mergeSessionsByUpdatedAt,
   nextSessionSaveAttempt,
   normalizeSessionRevision,
+  reconcileSessionConflictState,
 } = sessionRevision;
 
 test("session save payload carries the expected backend revision exactly", () => {
@@ -25,6 +26,13 @@ test("session save payload carries the expected backend revision exactly", () =>
 });
 
 test("session merge keeps every id and resolves timestamps deterministically without mutation", () => {
+  const baseline = [
+    { id: "shared", updatedAt: "2026-07-10T10:00:00Z", value: "shared-base" },
+    { id: "server-newer", updatedAt: "2026-07-10T10:00:00Z", value: "server-newer-base" },
+    { id: "tie", updatedAt: "2026-07-10T10:00:00Z", value: "tie-base" },
+    { id: "server-valid-local-invalid", value: "invalid-base" },
+    { id: "both-invalid", value: "invalid-base" },
+  ];
   const local = [
     { id: "shared", updatedAt: "2026-07-10T10:03:00Z", value: "local-newer" },
     { id: "server-newer", updatedAt: "2026-07-10T10:00:00Z", value: "local-older" },
@@ -42,11 +50,13 @@ test("session merge keeps every id and resolves timestamps deterministically wit
     { id: "both-invalid", updatedAt: "still-not-a-date", value: "server-invalid-tie" },
     { id: "z-invalid-server", value: "server-invalid-only" },
   ];
+  const baselineBefore = structuredClone(baseline);
   const localBefore = structuredClone(local);
   const serverBefore = structuredClone(server);
 
-  const merged = mergeSessionsByUpdatedAt(local, server);
+  const merged = mergeSessionsByUpdatedAt(baseline, local, server);
 
+  assert.deepEqual(baseline, baselineBefore);
   assert.deepEqual(local, localBefore);
   assert.deepEqual(server, serverBefore);
   assert.deepEqual(merged.map((session) => session.id), [
@@ -65,6 +75,104 @@ test("session merge keeps every id and resolves timestamps deterministically wit
   assert.equal(byId.tie.value, "local-tie");
   assert.equal(byId["both-invalid"].value, "local-invalid-tie");
   assert.equal(byId["server-valid-local-invalid"].value, "server-valid");
+});
+
+test("local deletion wins when the server copy is unchanged from baseline", () => {
+  const baseline = [{ id: "deleted-local", updatedAt: "2026-07-10T10:00:00Z", value: "base" }];
+  const server = [{ ...baseline[0] }];
+
+  assert.deepEqual(mergeSessionsByUpdatedAt(baseline, [], server), []);
+});
+
+test("server deletion wins when local is unchanged and does not resurrect pruned references", () => {
+  const baseline = [{
+    id: "deleted-server",
+    updatedAt: "2026-07-10T10:00:00Z",
+    references: [{ src: "/outputs/session_refs/pruned.png" }],
+  }];
+  const local = structuredClone(baseline);
+
+  assert.deepEqual(mergeSessionsByUpdatedAt(baseline, local, []), []);
+});
+
+test("a real edit wins when the other side deleted the baseline session", () => {
+  const baseline = [{ id: "edited", updatedAt: "2026-07-10T10:00:00Z", value: "base" }];
+  const localEdit = [{ id: "edited", updatedAt: "2026-07-10T10:02:00Z", value: "local-edit" }];
+  const serverEdit = [{ id: "edited", updatedAt: "2026-07-10T10:03:00Z", value: "server-edit" }];
+
+  assert.equal(mergeSessionsByUpdatedAt(baseline, localEdit, [])[0].value, "local-edit");
+  assert.equal(mergeSessionsByUpdatedAt(baseline, [], serverEdit)[0].value, "server-edit");
+});
+
+test("sessions created independently on both sides are merged as a union", () => {
+  const local = [{ id: "local-new", updatedAt: "2026-07-10T10:01:00Z" }];
+  const server = [{ id: "server-new", updatedAt: "2026-07-10T10:02:00Z" }];
+
+  assert.deepEqual(
+    mergeSessionsByUpdatedAt([], local, server).map((session) => session.id),
+    ["server-new", "local-new"],
+  );
+});
+
+test("second conflict is merged into state before advancing revision without a third request", async () => {
+  assert.equal(typeof reconcileSessionConflictState, "function");
+  const initialBaseline = [
+    { id: "shared", updatedAt: "2026-07-10T10:00:00Z", value: "base" },
+  ];
+  const initialLocal = [
+    { id: "shared", updatedAt: "2026-07-10T10:02:00Z", value: "local-edit" },
+  ];
+  const firstCurrent = {
+    revision: 2,
+    sessions: [
+      { id: "shared", updatedAt: "2026-07-10T10:00:00Z", value: "base" },
+      { id: "remote-first", updatedAt: "2026-07-10T10:01:00Z", value: "remote-first" },
+    ],
+  };
+  const secondCurrent = {
+    revision: 3,
+    sessions: [
+      { id: "shared", updatedAt: "2026-07-10T10:00:00Z", value: "base" },
+      { id: "remote-first", updatedAt: "2026-07-10T10:03:00Z", value: "remote-second-edit" },
+      { id: "remote-second", updatedAt: "2026-07-10T10:04:00Z", value: "remote-second" },
+    ],
+  };
+  const sends = [];
+
+  const result = await sessionRevision.runSessionSaveWithRetry({
+    initialState: {
+      revision: 1,
+      baselineSessions: initialBaseline,
+      sessions: initialLocal,
+    },
+    send: async (state, attempt) => {
+      sends.push({ state, attempt });
+      const current = attempt === 0 ? firstCurrent : secondCurrent;
+      return { ok: false, status: 409, payload: { current } };
+    },
+    resolveConflict: (response, state) => reconcileSessionConflictState({
+      baselineSessions: state.baselineSessions,
+      localSessions: state.sessions,
+      serverSessions: response.payload.current.sessions,
+      serverRevision: response.payload.current.revision,
+    }),
+  });
+
+  assert.equal(result.kind, "exhausted");
+  assert.equal(sends.length, 2);
+  const reconciled = reconcileSessionConflictState({
+    baselineSessions: result.state.baselineSessions,
+    localSessions: result.state.sessions,
+    serverSessions: result.response.payload.current.sessions,
+    serverRevision: result.response.payload.current.revision,
+  });
+  const byId = Object.fromEntries(reconciled.sessions.map((session) => [session.id, session]));
+
+  assert.equal(reconciled.revision, 3);
+  assert.equal(byId.shared.value, "local-edit");
+  assert.equal(byId["remote-first"].value, "remote-second-edit");
+  assert.equal(byId["remote-second"].value, "remote-second");
+  assert.deepEqual(reconciled.baselineSessions, secondCurrent.sessions);
 });
 
 test("session conflict retry decision permits only one retry", () => {

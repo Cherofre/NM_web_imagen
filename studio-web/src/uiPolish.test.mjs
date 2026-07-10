@@ -147,7 +147,8 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(appSource, /function retryQueueJob\(job: QueueJob\)/);
   assert.match(appSource, /function applyQueueJob\(job: QueueJob\)/);
   assert.match(appSource, /function removeQueueJob\(job: QueueJob\)/);
-  assert.match(appSource, /if \(job\.status === "queued" \|\| job\.status === "running"\) \{[\s\S]*cancelQueueJob\(job\);/);
+  assert.match(appSource, /const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>\(new Map\(\)\);/);
+  assert.match(appSource, /if \(job\.status === "queued" \|\| job\.status === "running" \|\| pendingQueueRemovalsRef\.current\.has\(jobId\)\) \{[\s\S]*cancelJobThenRemove\(\{/);
   assert.match(appSource, /queueAbortControllersRef/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.cancel"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.retry"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
@@ -158,7 +159,7 @@ test("queue rows expose cancel retry apply and remove controls", () => {
 });
 
 test("queue and chat requests share backend job cancellation protocol", () => {
-  assert.match(appSource, /import \{ appendJobId, cancelJobBeforeAbort, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
+  assert.match(appSource, /import \{ appendJobId, cancelJobBeforeAbort, cancelJobThenRemove, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
   assert.match(appSource, /function createFormData\([\s\S]*jobId: string,[\s\S]*return appendJobId\(data, jobId\);/);
   assert.match(appSource, /function createChatPayload\([\s\S]*jobId: string,[\s\S]*return withJobId\(/);
   assert.match(appSource, /createFormData\([\s\S]*payload\.posterText,[\s\S]*payload\.jobId,[\s\S]*\)/);
@@ -169,12 +170,16 @@ test("queue and chat requests share backend job cancellation protocol", () => {
   const cancelSource = appSource.slice(cancelStart, cancelEnd);
   assert.notEqual(cancelStart, -1, "cancelQueueJob must be async");
   assert.match(cancelSource, /await cancelJobBeforeAbort\(\{/);
-  assert.match(cancelSource, /markCanceling:\s*\(\) => \{[\s\S]*cancelingQueueJobsRef\.current\.add\(job\.id\);[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
+  const markCancelingStart = cancelSource.indexOf("markCanceling:");
+  const requestCancelStart = cancelSource.indexOf("requestCancel:", markCancelingStart);
+  const markCancelingSource = cancelSource.slice(markCancelingStart, requestCancelStart);
+  assert.match(markCancelingSource, /cancelingQueueJobsRef\.current\.add\(job\.id\);/);
+  assert.doesNotMatch(markCancelingSource, /delete queuePayloadsRef\.current\[job\.id\];/);
   assert.match(cancelSource, /requestCancel:\s*async \(\) => \{[\s\S]*await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
   assert.match(cancelSource, /abort:\s*\(\) => abortController\?\.abort\(\)/);
   assert.match(cancelSource, /cleanup:\s*\(\) => \{[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
   assert.match(cancelSource, /cancellationNotice\(language\)/);
-  assert.match(appSource, /void cancelQueueJob\(job\);/);
+  assert.match(appSource, /void cancelJobThenRemove\(\{[\s\S]*cancel:\s*\(\) => cancelQueueJob\(job\),/);
   assert.match(appSource, /onClick=\{\(\) => void cancelQueueJob\(job\)\}/);
 
   assert.match(appSource, /if \(responsePayload\.canceled === true\)/);
@@ -240,10 +245,11 @@ test("session persistence defers heavy storage work while typing", () => {
 });
 
 test("session persistence merges one revision conflict and retries exactly once", () => {
-  assert.match(appSource, /import \{ buildSessionSavePayload, mergeSessionsByUpdatedAt, normalizeSessionRevision, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
+  assert.match(appSource, /import \{ buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
   assert.match(appSource, /function normalizeSessionStatePayload\([\s\S]*revision:\s*normalizeSessionRevision\(source\.revision\)/);
   assert.match(appSource, /const sessionsRef = useRef<WorkbenchSession\[\]>\(sessions\);/);
   assert.match(appSource, /const sessionRevisionRef = useRef\(1\);/);
+  assert.match(appSource, /const sessionBaselineRef = useRef<WorkbenchSession\[\]>\(\[\]\);/);
   assert.match(appSource, /const skipNextSessionSaveRef = useRef<\{ sessions: WorkbenchSession\[\]; activeSessionId: string \} \| null>\(null\);/);
   assert.match(appSource, /sessionsRef\.current = sessions;/);
   assert.match(appSource, /sessionRevisionRef\.current = Math\.max\(sessionRevisionRef\.current, normalized\.revision\);/);
@@ -258,7 +264,16 @@ test("session persistence merges one revision conflict and retries exactly once"
   assert.match(saveSource, /resolveConflict:\s*\(response\) => \{/);
   assert.match(saveSource, /const currentPayload = response\.payload\.current;/);
   assert.match(saveSource, /const latestLocalSessions = compactSessionsForStorage\(sessionsRef\.current\);/);
-  assert.match(saveSource, /mergeSessionsByUpdatedAt\(latestLocalSessions, normalizedCurrent\.sessions\)/);
+  assert.match(saveSource, /function applySessionConflictCurrent\(/);
+  assert.match(saveSource, /reconcileSessionConflictState\(\{[\s\S]*baselineSessions: sessionBaselineRef\.current,[\s\S]*localSessions: latestLocalSessions,[\s\S]*serverSessions: normalizedCurrent\.sessions,[\s\S]*serverRevision: normalizedCurrent\.revision,/);
+  assert.match(saveSource, /sessionBaselineRef\.current = compactSessionsForStorage\(reconciled\.baselineSessions\);/);
+  assert.match(saveSource, /sessionBaselineRef\.current = compactSessionsForStorage\(normalized\.sessions\);/);
+  assert.match(saveSource, /if \(result\.kind === "exhausted"\) \{[\s\S]*applySessionConflictCurrent\(current\);[\s\S]*setNotice\(t\("status\.sessionConflictRefresh"\)\);[\s\S]*return;/);
+
+  const loadStart = appSource.indexOf("async function loadServerSessions()");
+  const loadEnd = appSource.indexOf("void loadServerSessions();", loadStart);
+  const loadSource = appSource.slice(loadStart, loadEnd);
+  assert.match(loadSource, /sessionBaselineRef\.current = compactSessionsForStorage\(normalized\.sessions\);/);
   assert.match(saveSource, /skipNextSessionSaveRef\.current = \{ sessions: mergedSessions, activeSessionId: mergedActiveSessionId \};/);
   assert.match(saveSource, /setSessions\(mergedSessions\);/);
   assert.match(saveSource, /return \{[\s\S]*sessions:\s*compactSessionsForStorage\(mergedSessions\),[\s\S]*activeSessionId:\s*mergedActiveSessionId/);

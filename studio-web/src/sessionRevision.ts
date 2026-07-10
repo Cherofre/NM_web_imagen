@@ -45,6 +45,14 @@ function preferLocalSession(local: SessionLike, server: SessionLike) {
   return true;
 }
 
+function sessionChangedSinceBaseline(session: SessionLike, baseline: SessionLike) {
+  const sessionTime = sessionTimestamp(session);
+  const baselineTime = sessionTimestamp(baseline);
+  if (sessionTime.valid && baselineTime.valid) return sessionTime.value > baselineTime.value;
+  if (sessionTime.valid !== baselineTime.valid) return sessionTime.valid;
+  return false;
+}
+
 function compareSessionOrder(left: SessionLike, right: SessionLike) {
   const leftTime = sessionTimestamp(left);
   const rightTime = sessionTimestamp(right);
@@ -72,24 +80,56 @@ export function buildSessionSavePayload<Session>(
 }
 
 export function mergeSessionsByUpdatedAt<Session extends SessionLike>(
+  baselineSessions: readonly Session[],
   localSessions: readonly Session[],
   serverSessions: readonly Session[],
 ) {
+  const baselineById = dedupeSessions(baselineSessions);
   const localById = dedupeSessions(localSessions);
   const serverById = dedupeSessions(serverSessions);
-  const ids = new Set([...localById.keys(), ...serverById.keys()]);
+  const ids = new Set([...baselineById.keys(), ...localById.keys(), ...serverById.keys()]);
   const merged: Session[] = [];
 
   for (const id of ids) {
+    const baseline = baselineById.get(id);
     const local = localById.get(id);
     const server = serverById.get(id);
-    const selected = local && server
-      ? preferLocalSession(local, server) ? local : server
-      : local || server;
+    let selected: Session | undefined;
+
+    if (!baseline) {
+      selected = local && server
+        ? preferLocalSession(local, server) ? local : server
+        : local || server;
+    } else if (local && server) {
+      selected = preferLocalSession(local, server) ? local : server;
+    } else if (local) {
+      selected = sessionChangedSinceBaseline(local, baseline) ? local : undefined;
+    } else if (server) {
+      selected = sessionChangedSinceBaseline(server, baseline) ? server : undefined;
+    }
+
     if (selected) merged.push({ ...selected });
   }
 
   return merged.sort(compareSessionOrder);
+}
+
+export function reconcileSessionConflictState<Session extends SessionLike>({
+  baselineSessions,
+  localSessions,
+  serverSessions,
+  serverRevision,
+}: {
+  baselineSessions: readonly Session[];
+  localSessions: readonly Session[];
+  serverSessions: readonly Session[];
+  serverRevision: unknown;
+}) {
+  return {
+    revision: normalizeSessionRevision(serverRevision),
+    baselineSessions: serverSessions.map((session) => ({ ...session })),
+    sessions: mergeSessionsByUpdatedAt(baselineSessions, localSessions, serverSessions),
+  };
 }
 
 export function nextSessionSaveAttempt(retryCount: number, status: number) {

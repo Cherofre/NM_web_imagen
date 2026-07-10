@@ -88,8 +88,8 @@ import {
 } from "./i18n";
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
-import { appendJobId, cancelJobBeforeAbort, cancellationNotice, cancelJobUrl, withJobId } from "./jobProtocol";
-import { buildSessionSavePayload, mergeSessionsByUpdatedAt, normalizeSessionRevision, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
+import { appendJobId, cancelJobBeforeAbort, cancelJobThenRemove, cancellationNotice, cancelJobUrl, withJobId } from "./jobProtocol";
+import { buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -1085,6 +1085,7 @@ function App() {
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
   const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
+  const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>(new Map());
   const queueProcessingRef = useRef<string | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
@@ -1097,6 +1098,7 @@ function App() {
   const sessionsRef = useRef<WorkbenchSession[]>(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
   const sessionRevisionRef = useRef(1);
+  const sessionBaselineRef = useRef<WorkbenchSession[]>([]);
   const skipNextSessionSaveRef = useRef<{ sessions: WorkbenchSession[]; activeSessionId: string } | null>(null);
   const initialScrollKeyRef = useRef("");
   const submitModeRef = useRef(submitMode);
@@ -1149,6 +1151,44 @@ function App() {
   }
 
   async function saveStudioSessionsWithRetry(localSessions: WorkbenchSession[], activeId: string) {
+    function applySessionConflictCurrent(
+      normalizedCurrent: NonNullable<ReturnType<typeof normalizeSessionStatePayload>>,
+    ) {
+      const latestLocalSessions = compactSessionsForStorage(sessionsRef.current);
+      const reconciled = reconcileSessionConflictState({
+        baselineSessions: sessionBaselineRef.current,
+        localSessions: latestLocalSessions,
+        serverSessions: normalizedCurrent.sessions,
+        serverRevision: normalizedCurrent.revision,
+      });
+      const mergedSessions = reconciled.sessions;
+      const latestActiveSessionId = activeSessionIdRef.current;
+      const mergedActiveSessionId = mergedSessions.some((session) => session.id === latestActiveSessionId)
+        ? latestActiveSessionId
+        : mergedSessions.some((session) => session.id === normalizedCurrent.activeSessionId)
+        ? normalizedCurrent.activeSessionId
+        : mergedSessions[0]?.id || "";
+
+      sessionRevisionRef.current = Math.max(sessionRevisionRef.current, reconciled.revision);
+      sessionBaselineRef.current = compactSessionsForStorage(reconciled.baselineSessions);
+      sessionsRef.current = mergedSessions;
+      activeSessionIdRef.current = mergedActiveSessionId;
+      skipNextSessionSaveRef.current = { sessions: mergedSessions, activeSessionId: mergedActiveSessionId };
+      setSessions(mergedSessions);
+      setActiveSessionId(mergedActiveSessionId);
+      try {
+        localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(mergedSessions)));
+        localStorage.setItem(activeSessionStorageKey, mergedActiveSessionId);
+      } catch {
+        setNotice(t("status.sessionTooLarge"));
+      }
+
+      return {
+        sessions: compactSessionsForStorage(mergedSessions),
+        activeSessionId: mergedActiveSessionId,
+      };
+    }
+
     const result = await runSessionSaveWithRetry({
       initialState: { sessions: localSessions, activeSessionId: activeId },
       send: async (state, _attempt) => {
@@ -1170,32 +1210,7 @@ function App() {
           return null;
         }
 
-        const latestLocalSessions = compactSessionsForStorage(sessionsRef.current);
-        const mergedSessions = mergeSessionsByUpdatedAt(latestLocalSessions, normalizedCurrent.sessions);
-        const latestActiveSessionId = activeSessionIdRef.current;
-        const mergedActiveSessionId = mergedSessions.some((session) => session.id === latestActiveSessionId)
-          ? latestActiveSessionId
-          : mergedSessions.some((session) => session.id === normalizedCurrent.activeSessionId)
-          ? normalizedCurrent.activeSessionId
-          : mergedSessions[0]?.id || "";
-
-        sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalizedCurrent.revision);
-        sessionsRef.current = mergedSessions;
-        activeSessionIdRef.current = mergedActiveSessionId;
-        skipNextSessionSaveRef.current = { sessions: mergedSessions, activeSessionId: mergedActiveSessionId };
-        setSessions(mergedSessions);
-        setActiveSessionId(mergedActiveSessionId);
-        try {
-          localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(mergedSessions)));
-          localStorage.setItem(activeSessionStorageKey, mergedActiveSessionId);
-        } catch {
-          setNotice(t("status.sessionTooLarge"));
-        }
-
-        return {
-          sessions: compactSessionsForStorage(mergedSessions),
-          activeSessionId: mergedActiveSessionId,
-        };
+        return applySessionConflictCurrent(normalizedCurrent);
       },
     });
 
@@ -1206,6 +1221,7 @@ function App() {
         return;
       }
       sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
+      sessionBaselineRef.current = compactSessionsForStorage(normalized.sessions);
       try {
         localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessionsRef.current)));
       } catch {
@@ -1215,6 +1231,14 @@ function App() {
     }
 
     if (result.kind === "exhausted") {
+      const currentPayload = result.response.payload.current;
+      const currentRevision = currentPayload && typeof currentPayload === "object"
+        ? (currentPayload as { revision?: unknown }).revision
+        : undefined;
+      const current = normalizeSessionStatePayload(currentPayload, queueJobs);
+      if (current && normalizeSessionRevision(currentRevision) === currentRevision) {
+        applySessionConflictCurrent(current);
+      }
       setNotice(t("status.sessionConflictRefresh"));
       return;
     }
@@ -1314,6 +1338,7 @@ function App() {
         const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
         if (!cancelled && normalized) {
           sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
+          sessionBaselineRef.current = compactSessionsForStorage(normalized.sessions);
           if (normalized.sessions.length > 0) {
             sessionsRef.current = normalized.sessions;
             activeSessionIdRef.current = normalized.activeSessionId;
@@ -1673,7 +1698,6 @@ function App() {
       const payload = await cancelJobBeforeAbort({
         markCanceling: () => {
           cancelingQueueJobsRef.current.add(job.id);
-          delete queuePayloadsRef.current[job.id];
           markCanceled();
           setNotice(fallbackNotice);
         },
@@ -1741,15 +1765,23 @@ function App() {
   }
 
   function removeQueueJob(job: QueueJob) {
-    if (job.status === "queued" || job.status === "running") {
-      void cancelQueueJob(job);
+    const jobId = job.id;
+    const remove = () => {
+      setQueueJobs((items) => items.filter((item) => item.id !== jobId));
+    };
+    if (job.status === "queued" || job.status === "running" || pendingQueueRemovalsRef.current.has(jobId)) {
+      void cancelJobThenRemove({
+        jobId,
+        pending: pendingQueueRemovalsRef.current,
+        cancel: () => cancelQueueJob(job),
+        remove,
+      });
       return;
     }
-    const jobId = job.id;
     queueAbortControllersRef.current[jobId]?.abort();
     delete queueAbortControllersRef.current[jobId];
     delete queuePayloadsRef.current[jobId];
-    setQueueJobs((items) => items.filter((item) => item.id !== jobId));
+    remove();
   }
 
   async function saveConfig() {

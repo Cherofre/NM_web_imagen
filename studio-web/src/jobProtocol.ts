@@ -44,3 +44,32 @@ export async function cancelJobBeforeAbort<Result>({
     }
   }
 }
+
+export function cancelJobThenRemove<Result>({
+  jobId,
+  pending,
+  cancel,
+  remove,
+}: {
+  jobId: string;
+  pending: Map<string, Promise<void>>;
+  cancel: () => Result | Promise<Result>;
+  remove: () => void;
+}) {
+  const existing = pending.get(jobId);
+  if (existing) return existing;
+
+  let operation: Promise<void>;
+  operation = Promise.resolve()
+    .then(() => cancel())
+    .catch(() => undefined)
+    .then(() => {
+      remove();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (pending.get(jobId) === operation) pending.delete(jobId);
+    });
+  pending.set(jobId, operation);
+  return operation;
+}

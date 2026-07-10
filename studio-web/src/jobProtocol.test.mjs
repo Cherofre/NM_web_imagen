@@ -100,3 +100,61 @@ test("cancellation always aborts and cleans up when server cancellation fails", 
     assert.equal(cleanupCalls, 1);
   }
 });
+
+test("cancel then remove waits for one shared cancellation before removing", async () => {
+  assert.equal(typeof jobProtocol.cancelJobThenRemove, "function");
+  const pending = new Map();
+  const calls = { cancel: 0, abort: 0, deleteTracking: 0, remove: 0 };
+  let resolveCancel = () => {};
+  const deferredCancel = new Promise((resolve) => {
+    resolveCancel = resolve;
+  });
+  const options = {
+    jobId: "job-pending-remove",
+    pending,
+    cancel: async () => {
+      calls.cancel += 1;
+      await deferredCancel;
+      calls.abort += 1;
+      calls.deleteTracking += 1;
+    },
+    remove: () => {
+      calls.remove += 1;
+    },
+  };
+
+  const first = jobProtocol.cancelJobThenRemove(options);
+  const second = jobProtocol.cancelJobThenRemove(options);
+  await Promise.resolve();
+
+  assert.equal(first, second);
+  assert.equal(calls.cancel, 1);
+  assert.deepEqual(calls, { cancel: 1, abort: 0, deleteTracking: 0, remove: 0 });
+  assert.equal(pending.get(options.jobId), first);
+
+  resolveCancel();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(calls, { cancel: 1, abort: 1, deleteTracking: 1, remove: 1 });
+  assert.equal(pending.has(options.jobId), false);
+});
+
+test("cancel then remove still removes after cancellation fails", async () => {
+  assert.equal(typeof jobProtocol.cancelJobThenRemove, "function");
+  const pending = new Map();
+  let removeCalls = 0;
+
+  await jobProtocol.cancelJobThenRemove({
+    jobId: "job-failed-remove",
+    pending,
+    cancel: async () => {
+      throw new Error("cancel failed");
+    },
+    remove: () => {
+      removeCalls += 1;
+    },
+  });
+
+  assert.equal(removeCalls, 1);
+  assert.equal(pending.size, 0);
+});
