@@ -41,7 +41,7 @@
 - Modify: `app.py`
 - Test: `tests/test_security_boundaries.py`
 
-- [ ] **Step 1: Write failing pure image-safety tests**
+- [x] **Step 1: Write failing pure image-safety tests**
 
 Create tests for accepted raster magic, fake MIME, SVG, Base64 preflight size, total upload size and safe outputs resolution:
 
@@ -88,7 +88,7 @@ class ImageSafetyTests(unittest.TestCase):
                 resolve_output_image(root, "../secret.png")
 ```
 
-- [ ] **Step 2: Run the pure tests and verify RED**
+- [x] **Step 2: Run the pure tests and verify RED**
 
 Run:
 
@@ -99,7 +99,7 @@ python -m unittest tests.test_security_boundaries.ImageSafetyTests -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'image_safety'`.
 
-- [ ] **Step 3: Implement `image_safety.py`**
+- [x] **Step 3: Implement `image_safety.py`**
 
 Implement these public contracts and constants:
 
@@ -191,11 +191,11 @@ def read_limited_chunks(chunks: Iterable[bytes], *, max_bytes: int) -> bytes:
     return bytes(payload)
 ```
 
-- [ ] **Step 4: Run the pure tests and verify GREEN**
+- [x] **Step 4: Run the pure tests and verify GREEN**
 
 Run the Step 2 command. Expected: all `ImageSafetyTests` pass.
 
-- [ ] **Step 5: Write failing FastAPI boundary tests**
+- [x] **Step 5: Write failing FastAPI boundary tests**
 
 Add a `SecurityBoundaryApiTests` fixture that patches the same root constants as `StudioSessionTests`, then add:
 
@@ -268,7 +268,7 @@ def session_payload(reference_src: str) -> dict:
     }
 ```
 
-- [ ] **Step 6: Run API tests and verify RED**
+- [x] **Step 6: Run API tests and verify RED**
 
 Run:
 
@@ -279,7 +279,7 @@ python -m unittest tests.test_security_boundaries.SecurityBoundaryApiTests -v
 
 Expected: CORS echoes the origin, JSON is publicly served, remote session URL is accepted, or fake upload reaches the upstream mock.
 
-- [ ] **Step 7: Integrate strict uploads, session references and controlled outputs**
+- [x] **Step 7: Integrate strict uploads, session references and controlled outputs**
 
 In `app.py`:
 
@@ -317,7 +317,7 @@ Use `read_limited_chunks(response.iter_content(64 * 1024), max_bytes=REMOTE_RESU
 
 Call `validate_bind_host(args.host)` before `uvicorn.run()`.
 
-- [ ] **Step 8: Run security tests and existing backend regression suite**
+- [x] **Step 8: Run security tests and existing backend regression suite**
 
 Run:
 
@@ -329,7 +329,7 @@ python -m py_compile .\app.py .\image_safety.py
 
 Expected: all tests pass and compilation exits 0.
 
-- [ ] **Step 9: Commit phase one**
+- [x] **Step 9: Commit phase one**
 
 ```powershell
 git add app.py image_safety.py tests/test_security_boundaries.py

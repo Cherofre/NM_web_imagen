@@ -2,16 +2,17 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-10 +08:00
-- Phase: v1.0.6 P1 hardening implementation plan complete; Task 1 ready
-- Superpowers Phase: subagent-driven development; Task 1 implementation
+- Phase: v1.0.6 P1 hardening Task 1 complete; Task 2 ready
+- Superpowers Phase: subagent-driven development; Task 2 implementation
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: The user approved the written design. The task-by-task TDD implementation plan is complete and self-reviewed, with all nine P1 categories mapped to Tasks 1-5. Subagent-driven execution starts with local API and image boundaries, followed by independent spec and code-quality review. No application code has been changed yet.
+- Current Focus: Task 1 is implemented and approved after TDD, spec review, code-quality review, and fresh controller verification. Production CORS is off by default, bind host is loopback-only, `/outputs` serves only extension/magic-matched raster files, uploads/session references use 25 MiB per-image and 150 MiB request limits, remote results use a 50 MiB streamed limit, and invalid GPT/Banana image payloads are discarded. Task 2 now addresses browser Key persistence, chat reference truthfulness, unsupported controls, and the Banana diagnostic contract.
+- Latest Verification: `python -m unittest tests.test_security_boundaries tests.test_studio_sessions tests.test_release_cache_busting -v` passed 85/85; `python -m py_compile .\app.py .\image_safety.py` passed; cumulative diff check passed; worktree clean at `f9b5dd7`.
 
 ## Resume Here
-- Start with: Task 1 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md` on branch `codex/p1-hardening-v1.0.6`.
+- Start with: Task 2 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md` on branch `codex/p1-hardening-v1.0.6`.
 - Superpowers phase: use `subagent-driven-development` and TDD; write each regression test red before production changes, then run spec and code-quality review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
