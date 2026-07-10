@@ -215,13 +215,11 @@ class RequestBoundaryMiddleware:
                     )(scope, receive, send)
                     return
 
-        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        is_generation_multipart = (
+        is_generation_request = (
             path.startswith("/api/generate/")
             and method not in {"GET", "HEAD", "OPTIONS"}
-            and content_type == "multipart/form-data"
         )
-        if not is_generation_multipart:
+        if not is_generation_request:
             await self.app(scope, receive, send)
             return
 

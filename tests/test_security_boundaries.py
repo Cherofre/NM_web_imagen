@@ -418,6 +418,31 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         self.assertEqual("上传请求超过容量限制", response.json()["detail"])
         request_form.assert_not_called()
 
+    def test_generation_urlencoded_content_length_limit_rejects_before_form_parse(self) -> None:
+        with patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 64, create=True):
+            with TestClient(webapp.create_app()) as client, patch.object(
+                StarletteRequest,
+                "form",
+                side_effect=AssertionError("oversized urlencoded body reached form parsing"),
+            ) as request_form, patch.object(
+                webapp.UPSTREAM_EXECUTOR,
+                "run",
+                new_callable=AsyncMock,
+            ) as executor_run:
+                response = client.post(
+                    "/api/generate/gpt-image-2",
+                    content=b"x",
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Content-Length": "65",
+                    },
+                )
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual("上传请求超过容量限制", response.json()["detail"])
+        request_form.assert_not_called()
+        executor_run.assert_not_awaited()
+
     def test_generation_chunked_limit_stops_before_overflow_chunk_reaches_parser(self) -> None:
         parser_chunks = []
 
@@ -461,6 +486,76 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                     "headers": [
                         (b"host", b"testserver"),
                         (b"content-type", b"multipart/form-data; boundary=limit-test"),
+                    ],
+                    "client": ("127.0.0.1", 12345),
+                    "server": ("testserver", 80),
+                },
+                receive,
+                send,
+            )
+            return sent
+
+        with (
+            patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 32, create=True),
+            patch.object(StarletteRequest, "form", probe_form),
+            patch.object(webapp.UPSTREAM_EXECUTOR, "run", new_callable=AsyncMock) as executor_run,
+        ):
+            sent = asyncio.run(invoke_chunked(webapp.create_app()))
+
+        response_start = next(message for message in sent if message["type"] == "http.response.start")
+        response_body = b"".join(
+            message.get("body", b"")
+            for message in sent
+            if message["type"] == "http.response.body"
+        )
+        self.assertEqual(413, response_start["status"])
+        self.assertEqual("上传请求超过容量限制", json.loads(response_body)["detail"])
+        self.assertEqual([b"a" * 16], parser_chunks)
+        executor_run.assert_not_awaited()
+
+    def test_generation_urlencoded_chunked_limit_stops_before_overflow_chunk_reaches_parser(self) -> None:
+        parser_chunks = []
+
+        async def probe_form(request, *args, **kwargs):
+            del args, kwargs
+            if request._form is not None:
+                return request._form
+            async for chunk in request.stream():
+                parser_chunks.append(chunk)
+            request._form = FormData()
+            return request._form
+
+        async def invoke_chunked(app):
+            incoming = iter(
+                [
+                    {"type": "http.request", "body": b"a" * 16, "more_body": True},
+                    {"type": "http.request", "body": b"b" * 32, "more_body": False},
+                ]
+            )
+            sent = []
+
+            async def receive():
+                try:
+                    return next(incoming)
+                except StopIteration:
+                    return {"type": "http.disconnect"}
+
+            async def send(message):
+                sent.append(message)
+
+            await app(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0"},
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/api/generate/gpt-image-2",
+                    "raw_path": b"/api/generate/gpt-image-2",
+                    "query_string": b"",
+                    "headers": [
+                        (b"host", b"testserver"),
+                        (b"content-type", b"application/x-www-form-urlencoded"),
                     ],
                     "client": ("127.0.0.1", 12345),
                     "server": ("testserver", 80),
