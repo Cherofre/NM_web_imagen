@@ -94,6 +94,16 @@ GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
 UPSTREAM_RESULT_MAX_IMAGES = 10
 UPSTREAM_RESULT_MAX_BYTES = 150 * 1024 * 1024
 UPSTREAM_RESULT_LIMIT_MESSAGE = "上游图片结果超过请求级安全预算"
+CLIENT_ERROR_DETAILS = {
+    "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
+    "E_UPSTREAM_RATE_LIMIT": "上游服务请求过于频繁，请稍后重试。",
+    "E_UPSTREAM_TIMEOUT": "上游服务响应超时，请稍后重试或降低生成参数。",
+    "E_UPSTREAM_NETWORK": "无法连接上游服务，请检查网络和接口地址。",
+    "E_UPSTREAM_RESPONSE": "上游服务返回异常，请稍后重试。",
+    "E_UPSTREAM_REQUEST": "上游服务拒绝了请求，请检查模型与生成参数。",
+    "E_LOCAL_OPEN_OUTPUTS": "无法打开生成结果文件夹，请确认系统权限后重试。",
+    "E_LOCAL_SAVE_OUTPUT": "图片保存失败，请检查输出目录权限。",
+}
 UPSTREAM_EXECUTOR = UpstreamExecutor()
 JOB_REGISTRY = JobRegistry()
 GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh"}
@@ -110,6 +120,47 @@ FORM_ENGINES = {value: key for key, value in ENGINE_FORM_IDS.items()}
 
 class UpstreamResultLimitError(ValueError):
     pass
+
+
+class ClientSafeHTTPException(HTTPException):
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        error_code: str,
+        detail: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            status_code=status_code,
+            detail=detail or CLIENT_ERROR_DETAILS[error_code],
+        )
+        self.error_code = error_code
+
+
+def client_http_error(
+    error_code: str,
+    *,
+    status_code: int,
+    detail: Optional[str] = None,
+) -> ClientSafeHTTPException:
+    return ClientSafeHTTPException(
+        status_code=status_code,
+        error_code=error_code,
+        detail=detail,
+    )
+
+
+def upstream_error_classification(status_code: int) -> Tuple[int, str]:
+    normalized_status = int(status_code or 0)
+    if normalized_status in {401, 403}:
+        return normalized_status, "E_UPSTREAM_AUTH"
+    if normalized_status == 429:
+        return 429, "E_UPSTREAM_RATE_LIMIT"
+    if normalized_status in {408, 504, 524}:
+        return 504, "E_UPSTREAM_TIMEOUT"
+    if 400 <= normalized_status < 500:
+        return 400, "E_UPSTREAM_REQUEST"
+    return 502, "E_UPSTREAM_RESPONSE"
 
 
 class UpstreamImageBudget:
@@ -763,6 +814,24 @@ def extract_error_message(
     )
 
 
+def extract_upstream_control_message(response: requests.Response) -> str:
+    """Read an upstream message for internal control flow only; never return it to clients."""
+    try:
+        payload = response_json_utf8_first(response)
+    except Exception:
+        return compact_text(response_text_utf8_first(response), 1000)
+    if isinstance(payload, dict):
+        error_obj = payload.get("error")
+        if isinstance(error_obj, dict):
+            message = str(error_obj.get("message") or "").strip()
+            if message:
+                return compact_text(message, 1000)
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            return compact_text(message, 1000)
+    return compact_text(response_text_utf8_first(response), 1000)
+
+
 def create_requests_session(bypass_proxy: bool = False) -> requests.Session:
     session = requests.Session()
     if bypass_proxy:
@@ -1098,7 +1167,14 @@ def cleanup_generated_image_files(
             continue
 
     for image in images:
-        for key in ("saved_name", "saved_path", "saved_url", "save_status", "save_error"):
+        for key in (
+            "saved_name",
+            "saved_path",
+            "saved_url",
+            "save_status",
+            "save_error",
+            "save_error_code",
+        ):
             image.pop(key, None)
 
 
@@ -1145,9 +1221,10 @@ def save_generated_images(
                 saved_count += 1
             except JobCancelled:
                 raise
-            except Exception as exc:
+            except Exception:
                 image["save_status"] = "failed"
-                image["save_error"] = compact_text(str(exc), 220)
+                image["save_error"] = CLIENT_ERROR_DETAILS["E_LOCAL_SAVE_OUTPUT"]
+                image["save_error_code"] = "E_LOCAL_SAVE_OUTPUT"
         JOB_REGISTRY.raise_if_canceled(job_id)
         return saved_count
     except JobCancelled:
@@ -2492,20 +2569,23 @@ def diagnostic_result(
     model: str,
     started_at: float,
     status_code: Optional[int] = None,
-    error: str = "",
+    error_code: str = "",
+    secrets: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "capability": capability,
         "label": label,
         "ok": ok,
-        "endpoint": redact_diagnostic_endpoint(endpoint, []),
-        "model": model,
+        "endpoint": redact_diagnostic_endpoint(endpoint, secrets or []),
+        "model": sanitize_client_error(model, secrets=secrets, fallback=""),
         "latency_ms": max(0, int((time.monotonic() - started_at) * 1000)),
     }
     if status_code is not None:
         result["status_code"] = status_code
-    if error:
-        result["error"] = error
+    if not ok:
+        resolved_error_code = error_code or upstream_error_classification(status_code or 0)[1]
+        result["error_code"] = resolved_error_code
+        result["error"] = CLIENT_ERROR_DETAILS[resolved_error_code]
     return result
 
 
@@ -2533,7 +2613,16 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
     endpoint = build_gpt_api_url(base_url, "/v1/images/generations")
     started_at = time.monotonic()
     if not api_key:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_AUTH",
+            secrets=secrets,
+        )
     try:
         response = await UPSTREAM_EXECUTOR.run(
             "generation",
@@ -2552,6 +2641,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             timeout=timeout,
         )
         if not response.ok:
+            _public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "generation",
                 "生图",
@@ -2560,21 +2650,68 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
                 model,
                 started_at,
                 response.status_code,
-                extract_error_message(response, secrets=secrets),
+                error_code,
+                secrets,
             )
         response_data = response_json_utf8_first(response)
         if not extract_gpt_image_values(
             response_data if isinstance(response_data, dict) else {},
             limit=1,
         ):
-            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
-        return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
-    except requests.Timeout as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
-    except requests.RequestException as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
-    except Exception as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+            return diagnostic_result(
+                "generation",
+                "生图",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                "E_UPSTREAM_RESPONSE",
+                secrets,
+            )
+        return diagnostic_result(
+            "generation",
+            "生图",
+            True,
+            endpoint,
+            model,
+            started_at,
+            response.status_code,
+            secrets=secrets,
+        )
+    except requests.Timeout:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_TIMEOUT",
+            secrets=secrets,
+        )
+    except requests.RequestException:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_NETWORK",
+            secrets=secrets,
+        )
+    except Exception:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_RESPONSE",
+            secrets=secrets,
+        )
 
 
 async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
@@ -2586,7 +2723,16 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
     endpoint = build_openai_chat_url(base_url)
     started_at = time.monotonic()
     if not api_key:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error="缺少 API Key")
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_AUTH",
+            secrets=secrets,
+        )
     chat_payload: Dict[str, Any] = {
         "model": model,
         "messages": build_openai_chat_messages("请只回复 OK，用于连接诊断。", []),
@@ -2606,6 +2752,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             timeout=timeout,
         )
         if not response.ok:
+            _public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "chat",
                 "聊天",
@@ -2614,18 +2761,65 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
                 model,
                 started_at,
                 response.status_code,
-                extract_error_message(response, secrets=secrets),
+                error_code,
+                secrets,
             )
         response_data = response_json_utf8_first(response)
         if not extract_openai_chat_reply(response_data if isinstance(response_data, dict) else {}):
-            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, "接口成功但未返回聊天内容")
-        return diagnostic_result("chat", "聊天", True, endpoint, model, started_at, response.status_code)
-    except requests.Timeout as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
-    except requests.RequestException as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
-    except Exception as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+            return diagnostic_result(
+                "chat",
+                "聊天",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                "E_UPSTREAM_RESPONSE",
+                secrets,
+            )
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            True,
+            endpoint,
+            model,
+            started_at,
+            response.status_code,
+            secrets=secrets,
+        )
+    except requests.Timeout:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_TIMEOUT",
+            secrets=secrets,
+        )
+    except requests.RequestException:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_NETWORK",
+            secrets=secrets,
+        )
+    except Exception:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_RESPONSE",
+            secrets=secrets,
+        )
 
 
 async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
@@ -2640,7 +2834,16 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
     endpoint = build_banana_api_url(api_base_url, model)
     started_at = time.monotonic()
     if not api_key:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_AUTH",
+            secrets=secrets,
+        )
     try:
         session = create_requests_session(bool(payload.get("bypass_proxy")))
         response = await UPSTREAM_EXECUTOR.run(
@@ -2660,7 +2863,18 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, extract_error_message(response, secrets=secrets))
+            _public_status, error_code = upstream_error_classification(response.status_code)
+            return diagnostic_result(
+                "generation",
+                "生图",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                error_code,
+                secrets,
+            )
         response_data = response_json_utf8_first(response)
         parsed = await extract_banana_images_async(
             response_data if isinstance(response_data, dict) else {},
@@ -2668,14 +2882,60 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             max_images=1,
         )
         if not parsed.get("images"):
-            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
-        return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
-    except requests.Timeout as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
-    except requests.RequestException as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
-    except Exception as exc:
-        return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+            return diagnostic_result(
+                "generation",
+                "生图",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                "E_UPSTREAM_RESPONSE",
+                secrets,
+            )
+        return diagnostic_result(
+            "generation",
+            "生图",
+            True,
+            endpoint,
+            model,
+            started_at,
+            response.status_code,
+            secrets=secrets,
+        )
+    except requests.Timeout:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_TIMEOUT",
+            secrets=secrets,
+        )
+    except requests.RequestException:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_NETWORK",
+            secrets=secrets,
+        )
+    except Exception:
+        return diagnostic_result(
+            "generation",
+            "生图",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_RESPONSE",
+            secrets=secrets,
+        )
 
 
 async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
@@ -2690,7 +2950,16 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
     endpoint = build_banana_api_url(api_base_url, model)
     started_at = time.monotonic()
     if not api_key:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error="缺少 API Key")
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_AUTH",
+            secrets=secrets,
+        )
     try:
         session = create_requests_session(bool(payload.get("bypass_proxy")))
         response = await UPSTREAM_EXECUTOR.run(
@@ -2706,17 +2975,74 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, extract_error_message(response, secrets=secrets))
+            _public_status, error_code = upstream_error_classification(response.status_code)
+            return diagnostic_result(
+                "chat",
+                "聊天",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                error_code,
+                secrets,
+            )
         response_data = response_json_utf8_first(response)
         if not extract_banana_text_reply(response_data if isinstance(response_data, dict) else {}):
-            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, "接口成功但未返回聊天内容")
-        return diagnostic_result("chat", "聊天", True, endpoint, model, started_at, response.status_code)
-    except requests.Timeout as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(f"请求超时：{exc}", secrets))
-    except requests.RequestException as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
-    except Exception as exc:
-        return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
+            return diagnostic_result(
+                "chat",
+                "聊天",
+                False,
+                endpoint,
+                model,
+                started_at,
+                response.status_code,
+                "E_UPSTREAM_RESPONSE",
+                secrets,
+            )
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            True,
+            endpoint,
+            model,
+            started_at,
+            response.status_code,
+            secrets=secrets,
+        )
+    except requests.Timeout:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_TIMEOUT",
+            secrets=secrets,
+        )
+    except requests.RequestException:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_NETWORK",
+            secrets=secrets,
+        )
+    except Exception:
+        return diagnostic_result(
+            "chat",
+            "聊天",
+            False,
+            endpoint,
+            model,
+            started_at,
+            error_code="E_UPSTREAM_RESPONSE",
+            secrets=secrets,
+        )
 
 
 async def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2992,6 +3318,20 @@ def create_app() -> FastAPI:
             if normalized:
                 JOB_REGISTRY.forget(normalized)
 
+    @app.exception_handler(ClientSafeHTTPException)
+    async def handle_client_safe_http_exception(
+        _request: Request,
+        exc: ClientSafeHTTPException,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": str(exc.detail),
+                "error_code": exc.error_code,
+            },
+            headers=exc.headers,
+        )
+
     @app.exception_handler(JobCancelled)
     async def handle_job_cancelled(_request: Request, _exc: JobCancelled) -> JSONResponse:
         return JSONResponse(
@@ -3169,9 +3509,9 @@ def create_app() -> FastAPI:
         try:
             open_local_directory(OUTPUTS_DIR)
         except Exception as exc:
-            raise HTTPException(
+            raise client_http_error(
+                "E_LOCAL_OPEN_OUTPUTS",
                 status_code=500,
-                detail=f"打开 outputs 文件夹失败：{sanitize_client_error(str(exc))}",
             ) from exc
 
         return {
@@ -3229,21 +3569,38 @@ def create_app() -> FastAPI:
             )
             JOB_REGISTRY.raise_if_canceled(job_id)
         except requests.Timeout as exc:
-            raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
+            raise client_http_error(
+                "E_UPSTREAM_TIMEOUT",
+                status_code=504,
+            ) from exc
         except requests.RequestException as exc:
-            safe_error = sanitize_client_error(str(exc), secrets=[api_key])
-            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {safe_error}") from exc
+            raise client_http_error(
+                "E_UPSTREAM_NETWORK",
+                status_code=502,
+            ) from exc
 
         if not response.ok:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=extract_error_message(response, secrets=[api_key]),
+            public_status, error_code = upstream_error_classification(response.status_code)
+            raise client_http_error(
+                error_code,
+                status_code=public_status,
             )
 
-        response_data = response_json_utf8_first(response)
-        reply = extract_openai_chat_reply(response_data)
+        try:
+            response_data = response_json_utf8_first(response)
+            reply = extract_openai_chat_reply(
+                response_data if isinstance(response_data, dict) else {}
+            )
+        except Exception as exc:
+            raise client_http_error(
+                "E_UPSTREAM_RESPONSE",
+                status_code=502,
+            ) from exc
         if not reply:
-            raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
+            raise client_http_error(
+                "E_UPSTREAM_RESPONSE",
+                status_code=502,
+            )
 
         usage = response_data.get("usage") if isinstance(response_data, dict) else {}
         return {
@@ -3307,21 +3664,38 @@ def create_app() -> FastAPI:
             )
             JOB_REGISTRY.raise_if_canceled(job_id)
         except requests.Timeout as exc:
-            raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
+            raise client_http_error(
+                "E_UPSTREAM_TIMEOUT",
+                status_code=504,
+            ) from exc
         except requests.RequestException as exc:
-            safe_error = sanitize_client_error(str(exc), secrets=[api_key])
-            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {safe_error}") from exc
+            raise client_http_error(
+                "E_UPSTREAM_NETWORK",
+                status_code=502,
+            ) from exc
 
         if not response.ok:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=extract_error_message(response, secrets=[api_key]),
+            public_status, error_code = upstream_error_classification(response.status_code)
+            raise client_http_error(
+                error_code,
+                status_code=public_status,
             )
 
-        response_data = response_json_utf8_first(response)
-        reply = extract_banana_text_reply(response_data)
+        try:
+            response_data = response_json_utf8_first(response)
+            reply = extract_banana_text_reply(
+                response_data if isinstance(response_data, dict) else {}
+            )
+        except Exception as exc:
+            raise client_http_error(
+                "E_UPSTREAM_RESPONSE",
+                status_code=502,
+            ) from exc
         if not reply:
-            raise HTTPException(status_code=502, detail="聊天接口没有返回可读文本")
+            raise client_http_error(
+                "E_UPSTREAM_RESPONSE",
+                status_code=502,
+            )
 
         return {
             "ok": True,
@@ -3367,9 +3741,16 @@ def create_app() -> FastAPI:
         started_at = time.time()
         generated_images: List[Dict[str, str]] = []
         messages: List[str] = []
+        batch_error_codes: List[str] = []
         seeds: List[int] = []
         session = create_requests_session(bypass_proxy=bypass_proxy)
         result_budget = UpstreamImageBudget()
+
+        def append_batch_error(batch_number: int, error_code: str) -> None:
+            messages.append(
+                f"第 {batch_number} 批：{CLIENT_ERROR_DETAILS[error_code]}"
+            )
+            batch_error_codes.append(error_code)
 
         for index in range(batch_size):
             JOB_REGISTRY.raise_if_canceled(job_id)
@@ -3406,8 +3787,10 @@ def create_app() -> FastAPI:
                 )
                 JOB_REGISTRY.raise_if_canceled(job_id)
                 if response.status_code >= 400:
-                    detail = extract_error_message(response, secrets=[api_key])
-                    messages.append(f"第 {index + 1} 批请求失败: {detail}")
+                    _public_status, error_code = upstream_error_classification(
+                        response.status_code
+                    )
+                    append_batch_error(index + 1, error_code)
                     continue
 
                 parsed = await extract_banana_images_async(
@@ -3422,28 +3805,22 @@ def create_app() -> FastAPI:
                     for image_index, image in enumerate(batch_images, start=1):
                         image["name"] = f"banana-{index + 1:02d}-{image_index:02d}{guess_extension(image['mime_type'])}"
                     generated_images.extend(batch_images)
-                else:
-                    messages.append(f"第 {index + 1} 批未返回图片")
-
-                for message in batch_messages:
-                    messages.append(f"第 {index + 1} 批: {message}")
+                if batch_messages or not batch_images:
+                    append_batch_error(index + 1, "E_UPSTREAM_RESPONSE")
             except JobCancelled:
                 raise
             except UpstreamResultLimitError as exc:
-                raise HTTPException(
+                raise client_http_error(
+                    "E_UPSTREAM_RESPONSE",
                     status_code=502,
                     detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
                 ) from exc
-            except requests.RequestException as exc:
-                messages.append(
-                    f"第 {index + 1} 批网络异常: {type(exc).__name__} "
-                    f"{sanitize_client_error(str(exc), secrets=[api_key])}"
-                )
-            except Exception as exc:
-                messages.append(
-                    f"第 {index + 1} 批处理失败: "
-                    f"{sanitize_client_error(str(exc), secrets=[api_key])}"
-                )
+            except requests.Timeout:
+                append_batch_error(index + 1, "E_UPSTREAM_TIMEOUT")
+            except requests.RequestException:
+                append_batch_error(index + 1, "E_UPSTREAM_NETWORK")
+            except Exception:
+                append_batch_error(index + 1, "E_UPSTREAM_RESPONSE")
 
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
@@ -3499,7 +3876,7 @@ def create_app() -> FastAPI:
             JOB_REGISTRY.raise_if_canceled(job_id)
             if history_entry:
                 meta["history_id"] = history_entry["id"]
-            return {
+            result: Dict[str, Any] = {
                 "ok": bool(generated_images),
                 "engine": "banana",
                 "images": generated_images,
@@ -3507,6 +3884,9 @@ def create_app() -> FastAPI:
                 "meta": meta,
                 "history_entry": history_entry,
             }
+            if batch_error_codes:
+                result["error_code"] = batch_error_codes[0]
+            return result
         except JobCancelled:
             if history_entry:
                 delete_history_entry(str(history_entry.get("id") or ""))
@@ -3677,9 +4057,9 @@ def create_app() -> FastAPI:
                         api_url = fallback_api_url
                         used_yuzapi_fallback = True
                         continue
-                    raise HTTPException(
+                    raise client_http_error(
+                        "E_UPSTREAM_TIMEOUT",
                         status_code=504,
-                        detail="GPT Image 2 请求超时：上游接口长时间没有返回。可以稍后重试，或调低质量/尺寸/数量。",
                     ) from exc
                 except requests.RequestException as exc:
                     if fallback_api_url and not used_yuzapi_fallback:
@@ -3687,23 +4067,13 @@ def create_app() -> FastAPI:
                         api_url = fallback_api_url
                         used_yuzapi_fallback = True
                         continue
-                    safe_error = sanitize_client_error(str(exc), secrets=[api_key])
-                    raise HTTPException(
+                    raise client_http_error(
+                        "E_UPSTREAM_NETWORK",
                         status_code=502,
-                        detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {safe_error}",
                     ) from exc
 
                 if response.status_code == 400:
-                    try:
-                        error_payload = response_json_utf8_first(response)
-                    except Exception:
-                        error_payload = {}
-                    raw_error_message = (
-                        error_payload.get("error", {}).get("message")
-                        if isinstance(error_payload, dict)
-                        else None
-                    ) or extract_error_message(response, secrets=[api_key])
-                    error_message = str(raw_error_message or "")
+                    error_message = extract_upstream_control_message(response)
                     unknown_param = unknown_param_pattern.search(error_message)
                     if unknown_param:
                         parameter_name = unknown_param.group(1)
@@ -3715,12 +4085,9 @@ def create_app() -> FastAPI:
                                 current_request_kwargs["data"] = current_payload
                             JOB_REGISTRY.raise_if_canceled(job_id)
                             continue
-                    raise HTTPException(
+                    raise client_http_error(
+                        "E_UPSTREAM_REQUEST",
                         status_code=400,
-                        detail=(
-                            "GPT Image 2 请求失败: "
-                            f"{sanitize_client_error(error_message, secrets=[api_key])}"
-                        ),
                     )
 
                 if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
@@ -3732,27 +4099,33 @@ def create_app() -> FastAPI:
                     continue
 
                 if response.status_code >= 400:
-                    status_code = 504 if response.status_code == 504 else 502
-                    failed_detail = extract_error_message(response, secrets=[api_key])
-                    raise HTTPException(
-                        status_code=status_code,
-                        detail=f"GPT Image 2 请求失败: {failed_detail}",
+                    public_status, error_code = upstream_error_classification(
+                        response.status_code
+                    )
+                    raise client_http_error(
+                        error_code,
+                        status_code=public_status,
                     )
 
                 try:
                     response_data = response_json_utf8_first(response)
-                except ValueError as exc:
-                    raise HTTPException(
+                except Exception as exc:
+                    raise client_http_error(
+                        "E_UPSTREAM_RESPONSE",
                         status_code=502,
-                        detail=(
-                            "GPT Image 2 返回不是 JSON: "
-                            f"{extract_error_message(response, secrets=[api_key])}"
-                        ),
                     ) from exc
+                if not isinstance(response_data, dict):
+                    raise client_http_error(
+                        "E_UPSTREAM_RESPONSE",
+                        status_code=502,
+                    )
                 break
 
             if response_data is None:
-                raise HTTPException(status_code=502, detail="GPT Image 2 请求失败，未获得有效响应")
+                raise client_http_error(
+                    "E_UPSTREAM_RESPONSE",
+                    status_code=502,
+                )
             return response_data
 
         result_budget = UpstreamImageBudget()
@@ -3786,7 +4159,8 @@ def create_app() -> FastAPI:
                 response_payloads.append(next_response_data)
                 images.extend(next_images)
         except UpstreamResultLimitError as exc:
-            raise HTTPException(
+            raise client_http_error(
+                "E_UPSTREAM_RESPONSE",
                 status_code=502,
                 detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
             ) from exc

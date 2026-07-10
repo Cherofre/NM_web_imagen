@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from urllib.parse import quote
 
 import httpx
@@ -56,6 +56,16 @@ SENSITIVE_MARKERS = (
     WINDOWS_SECRET_PATH,
     POSIX_SECRET_PATH,
 )
+CLIENT_ERROR_DETAILS = {
+    "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
+    "E_UPSTREAM_RATE_LIMIT": "上游服务请求过于频繁，请稍后重试。",
+    "E_UPSTREAM_TIMEOUT": "上游服务响应超时，请稍后重试或降低生成参数。",
+    "E_UPSTREAM_NETWORK": "无法连接上游服务，请检查网络和接口地址。",
+    "E_UPSTREAM_RESPONSE": "上游服务返回异常，请稍后重试。",
+    "E_UPSTREAM_REQUEST": "上游服务拒绝了请求，请检查模型与生成参数。",
+    "E_LOCAL_OPEN_OUTPUTS": "无法打开生成结果文件夹，请确认系统权限后重试。",
+    "E_LOCAL_SAVE_OUTPUT": "图片保存失败，请检查输出目录权限。",
+}
 
 
 def client_strings(value):
@@ -71,6 +81,18 @@ def assert_client_payload_is_sanitized(test_case, payload):
     for marker in SENSITIVE_MARKERS:
         test_case.assertNotIn(marker, text)
     return text
+
+
+def assert_stable_http_error(test_case, response, status_code, error_code):
+    test_case.assertEqual(status_code, response.status_code)
+    test_case.assertEqual(
+        {
+            "detail": CLIENT_ERROR_DETAILS[error_code],
+            "error_code": error_code,
+        },
+        response.json(),
+    )
+    assert_client_payload_is_sanitized(test_case, response.json())
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
@@ -1153,7 +1175,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("raw-upstream-text", response.text)
         self.assertNotIn(leaked_path, response.text)
 
-    async def test_chat_captured_errors_are_sanitized_for_both_engines(self) -> None:
+    async def test_chat_captured_errors_use_stable_codes_for_both_engines(self) -> None:
         class BananaSession:
             def __init__(self, outcome):
                 self.outcome = outcome
@@ -1163,14 +1185,10 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     raise self.outcome
                 return self.outcome
 
-        requests_and_expected = []
-        with patch.object(
-            webapp.requests,
-            "post",
-            side_effect=webapp.requests.ConnectionError(SENSITIVE_ERROR),
-        ):
-            requests_and_expected.append(
-                await self.client.post(
+        async def post_gpt(outcome):
+            kwargs = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
+            with patch.object(webapp.requests, "post", **kwargs):
+                return await self.client.post(
                     "/api/chat/gpt-image-2",
                     json={
                         "prompt": "hello",
@@ -1179,14 +1197,14 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "chat_model": "gpt-test",
                     },
                 )
-            )
-        with patch.object(
-            webapp,
-            "create_requests_session",
-            return_value=BananaSession(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
-        ):
-            requests_and_expected.append(
-                await self.client.post(
+
+        async def post_banana(outcome):
+            with patch.object(
+                webapp,
+                "create_requests_session",
+                return_value=BananaSession(outcome),
+            ):
+                return await self.client.post(
                     "/api/chat/banana",
                     json={
                         "prompt": "hello",
@@ -1195,54 +1213,58 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "model_type": "gemini-test",
                     },
                 )
-            )
-        with patch.object(
-            webapp.requests,
-            "post",
-            return_value=FakeJsonResponse(
-                {"error": {"message": SENSITIVE_ERROR}},
-                status_code=401,
-            ),
-        ):
-            requests_and_expected.append(
-                await self.client.post(
-                    "/api/chat/gpt-image-2",
-                    json={
-                        "prompt": "hello",
-                        "api_key": EXACT_SECRET,
-                        "base_url": "https://example.com/v1",
-                        "chat_model": "gpt-test",
-                    },
-                )
-            )
-        with patch.object(
-            webapp,
-            "create_requests_session",
-            return_value=BananaSession(
-                FakeJsonResponse(
-                    {"error": {"message": SENSITIVE_ERROR}},
-                    status_code=401,
-                )
-            ),
-        ):
-            requests_and_expected.append(
-                await self.client.post(
-                    "/api/chat/banana",
-                    json={
-                        "prompt": "hello",
-                        "api_key": EXACT_SECRET,
-                        "api_base_url": "https://example.com",
-                        "model_type": "gemini-test",
-                    },
-                )
-            )
 
-        self.assertEqual([502, 502, 401, 401], [item.status_code for item in requests_and_expected])
-        for response in requests_and_expected:
-            text = assert_client_payload_is_sanitized(self, response.json())
-            self.assertTrue("聊天" in text or "ConnectionError" in text)
+        cases = [
+            (
+                await post_gpt(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
+                502,
+                "E_UPSTREAM_NETWORK",
+            ),
+            (
+                await post_banana(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
+                502,
+                "E_UPSTREAM_NETWORK",
+            ),
+            (
+                await post_gpt(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=401)
+                ),
+                401,
+                "E_UPSTREAM_AUTH",
+            ),
+            (
+                await post_banana(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=403)
+                ),
+                403,
+                "E_UPSTREAM_AUTH",
+            ),
+            (
+                await post_gpt(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=429)
+                ),
+                429,
+                "E_UPSTREAM_RATE_LIMIT",
+            ),
+            (
+                await post_gpt(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=422)
+                ),
+                400,
+                "E_UPSTREAM_REQUEST",
+            ),
+            (
+                await post_banana(webapp.requests.Timeout(SENSITIVE_ERROR)),
+                504,
+                "E_UPSTREAM_TIMEOUT",
+            ),
+        ]
 
-    async def test_generation_captured_errors_are_sanitized_for_both_engines(self) -> None:
+        for response, status_code, error_code in cases:
+            with self.subTest(status_code=status_code, error_code=error_code):
+                assert_stable_http_error(self, response, status_code, error_code)
+
+    async def test_generation_captured_errors_use_stable_codes_for_both_engines(self) -> None:
         class BananaSession:
             def __init__(self, outcome):
                 self.outcome = outcome
@@ -1261,95 +1283,128 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             def json(self):
                 raise RuntimeError(SENSITIVE_ERROR)
 
-        class HtmlErrorResponse:
-            ok = False
-            status_code = 500
-            content = f"<html><title>{SENSITIVE_ERROR}</title></html>".encode("utf-8")
-            text = content.decode("utf-8")
+        async def post_gpt(outcome):
+            kwargs = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
+            with patch.object(webapp.requests, "post", **kwargs), patch.object(
+                webapp.asyncio,
+                "sleep",
+                new_callable=AsyncMock,
+            ):
+                return await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={
+                        "prompt": "square",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "model": "gpt-image-2",
+                    },
+                )
 
-            def json(self):
-                raise ValueError("not json")
-
-        responses = []
-        with patch.object(
-            webapp.requests,
-            "post",
-            side_effect=webapp.requests.ConnectionError(SENSITIVE_ERROR),
-        ):
-            responses.append(
-                await self.client.post(
-                    "/api/generate/gpt-image-2",
-                    data={
-                        "prompt": "square",
-                        "api_key": EXACT_SECRET,
-                        "base_url": "https://example.com/v1",
-                        "model": "gpt-image-2",
-                    },
-                )
-            )
-        with patch.object(
-            webapp.requests,
-            "post",
-            return_value=FakeJsonResponse(
-                {"error": {"message": SENSITIVE_ERROR}},
-                status_code=400,
-            ),
-        ):
-            responses.append(
-                await self.client.post(
-                    "/api/generate/gpt-image-2",
-                    data={
-                        "prompt": "square",
-                        "api_key": EXACT_SECRET,
-                        "base_url": "https://example.com/v1",
-                        "model": "gpt-image-2",
-                    },
-                )
-            )
-        with patch.object(webapp.requests, "post", return_value=HtmlErrorResponse()):
-            responses.append(
-                await self.client.post(
-                    "/api/generate/gpt-image-2",
-                    data={
-                        "prompt": "square",
-                        "api_key": EXACT_SECRET,
-                        "base_url": "https://example.com/v1",
-                        "model": "gpt-image-2",
-                    },
-                )
-            )
-        banana_outcomes = [
-            webapp.requests.ConnectionError(SENSITIVE_ERROR),
-            InvalidJsonResponse(),
-            FakeJsonResponse(
-                {"error": {"message": SENSITIVE_ERROR}},
-                status_code=401,
-            ),
-        ]
-        for outcome in banana_outcomes:
+        async def post_banana(outcome):
             with patch.object(
                 webapp,
                 "create_requests_session",
                 return_value=BananaSession(outcome),
             ):
-                responses.append(
-                    await self.client.post(
-                        "/api/generate/banana",
-                        data={
-                            "prompt": "square",
-                            "api_key": EXACT_SECRET,
-                            "api_base_url": "https://example.com",
-                            "model_type": "gemini-test",
-                            "batch_size": "1",
-                        },
-                    )
+                return await self.client.post(
+                    "/api/generate/banana",
+                    data={
+                        "prompt": "square",
+                        "api_key": EXACT_SECRET,
+                        "api_base_url": "https://example.com",
+                        "model_type": "gemini-test",
+                        "batch_size": "1",
+                    },
                 )
 
-        for response in responses:
-            text = assert_client_payload_is_sanitized(self, response.json())
-            self.assertTrue("GPT Image 2" in text or "批" in text)
+        gpt_cases = [
+            (
+                await post_gpt(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
+                502,
+                "E_UPSTREAM_NETWORK",
+            ),
+            (
+                await post_gpt(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=400)
+                ),
+                400,
+                "E_UPSTREAM_REQUEST",
+            ),
+            (
+                await post_gpt(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=500)
+                ),
+                502,
+                "E_UPSTREAM_RESPONSE",
+            ),
+            (
+                await post_gpt(InvalidJsonResponse()),
+                502,
+                "E_UPSTREAM_RESPONSE",
+            ),
+        ]
+        for response, status_code, error_code in gpt_cases:
+            with self.subTest(engine="gpt", error_code=error_code):
+                assert_stable_http_error(self, response, status_code, error_code)
 
-    async def test_diagnostics_and_open_outputs_captured_errors_are_sanitized(self) -> None:
+        banana_cases = [
+            (
+                await post_banana(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
+                "E_UPSTREAM_NETWORK",
+            ),
+            (
+                await post_banana(InvalidJsonResponse()),
+                "E_UPSTREAM_RESPONSE",
+            ),
+            (
+                await post_banana(
+                    FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=401)
+                ),
+                "E_UPSTREAM_AUTH",
+            ),
+        ]
+        for response, error_code in banana_cases:
+            with self.subTest(engine="banana", error_code=error_code):
+                self.assertEqual(200, response.status_code)
+                payload = response.json()
+                self.assertEqual(error_code, payload.get("error_code"))
+                self.assertEqual(
+                    [f"第 1 批：{CLIENT_ERROR_DETAILS[error_code]}"],
+                    payload.get("messages"),
+                )
+                assert_client_payload_is_sanitized(self, payload)
+
+    async def test_gpt_unknown_parameter_retry_keeps_raw_message_internal(self) -> None:
+        calls = []
+
+        def post(_url, **kwargs):
+            calls.append(dict(kwargs.get("json") or kwargs.get("data") or {}))
+            if len(calls) == 1:
+                return FakeJsonResponse(
+                    {"error": {"message": f"Unknown parameter: seed {SENSITIVE_ERROR}"}},
+                    status_code=400,
+                )
+            return FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]})
+
+        with patch.object(webapp.requests, "post", side_effect=post):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "square",
+                    "api_key": EXACT_SECRET,
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "seed": "7",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, len(calls))
+        self.assertEqual(7, calls[0].get("seed"))
+        self.assertNotIn("seed", calls[1])
+        assert_client_payload_is_sanitized(self, response.json())
+
+    async def test_diagnostics_and_open_outputs_use_stable_codes(self) -> None:
         with patch.object(
             webapp.requests,
             "post",
@@ -1373,9 +1428,37 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             open_outputs = await self.client.post("/api/open-outputs")
 
         self.assertEqual(200, diagnostic.status_code)
-        self.assertEqual(500, open_outputs.status_code)
-        assert_client_payload_is_sanitized(self, diagnostic.json())
-        assert_client_payload_is_sanitized(self, open_outputs.json())
+        diagnostic_payload = diagnostic.json()
+        result = diagnostic_payload["results"][0]
+        self.assertEqual("E_UPSTREAM_NETWORK", result.get("error_code"))
+        self.assertEqual(CLIENT_ERROR_DETAILS["E_UPSTREAM_NETWORK"], result.get("error"))
+        self.assertEqual("https://example.com/v1/images/generations", result.get("endpoint"))
+        self.assertIsInstance(result.get("latency_ms"), int)
+        assert_client_payload_is_sanitized(self, diagnostic_payload)
+        assert_stable_http_error(
+            self,
+            open_outputs,
+            500,
+            "E_LOCAL_OPEN_OUTPUTS",
+        )
+
+    async def test_save_error_uses_fixed_message_and_code(self) -> None:
+        image = {
+            "src": f"data:image/png;base64,{PNG_1X1}",
+            "mime_type": "image/png",
+        }
+        with patch.object(
+            Path,
+            "write_bytes",
+            side_effect=OSError(SENSITIVE_ERROR),
+        ):
+            saved_count = webapp.save_generated_images("gpt-image-2", [image])
+
+        self.assertEqual(0, saved_count)
+        self.assertEqual("failed", image.get("save_status"))
+        self.assertEqual(CLIENT_ERROR_DETAILS["E_LOCAL_SAVE_OUTPUT"], image.get("save_error"))
+        self.assertEqual("E_LOCAL_SAVE_OUTPUT", image.get("save_error_code"))
+        assert_client_payload_is_sanitized(self, image)
 
 
 class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
