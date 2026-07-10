@@ -1846,7 +1846,12 @@ async def extract_banana_images_async(
     pending_urls = parsed.pop("_pending_urls", [])
     for image_url in pending_urls:
         JOB_REGISTRY.raise_if_canceled(job_id)
-        downloaded = await UPSTREAM_EXECUTOR.run("download", download_remote_image, image_url)
+        downloaded = await UPSTREAM_EXECUTOR.run(
+            "download",
+            download_remote_image,
+            image_url,
+            before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
+        )
         JOB_REGISTRY.raise_if_canceled(job_id)
         if downloaded:
             parsed["images"].append(downloaded)
@@ -2546,6 +2551,7 @@ async def build_gpt_images_from_response_async(
                 "download",
                 download_remote_image,
                 image_value,
+                before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
             )
             JOB_REGISTRY.raise_if_canceled(job_id)
             if downloaded:
@@ -2832,6 +2838,7 @@ def create_app() -> FastAPI:
                 "chat",
                 requests.post,
                 api_url,
+                before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
                 headers=gpt_headers(
                     api_key,
                     accept="application/json",
@@ -2902,6 +2909,7 @@ def create_app() -> FastAPI:
                 "chat",
                 session.post,
                 api_url,
+                before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
                 json={
                     "contents": build_banana_chat_contents(prompt, payload.get("messages")),
                     "generationConfig": {
@@ -3000,6 +3008,7 @@ def create_app() -> FastAPI:
                     "generation",
                     session.post,
                     api_url,
+                    before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                     headers=banana_headers(api_key),
                     timeout=timeout,
@@ -3245,6 +3254,7 @@ def create_app() -> FastAPI:
                         "generation",
                         requests.post,
                         api_url,
+                        before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
                         headers=headers,
                         timeout=timeout_value,
                         **current_request_kwargs,

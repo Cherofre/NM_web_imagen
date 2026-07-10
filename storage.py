@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import threading
+import time
 from typing import Any, Callable, TypeVar
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ JsonValue = TypeVar("JsonValue")
 
 _PATH_LOCKS_GUARD = threading.Lock()
 _PATH_LOCKS: dict[Path, threading.RLock] = {}
+_REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.04)
 
 
 def _resolved_path(path: Path | str) -> Path:
@@ -37,6 +39,17 @@ def _read_json_unlocked(path: Path, fallback: JsonValue) -> Any | JsonValue:
         return deepcopy(fallback)
 
 
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    for attempt in range(len(_REPLACE_RETRY_DELAYS) + 1):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt >= len(_REPLACE_RETRY_DELAYS):
+                raise
+            time.sleep(_REPLACE_RETRY_DELAYS[attempt])
+
+
 def read_json(path: Path | str, fallback: JsonValue) -> Any | JsonValue:
     resolved = _resolved_path(path)
     with _lock_for(resolved):
@@ -55,7 +68,7 @@ def _atomic_write_json_unlocked(path: Path, payload: Any, *, backup: bool) -> No
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_path, path)
+        _replace_with_retry(temp_path, path)
     finally:
         try:
             temp_path.unlink(missing_ok=True)

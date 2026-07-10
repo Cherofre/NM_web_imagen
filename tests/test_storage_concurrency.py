@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app as webapp
+import storage
 from storage import atomic_write_json, mutate_json, read_json
 
 
@@ -58,6 +59,56 @@ class StorageUnitTests(unittest.TestCase):
         atomic_write_json(target, {"ok": True})
 
         self.assertTrue(target.read_text(encoding="utf-8").endswith("\n"))
+        self.assertEqual([], list(self.root.rglob("*.tmp")))
+
+    def test_atomic_write_retries_transient_permission_error(self) -> None:
+        target = self.root / "state.json"
+        target.write_text('{"value": "old"}\n', encoding="utf-8")
+        original_replace = storage.os.replace
+        replace_calls = 0
+
+        def flaky_replace(source, destination) -> None:
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 1:
+                raise PermissionError(13, "sharing violation")
+            original_replace(source, destination)
+
+        with patch.object(storage.os, "replace", side_effect=flaky_replace):
+            atomic_write_json(target, {"value": "new"})
+
+        self.assertEqual(2, replace_calls)
+        self.assertEqual({"value": "new"}, read_json(target, {}))
+        self.assertEqual([], list(self.root.rglob("*.tmp")))
+
+    def test_atomic_write_does_not_retry_non_permission_error(self) -> None:
+        target = self.root / "state.json"
+        original = '{"value": "old"}\n'
+        target.write_text(original, encoding="utf-8")
+
+        with patch.object(storage.os, "replace", side_effect=OSError("disk full")) as replace:
+            with self.assertRaisesRegex(OSError, "disk full"):
+                atomic_write_json(target, {"value": "new"})
+
+        self.assertEqual(1, replace.call_count)
+        self.assertEqual(original, target.read_text(encoding="utf-8"))
+        self.assertEqual([], list(self.root.rglob("*.tmp")))
+
+    def test_atomic_write_stops_after_finite_permission_retries(self) -> None:
+        target = self.root / "state.json"
+        original = '{"value": "old"}\n'
+        target.write_text(original, encoding="utf-8")
+
+        with patch.object(
+            storage.os,
+            "replace",
+            side_effect=PermissionError(13, "sharing violation"),
+        ) as replace:
+            with self.assertRaisesRegex(PermissionError, "sharing violation"):
+                atomic_write_json(target, {"value": "new"})
+
+        self.assertEqual(4, replace.call_count)
+        self.assertEqual(original, target.read_text(encoding="utf-8"))
         self.assertEqual([], list(self.root.rglob("*.tmp")))
 
     def test_bad_json_returns_independent_fallback(self) -> None:

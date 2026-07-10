@@ -47,6 +47,85 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic() - started, 0.1)
         await task
 
+    async def test_before_start_rechecks_cancellation_after_waiting_for_permit(self) -> None:
+        executor = UpstreamExecutor(generation_limit=1, chat_limit=1, download_limit=1)
+        registry = JobRegistry(ttl_seconds=60)
+        job_id = "queued-job"
+        registry.register(job_id)
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        upstream_calls = 0
+
+        def first() -> None:
+            first_entered.set()
+            release_first.wait(2)
+
+        def second(**_kwargs) -> None:
+            nonlocal upstream_calls
+            upstream_calls += 1
+
+        first_task = asyncio.create_task(executor.run("generation", first))
+        self.assertTrue(await asyncio.to_thread(first_entered.wait, 1))
+        registry.raise_if_canceled(job_id)
+        second_task = asyncio.create_task(
+            executor.run(
+                "generation",
+                second,
+                before_start=lambda: registry.raise_if_canceled(job_id),
+            )
+        )
+        await asyncio.sleep(0.03)
+
+        registry.cancel(job_id)
+        release_first.set()
+        await first_task
+
+        with self.assertRaises(JobCancelled):
+            await second_task
+        self.assertEqual(0, upstream_calls)
+
+    async def test_cancelled_awaiter_keeps_permit_until_blocking_call_finishes(self) -> None:
+        executor = UpstreamExecutor(generation_limit=1, chat_limit=1, download_limit=1)
+        first_entered = threading.Event()
+        first_finished = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+        active = 0
+        max_active = 0
+        active_lock = threading.Lock()
+
+        def blocking(label: str) -> None:
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                if label == "first":
+                    first_entered.set()
+                    release_first.wait(2)
+                    first_finished.set()
+                else:
+                    second_entered.set()
+            finally:
+                with active_lock:
+                    active -= 1
+
+        first_task = asyncio.create_task(executor.run("chat", blocking, "first"))
+        self.assertTrue(await asyncio.to_thread(first_entered.wait, 1))
+        first_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first_task
+
+        second_task = asyncio.create_task(executor.run("chat", blocking, "second"))
+        await asyncio.sleep(0.05)
+        second_started_early = second_entered.is_set()
+        release_first.set()
+        self.assertTrue(await asyncio.to_thread(first_finished.wait, 1))
+        await second_task
+
+        self.assertFalse(second_started_early)
+        self.assertEqual(1, max_active)
+
     async def _assert_same_kind_limit(self, executor: UpstreamExecutor, kind: str) -> None:
         first_entered = threading.Event()
         release_first = threading.Event()
@@ -293,15 +372,18 @@ class RecordingExecutor:
     def __init__(self):
         self.calls = []
 
-    async def run(self, kind, function, *args, **kwargs):
+    async def run(self, kind, function, *args, before_start=None, **kwargs):
         self.calls.append(
             {
                 "kind": kind,
                 "function": function,
                 "args": args,
                 "kwargs": dict(kwargs),
+                "before_start": before_start,
             }
         )
+        if before_start is not None:
+            before_start()
         return function(*args, **kwargs)
 
 
@@ -477,6 +559,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "api_key": "sk-test",
                         "base_url": "https://example.com/v1",
                         "chat_model": "gpt-test",
+                        "job_id": "gpt-chat-job",
                     },
                 ),
                 await self.client.post(
@@ -486,6 +569,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "api_key": "banana-test-key",
                         "api_base_url": "https://example.com",
                         "model_type": "gemini-test",
+                        "job_id": "banana-chat-job",
                     },
                 ),
                 await self.client.post(
@@ -495,6 +579,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "api_key": "sk-test",
                         "base_url": "https://example.com/v1",
                         "model": "gpt-image-2",
+                        "job_id": "gpt-generation-job",
                     },
                 ),
                 await self.client.post(
@@ -505,6 +590,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "api_base_url": "https://example.com",
                         "model_type": "gemini-test",
                         "batch_size": "1",
+                        "job_id": "banana-generation-job",
                     },
                 ),
             ]
@@ -513,6 +599,10 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ["generation", "chat", "generation", "chat", "chat", "chat", "generation", "generation"],
             [call["kind"] for call in executor.calls],
+        )
+        self.assertEqual(
+            [False, False, False, False, True, True, True, True],
+            [callable(call["before_start"]) for call in executor.calls],
         )
 
     async def test_gpt_request_headers_match_each_endpoint_contract(self) -> None:
@@ -548,6 +638,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "api_key": "sk-test",
                     "base_url": "https://example.com/v1",
                     "model": "gpt-image-2",
+                    "job_id": "gpt-remote-job",
                 },
             )
             edit = await self.client.post(
@@ -651,6 +742,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "api_base_url": "https://example.com",
                     "model_type": "gemini-test",
                     "batch_size": "1",
+                    "job_id": "banana-remote-job",
                 },
             )
 
@@ -660,6 +752,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ["generation", "download", "generation", "download"],
             [call["kind"] for call in executor.calls],
         )
+        self.assertTrue(all(callable(call["before_start"]) for call in executor.calls))
 
     async def test_zero_infinite_and_oversized_timeouts_remain_finite(self) -> None:
         executor = RecordingExecutor()

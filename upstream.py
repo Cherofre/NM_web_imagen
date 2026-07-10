@@ -145,16 +145,43 @@ class UpstreamExecutor:
                 self._loop_semaphores[loop] = semaphores
             return semaphores[kind]
 
+    @staticmethod
+    def _consume_background_result(task: asyncio.Task[Any]) -> None:
+        try:
+            task.result()
+        except (asyncio.CancelledError, Exception):
+            pass
+
     async def run(
         self,
         kind: RequestKind,
         function: Callable[..., T],
         *args: Any,
+        before_start: Callable[[], None] | None = None,
         **kwargs: Any,
     ) -> T:
         semaphore = self._semaphore_for_current_loop(kind)
-        async with semaphore:
-            return await asyncio.to_thread(function, *args, **kwargs)
+        permit_acquired = False
+
+        async def worker() -> T:
+            nonlocal permit_acquired
+            await semaphore.acquire()
+            permit_acquired = True
+            try:
+                if before_start is not None:
+                    before_start()
+                return await asyncio.to_thread(function, *args, **kwargs)
+            finally:
+                semaphore.release()
+
+        worker_task = asyncio.create_task(worker())
+        try:
+            return await asyncio.shield(worker_task)
+        except asyncio.CancelledError:
+            if not permit_acquired:
+                worker_task.cancel()
+            worker_task.add_done_callback(self._consume_background_result)
+            raise
 
 
 def bounded_timeout(value: Any, *, default: int, maximum: int) -> int:
