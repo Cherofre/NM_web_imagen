@@ -1,15 +1,18 @@
 # Next Actions
 
 ## Now
-- [x] v1.0.5 result/history UI polish is merged to `main`, and `VERSION` is bumped to `1.0.5`.
-- [x] Initial subagent compatibility review covered other computers / colleague machines / browser differences, packaging/G: sync, stale backend/cache reuse, and history/output deletion safety.
-- [x] Fixed the release-blocking compatibility findings: startup reuse now checks backend version, v1.0.4 hashed Studio assets are retained as fallbacks, legacy output deletion is scoped to exact top-level output image files, narrow result/history controls are more responsive, Esc closes the top preview before the history window, and Banana history displays requested `image_size/aspect_ratio`.
-- [x] Final post-fix subagent review found a nested-output forged deletion path; it is fixed and covered by `test_legacy_output_delete_rejects_matching_id_for_nested_outputs_file`.
-- [x] `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00; local and G: packages share SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`, include current assets plus v1.0.4 fallback assets, and exclude `config.local.json` / `outputs/`.
-- [x] `main` and tag `v1.0.5` are pushed to `origin`, and GitHub Release `v1.0.5` is published with `NM_web_imagen-v1.0.5.zip`.
-- [ ] Next version planning can start from the Later list below.
+- [x] User selected one `codex/p1-hardening-v1.0.6` branch with four staged implementation slices.
+- [x] Created an isolated worktree and verified the v1.0.5 baseline: backend 44/44, frontend 61/61, TypeScript, and size rules pass.
+- [x] Wrote the approved architecture and acceptance design in `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`.
+- [ ] User reviews and approves the written design spec.
+- [ ] Invoke `writing-plans` and create the task-by-task TDD implementation plan.
+- [ ] Implement only after the plan is approved, explaining intent and possible impact for every stage.
 
 ## Handoff Notes
+- Start here: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`, branch `codex/p1-hardening-v1.0.6`, design spec `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`.
+- Do not redo: P1 audit, approach selection, isolated worktree setup, and baseline test verification are complete.
+- Verify next: user approval of the written design, then create the task-by-task implementation plan.
+- Do not claim: no P1 implementation or release candidate exists yet.
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
 - Synced copy on this machine: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Current v1.0.5 packages: local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip`, share `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.

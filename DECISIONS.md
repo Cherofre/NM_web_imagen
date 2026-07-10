@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-07-10: Implement all confirmed P1 fixes on one isolated branch, `codex/p1-hardening-v1.0.6`, using four staged implementation slices and TDD. Preserve the FastAPI + React/Vite architecture, old config/history/session schemas, `/classic`, and offline Windows packaging.
+- 2026-07-10: v1.0.6 will disable unsupported or misleading behavior instead of inventing provider contracts: chat reference images are disabled until true multimodal payloads exist; GPT edit mode and reference strength are hidden until an upstream adapter uses them.
+- 2026-07-10: v1.0.6 uses strict raster validation, controlled outputs routing, production same-origin access, bounded threaded `requests`, in-memory job cancellation state, file locks/atomic JSON/revision conflict handling, and a release whitelist. SQLite, remote/LAN mode, and full multimodal chat remain separate future projects.
 - 2026-06-26: v1.0.5 is a result/history UI polish release. Before merge/tag/publish, run compatibility review for colleague PCs, G: clean package behavior, stale backend/cache reuse, Windows PowerShell 5.1 launchers, Firefox/Chromium layout behavior, and history/output deletion safety.
 - 2026-06-26: v1.0.5 startup reuse must validate `/api/health.version` against local `VERSION` before reusing an existing service, and Studio builds must keep the previous v1.0.4 hashed JS/CSS as fallback files. Legacy output deletion must be scoped to the exact generated legacy file id / `legacy_path` pair instead of scanning every file with the same stem.
 - 2026-05-26: Queue jobs own a live `sessionId/turnId` reference only while that target exists. Running/queued jobs block deleting or clearing their session, refresh-interrupted jobs reconcile their matching turn to an error state, and queue actions guard missing targets instead of silently switching to deleted sessions.

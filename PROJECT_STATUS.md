@@ -1,14 +1,18 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-06-26 17:37 +08:00
-- Phase: v1.0.5 released
-- Branch: main
-- Goal: Ship the v1.0.5 result-action and history-browser polish while keeping Windows one-click packaging, G: clean sync, older-machine startup reuse, and cross-browser teammate usage reliable.
-- Current Focus: v1.0.5 UI/history work is merged to `main`, tagged as `v1.0.5`, pushed to `origin`, and published as a GitHub Release with `NM_web_imagen-v1.0.5.zip`. Release hardening adds startup backend-version validation, v1.0.4 hashed asset fallbacks, safer top-level legacy output deletion, narrow-screen toolbar/list fixes, Banana requested-size display, and top-layer Esc behavior. Final post-fix subagent review found one forged nested-output deletion path, which is fixed and covered by regression test. `release_one_click.ps1` passed on `main` on 2026-06-26 17:33 +08:00. The release produced local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip` and G: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, both SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. GitHub Release: `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.5`.
+- Last Updated: 2026-07-10 +08:00
+- Phase: v1.0.6 P1 hardening written spec awaiting user review
+- Superpowers Phase: brainstorming written-spec review gate
+- Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
+- Branch: `codex/p1-hardening-v1.0.6`
+- Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
+- Current Focus: The user selected the single-branch/four-stage approach. An isolated worktree was created at `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`. Baseline verification passed: backend 44/44, frontend 61/61, TypeScript, and size rules. The written design is ready for the required review gate. No application code has been changed yet.
 
 ## Resume Here
-- Start with: `git status --short --branch` on `main`.
+- Start with: review `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md` on branch `codex/p1-hardening-v1.0.6`.
+- Superpowers phase: commit the reviewed design/ledger, wait for written-spec approval, then invoke `writing-plans`.
+- Do not implement before the written spec review gate is approved.
 - Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
 - Sync target after local commits: this machine uses `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; scripts also allow the older `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` mount if that anchor exists.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
