@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -56,6 +57,7 @@ def invoke_script_function(
     invocation: str,
     *,
     env: dict[str, str] | None = None,
+    support_functions: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     command = r"""
 $ErrorActionPreference = 'Stop'
@@ -69,20 +71,23 @@ $Ast = [System.Management.Automation.Language.Parser]::ParseFile(
 if ($Errors.Count -gt 0) {
   throw ($Errors | ForEach-Object { $_.Message } | Out-String)
 }
-$Function = $Ast.Find({
-  param($Node)
-  $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-    $Node.Name -eq $env:CODEX_FUNCTION_NAME
-}, $true)
-if ($null -eq $Function) {
-  throw "Function was not found: $env:CODEX_FUNCTION_NAME"
+$FunctionNames = $env:CODEX_FUNCTION_NAMES.Split("|")
+foreach ($FunctionName in $FunctionNames) {
+  $Function = $Ast.Find({
+    param($Node)
+    $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $Node.Name -eq $FunctionName
+  }, $true)
+  if ($null -eq $Function) {
+    throw "Function was not found: $FunctionName"
+  }
+  Invoke-Expression $Function.Extent.Text
 }
-Invoke-Expression $Function.Extent.Text
 Invoke-Expression $env:CODEX_FUNCTION_INVOCATION
 """
     process_env = {
         "CODEX_SCRIPT_PATH": str(script_path),
-        "CODEX_FUNCTION_NAME": function_name,
+        "CODEX_FUNCTION_NAMES": "|".join((*support_functions, function_name)),
         "CODEX_FUNCTION_INVOCATION": invocation,
     }
     if env:
@@ -148,20 +153,77 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertTrue(payload["instance_id"])
         self.assertEqual(webapp.compute_instance_id(), payload["instance_id"])
 
-    def test_start_script_instance_id_matches_python(self) -> None:
+    def test_start_script_instance_id_matches_python_for_unicode_and_junctions(self) -> None:
         self.assertTrue(hasattr(webapp, "compute_instance_id"))
         with tempfile.TemporaryDirectory(prefix="脚本 身份 ") as folder:
-            root = Path(folder) / "中文 工具"
-            root.mkdir()
-            result = invoke_script_function(
-                ROOT / "start_web.ps1",
-                "Get-InstanceId",
-                "Get-InstanceId -RootPath $env:CODEX_INSTANCE_ROOT",
-                env={"CODEX_INSTANCE_ROOT": str(root)},
+            fixture_root = Path(folder)
+            ordinary_root = fixture_root / "中文 工具"
+            unicode_root = fixture_root / "Straße Σς"
+            junction_target = fixture_root / "真实 目标"
+            junction_root = fixture_root / "junction alias"
+            for path in (ordinary_root, unicode_root, junction_target):
+                path.mkdir()
+
+            junction_result = run_powershell(
+                [
+                    "-Command",
+                    "New-Item -ItemType Junction -Path $env:CODEX_JUNCTION "
+                    "-Target $env:CODEX_TARGET | Out-Null",
+                ],
+                env={
+                    "CODEX_JUNCTION": str(junction_root),
+                    "CODEX_TARGET": str(junction_target),
+                },
+            )
+            self.assertEqual(
+                0,
+                junction_result.returncode,
+                junction_result.stdout + junction_result.stderr,
             )
 
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(webapp.compute_instance_id(root), result.stdout.strip().splitlines()[-1])
+            try:
+                for label, root in (
+                    ("ordinary", ordinary_root),
+                    ("unicode-casefold", unicode_root),
+                    ("junction", junction_root),
+                ):
+                    with self.subTest(label=label):
+                        result = invoke_script_function(
+                            ROOT / "start_web.ps1",
+                            "Get-InstanceId",
+                            "$RuntimePythonPath=$env:CODEX_PYTHON; "
+                            "Get-InstanceId -RootPath $env:CODEX_INSTANCE_ROOT",
+                            env={
+                                "CODEX_INSTANCE_ROOT": str(root),
+                                "CODEX_PYTHON": sys.executable,
+                            },
+                            support_functions=("Invoke-SelectedPython",),
+                        )
+                        self.assertEqual(
+                            0,
+                            result.returncode,
+                            f"{label}: {result.stdout}{result.stderr}",
+                        )
+                        self.assertEqual(
+                            webapp.compute_instance_id(root),
+                            result.stdout.strip().splitlines()[-1],
+                            label,
+                        )
+            finally:
+                cleanup_result = run_powershell(
+                    [
+                        "-Command",
+                        "if (Test-Path -LiteralPath $env:CODEX_JUNCTION) { "
+                        "[System.IO.Directory]::Delete($env:CODEX_JUNCTION) }",
+                    ],
+                    env={"CODEX_JUNCTION": str(junction_root)},
+                )
+                self.assertEqual(
+                    0,
+                    cleanup_result.returncode,
+                    cleanup_result.stdout + cleanup_result.stderr,
+                )
+                self.assertTrue(junction_target.exists())
 
     def test_runtime_fingerprint_invalidates_for_every_runtime_input(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -230,6 +292,22 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             re.compile(r"Remove-Item\s+-LiteralPath\s+\$PortablePythonZip", re.IGNORECASE),
         )
 
+    def test_start_script_checks_runtime_fingerprint_before_backend_reuse(self) -> None:
+        script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
+
+        fingerprint_index = script.index(
+            "$ExpectedRuntimeFingerprint = Get-RuntimeFingerprint"
+        )
+        reuse_probe_index = script.index("if (Test-LocalServer)")
+        self.assertLess(fingerprint_index, reuse_probe_index)
+        self.assertRegex(
+            script,
+            re.compile(
+                r"\$RuntimeFingerprintMatches(?:(?!\n\s*exit 0).)*Test-BackendVersion",
+                re.DOTALL,
+            ),
+        )
+
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
@@ -248,10 +326,13 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
 
         self.assertIn("function Test-StudioAssets", script)
+        self.assertIn("$LocalServerRunning = Test-LocalServer", script)
         self.assertRegex(
             script,
             re.compile(
-                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*Test-StudioAssets",
+                r"if\s*\(\$RuntimeFingerprintMatches -and "
+                r"\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and "
+                r"\(Test-RequiredApiRoutes\)\)",
                 re.DOTALL,
             ),
         )
@@ -263,10 +344,13 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn("function Test-RequiredApiRoutes", script)
         self.assertIn("$DiagnosticsUrl = \"$Url/api/diagnostics\"", script)
         self.assertIn('"checks" = @("chat")', script)
+        self.assertIn("$LocalServerRunning = Test-LocalServer", script)
         self.assertRegex(
             script,
             re.compile(
-                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*if\s*\(\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and \(Test-RequiredApiRoutes\)\)",
+                r"if\s*\(\$RuntimeFingerprintMatches -and "
+                r"\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and "
+                r"\(Test-RequiredApiRoutes\)\)",
                 re.DOTALL,
             ),
         )
@@ -277,10 +361,14 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn("function Test-BackendVersion", script)
         self.assertIn("$HealthPayload = $Response.Content | ConvertFrom-Json", script)
         self.assertIn("$HealthPayload.version -eq $AppVersion", script)
+        self.assertIn("$HealthPayload.instance_id -eq $InstanceId", script)
+        self.assertIn("$LocalServerRunning = Test-LocalServer", script)
         self.assertRegex(
             script,
             re.compile(
-                r"if\s*\(Test-LocalServer\)\s*\{(?:(?!\n\}).)*if\s*\(\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and \(Test-RequiredApiRoutes\)\)",
+                r"if\s*\(\$RuntimeFingerprintMatches -and "
+                r"\(Test-BackendVersion\) -and \(Test-StudioAssets\) -and "
+                r"\(Test-RequiredApiRoutes\)\)",
                 re.DOTALL,
             ),
         )

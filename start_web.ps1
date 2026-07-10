@@ -49,20 +49,30 @@ function Write-Section {
 }
 
 function Get-InstanceId {
-  param([string]$RootPath = $ScriptDir)
+  param(
+    [string]$RootPath = $ScriptDir,
+    [hashtable]$Python = $null
+  )
 
-  $ResolvedRoot = (Get-Item -LiteralPath $RootPath).FullName
-  $NormalizedRoot = $ResolvedRoot.Replace("/", "\").TrimEnd("\", "/").ToLowerInvariant()
-  $Sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $Hash = $Sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($NormalizedRoot))
-    return ([BitConverter]::ToString($Hash)).Replace("-", "").ToLowerInvariant().Substring(0, 20)
-  } finally {
-    $Sha.Dispose()
+  if ($null -eq $Python) {
+    if ([string]::IsNullOrWhiteSpace($RuntimePythonPath)) {
+      throw "Portable Python is required to compute the backend instance ID."
+    }
+    $Python = @{ Command = $RuntimePythonPath; Args = @() }
   }
-}
 
-$InstanceId = Get-InstanceId -RootPath $ScriptDir
+  $Code = 'import hashlib, pathlib, sys; normalized = str(pathlib.Path(sys.argv[1]).resolve()).replace(chr(47), chr(92)).rstrip(chr(92)).casefold(); print(hashlib.sha256(normalized.encode()).hexdigest()[:20])'
+  $Output = @(Invoke-SelectedPython -Python $Python -Arguments @("-c", $Code, $RootPath) 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to compute the backend instance ID with portable Python: $($Output -join [Environment]::NewLine)"
+  }
+
+  $Value = ([string]($Output | Select-Object -Last 1)).Trim()
+  if ($Value -notmatch "^[0-9a-f]{20}$") {
+    throw "Portable Python returned an invalid backend instance ID: $Value"
+  }
+  return $Value
+}
 
 function Test-LocalServer {
   try {
@@ -481,19 +491,22 @@ if (-not (Test-Path -LiteralPath $RequirementsPath)) {
   throw "requirements.txt was not found. Dependencies cannot be checked."
 }
 
-if (-not $PrepareOnly) {
-  if (Test-LocalServer) {
-    if ((Test-BackendVersion) -and (Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
-      Write-Host "Backend service is already running. Opening:"
-      Write-Host $OpenUrl
-      if (-not $NoBrowser) {
-        Start-Process $OpenUrl
-      }
-      exit 0
-    }
+$ExpectedRuntimeFingerprint = Get-RuntimeFingerprint
+$StoredRuntimeFingerprint = ""
+if (Test-Path -LiteralPath $RuntimeFingerprintPath) {
+  $StoredRuntimeFingerprint = (Get-Content -LiteralPath $RuntimeFingerprintPath -Encoding ASCII -TotalCount 1).Trim()
+}
+$RuntimeFingerprintMatches = (
+  $StoredRuntimeFingerprint -eq $ExpectedRuntimeFingerprint -and
+  (Test-Path -LiteralPath $RuntimePythonPath -PathType Leaf)
+)
 
-    Write-Host "Backend service responded, but current version, Studio assets, or API routes did not match."
-    Write-Host "Restarting current web tool service..."
+$LocalServerRunning = $false
+if (-not $PrepareOnly) {
+  $LocalServerRunning = Test-LocalServer
+  if ($LocalServerRunning -and -not $RuntimeFingerprintMatches) {
+    Write-Host "Backend service is running, but bundled runtime inputs changed."
+    Write-Host "Restarting current web tool service before rebuilding the portable runtime..."
     $Stopped = Stop-ExistingWebToolProcesses
     if ($Stopped -eq 0) {
       throw "Could not restart the existing backend service. Please run stop_web.bat, then start again."
@@ -502,20 +515,39 @@ if (-not $PrepareOnly) {
     if (Test-LocalServer) {
       throw "Port $Port is still occupied after restart attempt. Please run stop_web.bat, then start again."
     }
+    $LocalServerRunning = $false
   }
 }
 
-$ExpectedRuntimeFingerprint = Get-RuntimeFingerprint
-$StoredRuntimeFingerprint = ""
-if (Test-Path -LiteralPath $RuntimeFingerprintPath) {
-  $StoredRuntimeFingerprint = (Get-Content -LiteralPath $RuntimeFingerprintPath -Encoding ASCII -TotalCount 1).Trim()
-}
-if ($StoredRuntimeFingerprint -ne $ExpectedRuntimeFingerprint) {
+if (-not $RuntimeFingerprintMatches) {
   Write-Host "Bundled runtime inputs changed. Rebuilding portable runtime..."
   Remove-ChildDirectory -Path $RuntimeDir -Name ".runtime"
 }
 
 $Python = Ensure-PortablePython
+$InstanceId = Get-InstanceId -RootPath $ScriptDir -Python $Python
+
+if (-not $PrepareOnly -and $LocalServerRunning) {
+  if ($RuntimeFingerprintMatches -and (Test-BackendVersion) -and (Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
+    Write-Host "Backend service is already running. Opening:"
+    Write-Host $OpenUrl
+    if (-not $NoBrowser) {
+      Start-Process $OpenUrl
+    }
+    exit 0
+  }
+
+  Write-Host "Backend service responded, but current version, instance, Studio assets, or API routes did not match."
+  Write-Host "Restarting current web tool service..."
+  $Stopped = Stop-ExistingWebToolProcesses
+  if ($Stopped -eq 0) {
+    throw "Could not restart the existing backend service. Please run stop_web.bat, then start again."
+  }
+  Start-Sleep -Milliseconds 800
+  if (Test-LocalServer) {
+    throw "Port $Port is still occupied after restart attempt. Please run stop_web.bat, then start again."
+  }
+}
 
 if (-not (Test-PythonDependencies -Python $Python)) {
   Install-PortableDependencies -Python $Python
