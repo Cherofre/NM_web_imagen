@@ -3045,7 +3045,14 @@ def create_app() -> FastAPI:
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
         try:
-            saved_count = save_generated_images("banana", generated_images, job_id=job_id)
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            saved_count = await asyncio.to_thread(
+                save_generated_images,
+                "banana",
+                generated_images,
+                job_id=job_id,
+            )
+            JOB_REGISTRY.raise_if_canceled(job_id)
             meta = {
                 "model_type": model_type,
                 "api_base_url": api_base_url,
@@ -3077,7 +3084,8 @@ def create_app() -> FastAPI:
                 "disable_ssl": disable_ssl,
             }
             JOB_REGISTRY.raise_if_canceled(job_id)
-            history_entry = append_generation_history(
+            history_entry = await asyncio.to_thread(
+                append_generation_history,
                 engine="banana",
                 prompt=prompt,
                 form_state=form_state,
@@ -3357,7 +3365,14 @@ def create_app() -> FastAPI:
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
         try:
-            saved_count = save_generated_images("gpt-image-2", images, job_id=job_id)
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            saved_count = await asyncio.to_thread(
+                save_generated_images,
+                "gpt-image-2",
+                images,
+                job_id=job_id,
+            )
+            JOB_REGISTRY.raise_if_canceled(job_id)
             total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
             meta = {
                 "model": model,
@@ -3399,7 +3414,8 @@ def create_app() -> FastAPI:
                 "infinite_timeout": infinite_timeout,
             }
             JOB_REGISTRY.raise_if_canceled(job_id)
-            history_entry = append_generation_history(
+            history_entry = await asyncio.to_thread(
+                append_generation_history,
                 engine="gpt-image-2",
                 prompt=prompt,
                 negative_prompt=negative_prompt,

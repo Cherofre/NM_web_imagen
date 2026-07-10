@@ -893,6 +893,38 @@ class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def _cancel_while_generation_stage_is_blocked(
+        self,
+        job_id: str,
+        stage_entered: threading.Event,
+        release_stage: threading.Event,
+    ):
+        watchdog_fired = threading.Event()
+
+        def release_from_watchdog() -> None:
+            watchdog_fired.set()
+            release_stage.set()
+
+        async def cancel_after_stage_entered():
+            if not await asyncio.to_thread(stage_entered.wait, 1):
+                raise AssertionError("generation stage did not block")
+            return await self.client.post(f"/api/jobs/{job_id}/cancel")
+
+        cancel_task = asyncio.create_task(cancel_after_stage_entered())
+        generation_task = asyncio.create_task(self._post_gpt_generation(job_id))
+        watchdog = threading.Timer(0.5, release_from_watchdog)
+        watchdog.start()
+        try:
+            cancel = await cancel_task
+            cancel_completed_before_watchdog = not watchdog_fired.is_set()
+            release_stage.set()
+            generation = await generation_task
+        finally:
+            release_stage.set()
+            watchdog.cancel()
+
+        return cancel, generation, cancel_completed_before_watchdog
+
     def _raster_outputs(self):
         if not self.outputs.exists():
             return []
@@ -1316,25 +1348,32 @@ class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
             for key in ("saved_name", "saved_path", "saved_url", "save_status", "save_error"):
                 self.assertNotIn(key, image)
 
-    async def test_cancel_during_endpoint_save_returns_canceled_without_history(self) -> None:
+    async def test_cancel_request_runs_while_endpoint_save_is_in_progress(self) -> None:
         job_id = "job-save-endpoint"
-        original_write_bytes = Path.write_bytes
-        canceled = False
+        save_entered = threading.Event()
+        release_save = threading.Event()
+        original_save = webapp.save_generated_images
 
-        def write_then_cancel(path: Path, data: bytes) -> int:
-            nonlocal canceled
-            written = original_write_bytes(path, data)
-            if not canceled and path.parent.resolve() == self.outputs.resolve():
-                canceled = True
-                self.registry.cancel(job_id)
-            return written
+        def save_then_block(*args, **kwargs):
+            saved_count = original_save(*args, **kwargs)
+            save_entered.set()
+            release_save.wait(2)
+            return saved_count
 
         with (
-            patch.object(webapp.requests, "post", return_value=self._gpt_image_response(2)),
-            patch.object(Path, "write_bytes", new=write_then_cancel),
+            patch.object(webapp.requests, "post", return_value=self._gpt_image_response()),
+            patch.object(webapp, "save_generated_images", side_effect=save_then_block),
         ):
-            response = await self._post_gpt_generation(job_id, n=2)
+            cancel, response, cancel_completed_before_watchdog = (
+                await self._cancel_while_generation_stage_is_blocked(
+                    job_id,
+                    save_entered,
+                    release_save,
+                )
+            )
 
+        self.assertTrue(cancel_completed_before_watchdog)
+        self.assertEqual(200, cancel.status_code)
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.json()["canceled"])
         self.assertEqual([], response.json()["images"])
@@ -1342,21 +1381,32 @@ class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self._raster_outputs())
         self.assertFalse((self.outputs / "history.json").exists())
 
-    async def test_cancel_during_history_append_compensates_entry_and_images(self) -> None:
+    async def test_cancel_request_runs_while_history_append_is_in_progress(self) -> None:
         job_id = "job-history-append"
+        history_entered = threading.Event()
+        release_history = threading.Event()
         original_append = webapp.append_generation_history
 
-        def append_then_cancel(**kwargs):
+        def append_then_block(**kwargs):
             entry = original_append(**kwargs)
-            self.registry.cancel(job_id)
+            history_entered.set()
+            release_history.wait(2)
             return entry
 
         with (
             patch.object(webapp.requests, "post", return_value=self._gpt_image_response()),
-            patch.object(webapp, "append_generation_history", side_effect=append_then_cancel),
+            patch.object(webapp, "append_generation_history", side_effect=append_then_block),
         ):
-            response = await self._post_gpt_generation(job_id)
+            cancel, response, cancel_completed_before_watchdog = (
+                await self._cancel_while_generation_stage_is_blocked(
+                    job_id,
+                    history_entered,
+                    release_history,
+                )
+            )
 
+        self.assertTrue(cancel_completed_before_watchdog)
+        self.assertEqual(200, cancel.status_code)
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.json()["canceled"])
         self.assertEqual([], self._raster_outputs())
