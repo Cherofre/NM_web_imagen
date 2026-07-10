@@ -3,7 +3,7 @@
 ## Now
 - [x] Complete and review approved Tasks 1-5: application security/behavior/concurrency/persistence hardening, Windows release hardening, v1.0.6 build, package, and initial release verification.
 - [x] Fix all final-review Important findings with RED/GREEN tests and targeted spec/code-quality re-review.
-- [x] Rebuild, rerun the complete release/API/browser matrix, overwrite the rejected G: candidate, and verify final SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7`.
+- [x] Rebuild, rerun the complete release/API/browser matrix, overwrite the rejected G: candidate, and verify fresh final SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4`.
 - [ ] Run fresh complete verification and repeat final whole-branch review until no Critical/Important remains; record the evidence and exact final HEAD in the ledger.
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
@@ -12,7 +12,7 @@
 - Do not redo: Tasks 1-5, final-review remediation through `baf20c5`, canonical packaging, browser/API smoke on port `18767`, or the verified G: overwrite unless review changes a packaged file.
 - Verify next: full Python/Node/size/build/compile/PowerShell/package/preflight matrix, then requirements/spec/code-quality review with zero unresolved Critical/Important findings.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
-- Release boundary: local/G v1.0.6 SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7` is the current verified candidate. The rejected `958334…` and intermediate `c355…` candidates are superseded. Final review is still required before branch finishing.
+- Release boundary: local/G v1.0.6 SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4` is the current verified candidate. `51f75e…` was content-identical but superseded by the fresh rebuild's ZIP timestamps; the rejected `958334…` and intermediate `c355…` candidates are also superseded. Final review is still required before branch finishing.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
 
 ## Prior Release Context
