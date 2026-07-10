@@ -1,14 +1,17 @@
 import asyncio
 import base64
 import io
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import quote
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from starlette.datastructures import FormData
+from starlette.requests import Request as StarletteRequest
 
 import app as webapp
 import image_safety as image_safety_module
@@ -305,6 +308,185 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 ["http://127.0.0.1:5173", "http://localhost:4173"],
                 webapp.dev_cors_origins(),
             )
+
+    def test_foreign_origin_multipart_is_rejected_before_form_parse_or_executor(self) -> None:
+        with (
+            patch.object(
+                StarletteRequest,
+                "form",
+                side_effect=AssertionError("foreign origin reached multipart parsing"),
+            ) as request_form,
+            patch.object(webapp.UPSTREAM_EXECUTOR, "run", new_callable=AsyncMock) as executor_run,
+        ):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                headers={"Origin": "https://attacker.example"},
+                data={"api_key": "secret", "prompt": "test"},
+                files={"reference_files": ("probe.png", PNG_RAW, "image/png")},
+            )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求来源", response.json()["detail"])
+        request_form.assert_not_called()
+        executor_run.assert_not_awaited()
+
+    def test_generation_accepts_same_origin_configured_dev_origin_and_no_origin(self) -> None:
+        original_form = StarletteRequest.form
+        form_calls = []
+
+        def tracking_form(request, *args, **kwargs):
+            form_calls.append(dict(kwargs))
+            return original_form(request, *args, **kwargs)
+
+        with (
+            patch.object(StarletteRequest, "form", tracking_form),
+            patch.object(
+                webapp.UPSTREAM_EXECUTOR,
+                "run",
+                new_callable=AsyncMock,
+                return_value=FakeGenerationResponse(),
+            ) as executor_run,
+        ):
+            same_origin = self.client.post(
+                "/api/generate/gpt-image-2",
+                headers={"Origin": "http://testserver"},
+                data={"api_key": "secret", "prompt": "same origin"},
+            )
+            no_origin = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"api_key": "secret", "prompt": "local script"},
+            )
+            with patch.dict(
+                os.environ,
+                {"IMAGE_TOOL_DEV_CORS_ORIGINS": "http://127.0.0.1:5173"},
+            ):
+                with TestClient(webapp.create_app()) as dev_client:
+                    dev_origin = dev_client.post(
+                        "/api/generate/gpt-image-2",
+                        headers={"Origin": "http://127.0.0.1:5173"},
+                        data={"api_key": "secret", "prompt": "dev origin"},
+                    )
+
+        self.assertEqual(200, same_origin.status_code)
+        self.assertEqual(200, no_origin.status_code)
+        self.assertEqual(200, dev_origin.status_code)
+        self.assertEqual("http://127.0.0.1:5173", dev_origin.headers.get("access-control-allow-origin"))
+        self.assertEqual(3, executor_run.await_count)
+        self.assertTrue(
+            any(
+                call.get("max_files") == 16
+                and call.get("max_fields") == 64
+                and call.get("max_part_size") == 1024 * 1024
+                for call in form_calls
+            ),
+            form_calls,
+        )
+
+    def test_null_and_malformed_origins_are_rejected_before_body_parse(self) -> None:
+        for origin in ("null", "not-an-origin", "http://testserver/path"):
+            with self.subTest(origin=origin), patch.object(
+                StarletteRequest,
+                "form",
+                side_effect=AssertionError("invalid origin reached multipart parsing"),
+            ) as request_form:
+                response = self.client.post(
+                    "/api/generate/gpt-image-2",
+                    headers={"Origin": origin},
+                    data={"api_key": "secret", "prompt": "test"},
+                )
+
+            self.assertEqual(403, response.status_code)
+            request_form.assert_not_called()
+
+    def test_generation_multipart_content_length_limit_rejects_before_form_parse(self) -> None:
+        with patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 64, create=True):
+            with TestClient(webapp.create_app()) as client, patch.object(
+                StarletteRequest,
+                "form",
+                side_effect=AssertionError("oversized body reached multipart parsing"),
+            ) as request_form:
+                response = client.post(
+                    "/api/generate/gpt-image-2",
+                    content=b"x",
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=limit-test",
+                        "Content-Length": "65",
+                    },
+                )
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual("上传请求超过容量限制", response.json()["detail"])
+        request_form.assert_not_called()
+
+    def test_generation_chunked_limit_stops_before_overflow_chunk_reaches_parser(self) -> None:
+        parser_chunks = []
+
+        async def probe_form(request, *args, **kwargs):
+            del args, kwargs
+            if request._form is not None:
+                return request._form
+            async for chunk in request.stream():
+                parser_chunks.append(chunk)
+            request._form = FormData()
+            return request._form
+
+        async def invoke_chunked(app):
+            incoming = iter(
+                [
+                    {"type": "http.request", "body": b"a" * 16, "more_body": True},
+                    {"type": "http.request", "body": b"b" * 32, "more_body": False},
+                ]
+            )
+            sent = []
+
+            async def receive():
+                try:
+                    return next(incoming)
+                except StopIteration:
+                    return {"type": "http.disconnect"}
+
+            async def send(message):
+                sent.append(message)
+
+            await app(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0"},
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/api/generate/gpt-image-2",
+                    "raw_path": b"/api/generate/gpt-image-2",
+                    "query_string": b"",
+                    "headers": [
+                        (b"host", b"testserver"),
+                        (b"content-type", b"multipart/form-data; boundary=limit-test"),
+                    ],
+                    "client": ("127.0.0.1", 12345),
+                    "server": ("testserver", 80),
+                },
+                receive,
+                send,
+            )
+            return sent
+
+        with (
+            patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 32, create=True),
+            patch.object(StarletteRequest, "form", probe_form),
+            patch.object(webapp.UPSTREAM_EXECUTOR, "run", new_callable=AsyncMock) as executor_run,
+        ):
+            sent = asyncio.run(invoke_chunked(webapp.create_app()))
+
+        response_start = next(message for message in sent if message["type"] == "http.response.start")
+        response_body = b"".join(
+            message.get("body", b"")
+            for message in sent
+            if message["type"] == "http.response.body"
+        )
+        self.assertEqual(413, response_start["status"])
+        self.assertEqual("上传请求超过容量限制", json.loads(response_body)["detail"])
+        self.assertEqual([b"a" * 16], parser_chunks)
+        executor_run.assert_not_awaited()
 
     def test_outputs_serves_only_valid_rasters_with_private_headers(self) -> None:
         session_refs = self.outputs / "session_refs"

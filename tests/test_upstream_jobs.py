@@ -34,9 +34,223 @@ PNG_1X1 = base64.b64encode(
     b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\x89\x81\xb5"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 ).decode("ascii")
+PNG_1X1_RAW = base64.b64decode(PNG_1X1)
+EXACT_SECRET = "exact-client-key-ABC123"
+WINDOWS_SECRET_PATH = r"C:\Users\Alice\private\token.txt"
+POSIX_SECRET_PATH = "/home/alice/private/token.txt"
+SENSITIVE_URL = "https://url-user:url-pass@example.com/v1?token=query-secret&safe=ok"
+SENSITIVE_ERROR = (
+    f"ConnectionError {EXACT_SECRET} Bearer bearer-secret sk-abcdef123456 "
+    f"{SENSITIVE_URL} api_key=kv-secret password: pass-secret "
+    f"{WINDOWS_SECRET_PATH} {POSIX_SECRET_PATH}"
+)
+SENSITIVE_MARKERS = (
+    EXACT_SECRET,
+    "bearer-secret",
+    "sk-abcdef123456",
+    "url-user",
+    "url-pass",
+    "query-secret",
+    "kv-secret",
+    "pass-secret",
+    WINDOWS_SECRET_PATH,
+    POSIX_SECRET_PATH,
+)
+
+
+def client_strings(value):
+    if isinstance(value, dict):
+        return "\n".join(client_strings(item) for item in value.values())
+    if isinstance(value, list):
+        return "\n".join(client_strings(item) for item in value)
+    return str(value)
+
+
+def assert_client_payload_is_sanitized(test_case, payload):
+    text = client_strings(payload)
+    for marker in SENSITIVE_MARKERS:
+        test_case.assertNotIn(marker, text)
+    return text
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
+    def test_client_error_sanitizer_redacts_keys_urls_assignments_and_paths(self) -> None:
+        sanitized = webapp.sanitize_client_error(
+            SENSITIVE_ERROR,
+            secrets=[EXACT_SECRET],
+        )
+
+        assert_client_payload_is_sanitized(self, sanitized)
+        self.assertIn("ConnectionError", sanitized)
+        self.assertIn("safe=ok", sanitized)
+        self.assertIn("Bearer ***", sanitized)
+
+    def test_extract_error_message_sanitizes_json_html_and_text_payloads(self) -> None:
+        class RawResponse:
+            def __init__(self, content, *, status_code=502, payload_error=None):
+                self.status_code = status_code
+                self.content = content
+                self.text = content.decode("utf-8")
+                self.payload_error = payload_error
+
+            def json(self):
+                if self.payload_error is not None:
+                    raise self.payload_error
+                return json.loads(self.text)
+
+        responses = [
+            FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=401),
+            RawResponse(f"<html><title>{SENSITIVE_ERROR}</title></html>".encode("utf-8")),
+            RawResponse(SENSITIVE_ERROR.encode("utf-8")),
+        ]
+
+        for response in responses:
+            with self.subTest(content=response.text[:20]):
+                message = webapp.extract_error_message(
+                    response,
+                    secrets=[EXACT_SECRET],
+                )
+                assert_client_payload_is_sanitized(self, message)
+
+    async def test_gpt_response_processes_only_requested_url_candidates(self) -> None:
+        download_calls = []
+
+        class DownloadExecutor:
+            async def run(self, kind, function, *args, before_start=None, **kwargs):
+                del function, kwargs
+                if kind != "download":
+                    raise AssertionError(f"unexpected executor kind: {kind}")
+                if before_start is not None:
+                    before_start()
+                download_calls.append(args[0])
+                return {
+                    "src": f"data:image/png;base64,{PNG_1X1}",
+                    "mime_type": "image/png",
+                    "source": "downloaded-url",
+                }
+
+        payload = {
+            "data": [
+                {"url": f"https://example.com/result-{index:02d}.png"}
+                for index in range(25)
+            ]
+        }
+        budget = webapp.UpstreamImageBudget(max_images=10, max_bytes=1024 * 1024)
+        with patch.object(webapp, "UPSTREAM_EXECUTOR", DownloadExecutor()):
+            images = await webapp.build_gpt_images_from_response_async(
+                payload,
+                max_images=3,
+                budget=budget,
+            )
+
+        self.assertEqual(3, len(images))
+        self.assertEqual(
+            [f"https://example.com/result-{index:02d}.png" for index in range(3)],
+            download_calls,
+        )
+
+    def test_gpt_url_budget_stops_before_starting_next_download(self) -> None:
+        class StreamingResponse:
+            headers = {
+                "Content-Type": "image/png",
+                "Content-Length": str(len(PNG_1X1_RAW)),
+            }
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, _chunk_size):
+                yield PNG_1X1_RAW
+
+            def close(self):
+                return None
+
+        payload = {
+            "data": [
+                {"url": f"https://example.com/result-{index}.png"}
+                for index in range(3)
+            ]
+        }
+        budget = webapp.UpstreamImageBudget(
+            max_images=10,
+            max_bytes=len(PNG_1X1_RAW) * 2,
+        )
+        with patch.object(
+            webapp.requests,
+            "get",
+            side_effect=[StreamingResponse(), StreamingResponse(), StreamingResponse()],
+        ) as remote_get:
+            with self.assertRaises(webapp.UpstreamResultLimitError):
+                webapp.build_gpt_images_from_response(
+                    payload,
+                    max_images=3,
+                    budget=budget,
+                )
+
+        self.assertEqual(2, remote_get.call_count)
+
+    def test_gpt_url_and_base64_results_share_one_byte_budget(self) -> None:
+        class StreamingResponse:
+            headers = {
+                "Content-Type": "image/png",
+                "Content-Length": str(len(PNG_1X1_RAW)),
+            }
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, _chunk_size):
+                yield PNG_1X1_RAW
+
+            def close(self):
+                return None
+
+        budget = webapp.UpstreamImageBudget(
+            max_images=10,
+            max_bytes=(len(PNG_1X1_RAW) * 2) - 1,
+        )
+        with patch.object(webapp.requests, "get", return_value=StreamingResponse()) as remote_get:
+            with self.assertRaises(webapp.UpstreamResultLimitError):
+                webapp.build_gpt_images_from_response(
+                    {
+                        "data": [
+                            {"url": "https://example.com/first.png"},
+                            {"b64_json": PNG_1X1},
+                        ]
+                    },
+                    max_images=2,
+                    budget=budget,
+                )
+
+        remote_get.assert_called_once()
+        self.assertEqual(1, budget.image_count)
+        self.assertEqual(len(PNG_1X1_RAW), budget.total_bytes)
+
+    def test_banana_response_accepts_at_most_one_image_candidate(self) -> None:
+        payload = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": PNG_1X1,
+                                }
+                            }
+                            for _ in range(5)
+                        ]
+                    }
+                }
+            ]
+        }
+        budget = webapp.UpstreamImageBudget(max_images=10, max_bytes=1024 * 1024)
+
+        parsed = webapp.extract_banana_images(payload, budget=budget, max_images=1)
+
+        self.assertEqual(1, len(parsed["images"]))
+        self.assertEqual(1, budget.image_count)
+
     async def test_slow_blocking_call_does_not_block_event_loop(self) -> None:
         executor = UpstreamExecutor(generation_limit=1, chat_limit=1, download_limit=1)
         started = time.monotonic()
@@ -712,7 +926,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             def post(self, *_args, **_kwargs):
                 return FakeJsonResponse(banana_payload)
 
-        def fake_download(_url):
+        def fake_download(_url, _budget=None):
             return {
                 "src": f"data:image/png;base64,{PNG_1X1}",
                 "mime_type": "image/png",
@@ -753,6 +967,105 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             [call["kind"] for call in executor.calls],
         )
         self.assertTrue(all(callable(call["before_start"]) for call in executor.calls))
+
+    async def test_banana_batch_size_caps_final_image_count_when_each_batch_returns_many(self) -> None:
+        multi_image_payload = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": PNG_1X1,
+                                }
+                            }
+                            for _ in range(4)
+                        ]
+                    }
+                }
+            ]
+        }
+
+        class MultiImageBananaSession:
+            def post(self, *_args, **_kwargs):
+                return FakeJsonResponse(multi_image_payload)
+
+        with patch.object(webapp, "create_requests_session", return_value=MultiImageBananaSession()):
+            response = await self.client.post(
+                "/api/generate/banana",
+                data={
+                    "prompt": "square",
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                    "batch_size": "2",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, len(response.json()["images"]))
+        self.assertEqual(2, response.json()["meta"]["image_count"])
+
+    async def test_gpt_retry_budget_overflow_saves_no_partial_images_or_history(self) -> None:
+        with (
+            patch.object(webapp, "UPSTREAM_RESULT_MAX_BYTES", (len(PNG_1X1_RAW) * 2) - 1, create=True),
+            patch.object(
+                webapp.requests,
+                "post",
+                side_effect=[
+                    FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]}),
+                    FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]}),
+                ],
+            ) as upstream_post,
+            patch.object(webapp, "save_generated_images") as save_images,
+            patch.object(webapp, "append_generation_history") as append_history,
+        ):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "n": "2",
+                },
+            )
+
+        self.assertEqual(502, response.status_code)
+        self.assertEqual("上游图片结果超过请求级安全预算", response.json()["detail"])
+        self.assertEqual(2, upstream_post.call_count)
+        save_images.assert_not_called()
+        append_history.assert_not_called()
+        self.assertFalse((self.outputs / "history.json").exists())
+
+    async def test_banana_batches_share_byte_budget_and_save_no_partial_results(self) -> None:
+        class SingleImageBananaSession:
+            def post(self, *_args, **_kwargs):
+                return FakeBananaImageResponse()
+
+        with (
+            patch.object(webapp, "UPSTREAM_RESULT_MAX_BYTES", (len(PNG_1X1_RAW) * 2) - 1, create=True),
+            patch.object(webapp, "create_requests_session", return_value=SingleImageBananaSession()),
+            patch.object(webapp, "save_generated_images") as save_images,
+            patch.object(webapp, "append_generation_history") as append_history,
+        ):
+            response = await self.client.post(
+                "/api/generate/banana",
+                data={
+                    "prompt": "square",
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                    "batch_size": "2",
+                },
+            )
+
+        self.assertEqual(502, response.status_code)
+        self.assertEqual("上游图片结果超过请求级安全预算", response.json()["detail"])
+        save_images.assert_not_called()
+        append_history.assert_not_called()
+        self.assertFalse((self.outputs / "history.json").exists())
 
     async def test_zero_infinite_and_oversized_timeouts_remain_finite(self) -> None:
         executor = RecordingExecutor()
@@ -839,6 +1152,230 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("RuntimeError", response.text)
         self.assertNotIn("raw-upstream-text", response.text)
         self.assertNotIn(leaked_path, response.text)
+
+    async def test_chat_captured_errors_are_sanitized_for_both_engines(self) -> None:
+        class BananaSession:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            def post(self, *_args, **_kwargs):
+                if isinstance(self.outcome, Exception):
+                    raise self.outcome
+                return self.outcome
+
+        requests_and_expected = []
+        with patch.object(
+            webapp.requests,
+            "post",
+            side_effect=webapp.requests.ConnectionError(SENSITIVE_ERROR),
+        ):
+            requests_and_expected.append(
+                await self.client.post(
+                    "/api/chat/gpt-image-2",
+                    json={
+                        "prompt": "hello",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "chat_model": "gpt-test",
+                    },
+                )
+            )
+        with patch.object(
+            webapp,
+            "create_requests_session",
+            return_value=BananaSession(webapp.requests.ConnectionError(SENSITIVE_ERROR)),
+        ):
+            requests_and_expected.append(
+                await self.client.post(
+                    "/api/chat/banana",
+                    json={
+                        "prompt": "hello",
+                        "api_key": EXACT_SECRET,
+                        "api_base_url": "https://example.com",
+                        "model_type": "gemini-test",
+                    },
+                )
+            )
+        with patch.object(
+            webapp.requests,
+            "post",
+            return_value=FakeJsonResponse(
+                {"error": {"message": SENSITIVE_ERROR}},
+                status_code=401,
+            ),
+        ):
+            requests_and_expected.append(
+                await self.client.post(
+                    "/api/chat/gpt-image-2",
+                    json={
+                        "prompt": "hello",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "chat_model": "gpt-test",
+                    },
+                )
+            )
+        with patch.object(
+            webapp,
+            "create_requests_session",
+            return_value=BananaSession(
+                FakeJsonResponse(
+                    {"error": {"message": SENSITIVE_ERROR}},
+                    status_code=401,
+                )
+            ),
+        ):
+            requests_and_expected.append(
+                await self.client.post(
+                    "/api/chat/banana",
+                    json={
+                        "prompt": "hello",
+                        "api_key": EXACT_SECRET,
+                        "api_base_url": "https://example.com",
+                        "model_type": "gemini-test",
+                    },
+                )
+            )
+
+        self.assertEqual([502, 502, 401, 401], [item.status_code for item in requests_and_expected])
+        for response in requests_and_expected:
+            text = assert_client_payload_is_sanitized(self, response.json())
+            self.assertTrue("聊天" in text or "ConnectionError" in text)
+
+    async def test_generation_captured_errors_are_sanitized_for_both_engines(self) -> None:
+        class BananaSession:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            def post(self, *_args, **_kwargs):
+                if isinstance(self.outcome, Exception):
+                    raise self.outcome
+                return self.outcome
+
+        class InvalidJsonResponse:
+            ok = True
+            status_code = 200
+            content = b"not-json"
+            text = "not-json"
+
+            def json(self):
+                raise RuntimeError(SENSITIVE_ERROR)
+
+        class HtmlErrorResponse:
+            ok = False
+            status_code = 500
+            content = f"<html><title>{SENSITIVE_ERROR}</title></html>".encode("utf-8")
+            text = content.decode("utf-8")
+
+            def json(self):
+                raise ValueError("not json")
+
+        responses = []
+        with patch.object(
+            webapp.requests,
+            "post",
+            side_effect=webapp.requests.ConnectionError(SENSITIVE_ERROR),
+        ):
+            responses.append(
+                await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={
+                        "prompt": "square",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "model": "gpt-image-2",
+                    },
+                )
+            )
+        with patch.object(
+            webapp.requests,
+            "post",
+            return_value=FakeJsonResponse(
+                {"error": {"message": SENSITIVE_ERROR}},
+                status_code=400,
+            ),
+        ):
+            responses.append(
+                await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={
+                        "prompt": "square",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "model": "gpt-image-2",
+                    },
+                )
+            )
+        with patch.object(webapp.requests, "post", return_value=HtmlErrorResponse()):
+            responses.append(
+                await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={
+                        "prompt": "square",
+                        "api_key": EXACT_SECRET,
+                        "base_url": "https://example.com/v1",
+                        "model": "gpt-image-2",
+                    },
+                )
+            )
+        banana_outcomes = [
+            webapp.requests.ConnectionError(SENSITIVE_ERROR),
+            InvalidJsonResponse(),
+            FakeJsonResponse(
+                {"error": {"message": SENSITIVE_ERROR}},
+                status_code=401,
+            ),
+        ]
+        for outcome in banana_outcomes:
+            with patch.object(
+                webapp,
+                "create_requests_session",
+                return_value=BananaSession(outcome),
+            ):
+                responses.append(
+                    await self.client.post(
+                        "/api/generate/banana",
+                        data={
+                            "prompt": "square",
+                            "api_key": EXACT_SECRET,
+                            "api_base_url": "https://example.com",
+                            "model_type": "gemini-test",
+                            "batch_size": "1",
+                        },
+                    )
+                )
+
+        for response in responses:
+            text = assert_client_payload_is_sanitized(self, response.json())
+            self.assertTrue("GPT Image 2" in text or "批" in text)
+
+    async def test_diagnostics_and_open_outputs_captured_errors_are_sanitized(self) -> None:
+        with patch.object(
+            webapp.requests,
+            "post",
+            side_effect=webapp.requests.ConnectionError(SENSITIVE_ERROR),
+        ):
+            diagnostic = await self.client.post(
+                "/api/diagnostics",
+                json={
+                    "engine": "gpt-image-2",
+                    "checks": ["generation"],
+                    "api_key": EXACT_SECRET,
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                },
+            )
+        with patch.object(
+            webapp,
+            "open_local_directory",
+            side_effect=OSError(SENSITIVE_ERROR.replace(EXACT_SECRET, "open-output-error")),
+        ):
+            open_outputs = await self.client.post("/api/open-outputs")
+
+        self.assertEqual(200, diagnostic.status_code)
+        self.assertEqual(500, open_outputs.status_code)
+        assert_client_payload_is_sanitized(self, diagnostic.json())
+        assert_client_payload_is_sanitized(self, open_outputs.json())
 
 
 class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):

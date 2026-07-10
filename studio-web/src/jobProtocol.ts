@@ -45,15 +45,53 @@ export async function cancelJobBeforeAbort<Result>({
   }
 }
 
+export function settleQueueCancellation<Result>({
+  jobId,
+  pending,
+  requestCancellation,
+  markCanceling,
+  requestCancel,
+  abort,
+  cleanup,
+}: {
+  jobId: string;
+  pending: Map<string, Promise<unknown>>;
+  requestCancellation: boolean;
+  markCanceling: () => void;
+  requestCancel: () => Result | Promise<Result>;
+  abort: () => void;
+  cleanup: () => void;
+}): Promise<Result | undefined> {
+  const existing = pending.get(jobId);
+  if (existing) return existing as Promise<Result | undefined>;
+
+  if (requestCancellation) markCanceling();
+  const operation = (
+    requestCancellation
+      ? Promise.resolve().then(() => requestCancel())
+      : Promise.resolve(undefined)
+  ).finally(() => {
+    try {
+      abort();
+    } finally {
+      cleanup();
+    }
+  });
+  pending.set(jobId, operation);
+  return operation;
+}
+
 export function cancelJobThenRemove<Result>({
   jobId,
   pending,
+  settle,
   cancel,
   remove,
 }: {
   jobId: string;
   pending: Map<string, Promise<void>>;
-  cancel: () => Result | Promise<Result>;
+  settle?: () => Result | Promise<Result>;
+  cancel?: () => Result | Promise<Result>;
   remove: () => void;
 }) {
   const existing = pending.get(jobId);
@@ -61,7 +99,7 @@ export function cancelJobThenRemove<Result>({
 
   let operation: Promise<void>;
   operation = Promise.resolve()
-    .then(() => cancel())
+    .then(() => (settle || cancel)?.())
     .catch(() => undefined)
     .then(() => {
       remove();

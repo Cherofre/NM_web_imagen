@@ -88,7 +88,7 @@ import {
 } from "./i18n";
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
-import { appendJobId, cancelJobBeforeAbort, cancelJobThenRemove, cancellationNotice, cancelJobUrl, withJobId } from "./jobProtocol";
+import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, settleQueueCancellation, withJobId } from "./jobProtocol";
 import { advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
@@ -1085,6 +1085,7 @@ function App() {
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
   const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
+  const queueCancellationSettlementsRef = useRef<Map<string, Promise<unknown>>>(new Map());
   const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>(new Map());
   const queueProcessingRef = useRef<string | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
@@ -1690,60 +1691,72 @@ function App() {
     }, 80);
   }
 
-  async function cancelQueueJob(job: QueueJob) {
-    if (job.status !== "running" && job.status !== "queued") return;
+  function markQueueJobCanceled(job: QueueJob) {
+    const finishedAt = new Date().toISOString();
+    updateQueueJob(job.id, {
+      status: "canceled",
+      finishedAt,
+      error: t("status.generationCanceled"),
+    });
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === job.sessionId
+          ? {
+              ...session,
+              updatedAt: finishedAt,
+              turns: session.turns.map((turn) =>
+                turn.id === job.turnId
+                  ? {
+                      ...turn,
+                      status: "error",
+                      finishedAt,
+                      error: t("status.generationCanceled"),
+                    }
+                  : turn,
+              ),
+            }
+          : session,
+      ),
+    );
+    setStatus(t("status.generationCanceled"));
+  }
+
+  function settleQueueJobCancellation(job: QueueJob) {
     const abortController = queueAbortControllersRef.current[job.id];
     const fallbackNotice = cancellationNotice(language);
-    const finishedAt = new Date().toISOString();
-    const markCanceled = () => {
-      updateQueueJob(job.id, {
-        status: "canceled",
-        finishedAt,
-        error: t("status.generationCanceled"),
-      });
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === job.sessionId
-            ? {
-                ...session,
-                updatedAt: finishedAt,
-                turns: session.turns.map((turn) =>
-                  turn.id === job.turnId
-                    ? {
-                        ...turn,
-                        status: "error",
-                        finishedAt,
-                        error: t("status.generationCanceled"),
-                      }
-                    : turn,
-                ),
-              }
-            : session,
-        ),
-      );
-      setStatus(t("status.generationCanceled"));
-    };
+    const requestCancellation = job.status === "running" || job.status === "queued";
+    return settleQueueCancellation({
+      jobId: job.id,
+      pending: queueCancellationSettlementsRef.current,
+      requestCancellation,
+      markCanceling: () => {
+        cancelingQueueJobsRef.current.add(job.id);
+        markQueueJobCanceled(job);
+        setNotice(fallbackNotice);
+      },
+      requestCancel: async () => {
+        const response = await fetch(cancelJobUrl(job.id), { method: "POST" });
+        if (!response.ok) throw new Error("cancel request failed");
+        return response.json().catch(() => ({}));
+      },
+      abort: () => abortController?.abort(),
+      cleanup: () => {
+        delete queueAbortControllersRef.current[job.id];
+        delete queuePayloadsRef.current[job.id];
+        if (!abortController) cancelingQueueJobsRef.current.delete(job.id);
+      },
+    });
+  }
 
+  async function cancelQueueJob(job: QueueJob) {
+    if (
+      job.status !== "running"
+      && job.status !== "queued"
+      && !queueCancellationSettlementsRef.current.has(job.id)
+    ) return;
+    const fallbackNotice = cancellationNotice(language);
     try {
-      const payload = await cancelJobBeforeAbort({
-        markCanceling: () => {
-          cancelingQueueJobsRef.current.add(job.id);
-          markCanceled();
-          setNotice(fallbackNotice);
-        },
-        requestCancel: async () => {
-          const response = await fetch(cancelJobUrl(job.id), { method: "POST" });
-          if (!response.ok) throw new Error("cancel request failed");
-          return response.json().catch(() => ({}));
-        },
-        abort: () => abortController?.abort(),
-        cleanup: () => {
-          delete queueAbortControllersRef.current[job.id];
-          delete queuePayloadsRef.current[job.id];
-          if (!abortController) cancelingQueueJobsRef.current.delete(job.id);
-          markCanceled();
-        },
-      });
+      const payload = await settleQueueJobCancellation(job);
       setNotice(cancellationNoticeFromPayload(payload, language));
     } catch {
       setNotice(fallbackNotice);
@@ -1797,21 +1810,15 @@ function App() {
   function removeQueueJob(job: QueueJob) {
     const jobId = job.id;
     const remove = () => {
+      queueCancellationSettlementsRef.current.delete(jobId);
       setQueueJobs((items) => items.filter((item) => item.id !== jobId));
     };
-    if (job.status === "queued" || job.status === "running" || pendingQueueRemovalsRef.current.has(jobId)) {
-      void cancelJobThenRemove({
-        jobId,
-        pending: pendingQueueRemovalsRef.current,
-        cancel: () => cancelQueueJob(job),
-        remove,
-      });
-      return;
-    }
-    queueAbortControllersRef.current[jobId]?.abort();
-    delete queueAbortControllersRef.current[jobId];
-    delete queuePayloadsRef.current[jobId];
-    remove();
+    void cancelJobThenRemove({
+      jobId,
+      pending: pendingQueueRemovalsRef.current,
+      settle: () => settleQueueJobCancellation(job),
+      remove,
+    });
   }
 
   async function saveConfig() {

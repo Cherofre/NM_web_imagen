@@ -24,6 +24,18 @@ WINDOWS_RELEASE_SCRIPTS = (
     "release_package_smoke.ps1",
     "sync_release_to_g.ps1",
 )
+NEW_NODE_GATE_MODULES = (
+    "chatCapabilities.test.mjs",
+    "clientSafety.test.mjs",
+    "jobProtocol.test.mjs",
+    "sessionRevision.test.mjs",
+)
+NEW_PYTHON_GATE_MODULES = (
+    "test_classic_frontend_security.py",
+    "test_security_boundaries.py",
+    "test_storage_concurrency.py",
+    "test_upstream_jobs.py",
+)
 RELEASE_ROOT_FILES = (
     "app.py",
     "image_safety.py",
@@ -514,14 +526,23 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
 
     def test_one_click_release_runs_checks_before_sync(self) -> None:
         script = (ROOT / "release_one_click.ps1").read_text(encoding="utf-8")
+        node_modules = tuple(sorted(path.name for path in (ROOT / "studio-web" / "src").glob("*.test.mjs")))
+        python_modules = tuple(sorted(path.name for path in (ROOT / "tests").glob("test_*.py")))
 
         self.assertIn("function Invoke-NativeCommand", script)
         self.assertIn('-Command "node"', script)
         self.assertIn('"--test"', script)
-        self.assertIn("generationQueue.test.mjs", script)
+        self.assertIn('Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs"', script)
+        self.assertIn("Sort-Object Name", script)
+        self.assertEqual(14, len(node_modules), node_modules)
+        for module in NEW_NODE_GATE_MODULES:
+            self.assertIn(module, node_modules)
         self.assertIn('-Command "npm" -Arguments @("run", "build")', script)
         self.assertIn('-Command "python" -Arguments @("-m", "py_compile", ".\\app.py")', script)
-        self.assertIn('"tests.test_studio_sessions", "tests.test_release_cache_busting"', script)
+        self.assertIn('"-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"', script)
+        self.assertEqual(6, len(python_modules), python_modules)
+        for module in NEW_PYTHON_GATE_MODULES:
+            self.assertIn(module, python_modules)
         self.assertIn("failed with exit code", script)
         self.assertIn("Package clean zip", script)
         self.assertIn("Package smoke", script)
@@ -547,7 +568,8 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             fake_bin = root / "fake-bin"
             source.mkdir()
             fake_bin.mkdir()
-            (source / "studio-web").mkdir()
+            (source / "studio-web" / "src").mkdir(parents=True)
+            (source / "studio-web" / "src" / "fixture.test.mjs").write_text("", encoding="utf-8")
             shutil.copy2(ROOT / "release_one_click.ps1", source / "release_one_click.ps1")
             for name in (
                 "package_web_tool.ps1",
@@ -584,6 +606,78 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("exit code 7", result.stdout + result.stderr)
         self.assertFalse(gate_calls.strip(), gate_calls)
+
+    def test_one_click_release_stops_before_release_gates_when_any_new_test_fails(self) -> None:
+        all_node_modules = tuple(sorted(path.name for path in (ROOT / "studio-web" / "src").glob("*.test.mjs")))
+        all_python_modules = tuple(sorted(path.name for path in (ROOT / "tests").glob("test_*.py")))
+        variants = [
+            *(('node', module) for module in NEW_NODE_GATE_MODULES),
+            *(('python', module) for module in NEW_PYTHON_GATE_MODULES),
+        ]
+        for runner, failing_module in variants:
+            with self.subTest(runner=runner, failing_module=failing_module), tempfile.TemporaryDirectory(
+                prefix="release complete gate "
+            ) as folder:
+                root = Path(folder)
+                source = root / "NM_web_imagen"
+                fake_bin = root / "fake-bin"
+                studio_src = source / "studio-web" / "src"
+                tests_dir = source / "tests"
+                studio_src.mkdir(parents=True)
+                tests_dir.mkdir()
+                fake_bin.mkdir()
+                shutil.copy2(ROOT / "release_one_click.ps1", source / "release_one_click.ps1")
+                for name in (
+                    "package_web_tool.ps1",
+                    "release_package_smoke.ps1",
+                    "release_preflight.ps1",
+                    "sync_release_to_g.ps1",
+                ):
+                    (source / name).write_text("fixture", encoding="utf-8")
+                (source / "VERSION").write_text("1.0.6\n", encoding="utf-8")
+                (source / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+                for module in all_node_modules:
+                    (studio_src / module).write_text("", encoding="utf-8")
+                for module in all_python_modules:
+                    should_fail = runner == "python" and module == failing_module
+                    (tests_dir / module).write_text(
+                        "import unittest\n"
+                        "class ReleaseGateTest(unittest.TestCase):\n"
+                        f"    def test_gate(self): self.assertEqual({should_fail!r}, False)\n",
+                        encoding="utf-8",
+                    )
+
+                node_lines = ["@echo off"]
+                if runner == "node":
+                    node_lines.extend(
+                        [
+                            f'echo %* | findstr /C:"{failing_module}" >nul',
+                            "if not errorlevel 1 exit /b 9",
+                        ]
+                    )
+                node_lines.append("exit /b 0")
+                (fake_bin / "node.cmd").write_text("\n".join(node_lines) + "\n", encoding="ascii")
+                (fake_bin / "npm.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
+                if runner == "node":
+                    (fake_bin / "python.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
+                (fake_bin / "powershell.cmd").write_text(
+                    '@echo off\necho %*>>"%CODEX_GATE_LOG%"\nexit /b 0\n',
+                    encoding="ascii",
+                )
+                gate_log = root / "release-gates.log"
+
+                result = run_powershell(
+                    ["-File", str(source / "release_one_click.ps1")],
+                    cwd=source,
+                    env={
+                        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                        "CODEX_GATE_LOG": str(gate_log),
+                    },
+                )
+                gate_calls = gate_log.read_text(encoding="utf-8") if gate_log.exists() else ""
+
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertFalse(gate_calls.strip(), gate_calls)
 
     def test_package_smoke_uses_only_extracted_package_and_started_pid(self) -> None:
         path = ROOT / "release_package_smoke.ps1"

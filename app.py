@@ -22,8 +22,10 @@ import requests
 import uvicorn
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 
 from image_safety import (
     REFERENCE_IMAGE_MAX_BYTES,
@@ -82,6 +84,16 @@ DEFAULT_GPT_MODEL = "gpt-image-2"
 DEFAULT_GPT_CHAT_MODEL = "gpt-5.4"
 MAX_CHAT_TIMEOUT = 600
 MAX_GENERATION_TIMEOUT = 1800
+# The reference payload budget is 150 MiB. Multipart headers, form fields, and
+# boundaries get a separate fixed 2 MiB allowance, but never an unbounded one.
+GENERATION_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
+GENERATION_MULTIPART_MAX_BYTES = REFERENCE_REQUEST_MAX_BYTES + GENERATION_MULTIPART_OVERHEAD_BYTES
+GENERATION_MULTIPART_MAX_FILES = 16
+GENERATION_MULTIPART_MAX_FIELDS = 64
+GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
+UPSTREAM_RESULT_MAX_IMAGES = 10
+UPSTREAM_RESULT_MAX_BYTES = 150 * 1024 * 1024
+UPSTREAM_RESULT_LIMIT_MESSAGE = "上游图片结果超过请求级安全预算"
 UPSTREAM_EXECUTOR = UpstreamExecutor()
 JOB_REGISTRY = JobRegistry()
 GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh"}
@@ -96,12 +108,177 @@ ENGINE_FORM_IDS = {
 FORM_ENGINES = {value: key for key, value in ENGINE_FORM_IDS.items()}
 
 
+class UpstreamResultLimitError(ValueError):
+    pass
+
+
+class UpstreamImageBudget:
+    def __init__(
+        self,
+        *,
+        max_images: Optional[int] = None,
+        max_bytes: Optional[int] = None,
+    ) -> None:
+        self.max_images = max(1, int(max_images if max_images is not None else UPSTREAM_RESULT_MAX_IMAGES))
+        self.max_bytes = max(1, int(max_bytes if max_bytes is not None else UPSTREAM_RESULT_MAX_BYTES))
+        self.image_count = 0
+        self.total_bytes = 0
+
+    @property
+    def remaining_images(self) -> int:
+        return max(0, self.max_images - self.image_count)
+
+    @property
+    def remaining_bytes(self) -> int:
+        return max(0, self.max_bytes - self.total_bytes)
+
+    def ensure_image_slot(self) -> None:
+        if self.remaining_images < 1 or self.remaining_bytes < 1:
+            raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
+
+    def consume(self, byte_count: int) -> None:
+        self.ensure_image_slot()
+        normalized_bytes = max(0, int(byte_count))
+        if normalized_bytes > self.remaining_bytes:
+            raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
+        self.image_count += 1
+        self.total_bytes += normalized_bytes
+
+
 def dev_cors_origins() -> List[str]:
     return [
         item.strip().rstrip("/")
         for item in os.getenv("IMAGE_TOOL_DEV_CORS_ORIGINS", "").split(",")
         if item.strip()
     ]
+
+
+def normalize_http_origin(value: str) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "null":
+        return None
+    try:
+        parsed = urlparse(raw)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    if not hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    normalized_host = hostname.lower()
+    if ":" in normalized_host:
+        normalized_host = f"[{normalized_host}]"
+    default_port = 80 if scheme == "http" else 443
+    suffix = f":{port}" if port is not None and port != default_port else ""
+    return f"{scheme}://{normalized_host}{suffix}"
+
+
+class RequestBoundaryMiddleware:
+    def __init__(self, app: Any, *, allowed_origins: List[str]) -> None:
+        self.app = app
+        self.allowed_origins = {
+            normalized
+            for origin in allowed_origins
+            if (normalized := normalize_http_origin(origin)) is not None
+        }
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = str(scope.get("method") or "GET").upper()
+        path = str(scope.get("path") or "")
+        headers = Headers(scope=scope)
+        if path.startswith("/api/") and method not in {"GET", "HEAD", "OPTIONS"}:
+            raw_origin = headers.get("origin")
+            if raw_origin:
+                request_origin = normalize_http_origin(raw_origin)
+                host = headers.get("host") or ""
+                current_origin = normalize_http_origin(f"{scope.get('scheme') or 'http'}://{host}")
+                if request_origin is None or request_origin not in self.allowed_origins | {current_origin}:
+                    await JSONResponse(
+                        status_code=403,
+                        content={"detail": "不允许的请求来源"},
+                    )(scope, receive, send)
+                    return
+
+        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        is_generation_multipart = (
+            path.startswith("/api/generate/")
+            and method not in {"GET", "HEAD", "OPTIONS"}
+            and content_type == "multipart/form-data"
+        )
+        if not is_generation_multipart:
+            await self.app(scope, receive, send)
+            return
+
+        content_length = (headers.get("content-length") or "").strip()
+        if content_length:
+            try:
+                declared_bytes = int(content_length)
+            except ValueError:
+                declared_bytes = 0
+            if declared_bytes > GENERATION_MULTIPART_MAX_BYTES:
+                await JSONResponse(
+                    status_code=413,
+                    content={"detail": "上传请求超过容量限制"},
+                )(scope, receive, send)
+                return
+
+        received_bytes = 0
+
+        async def limited_receive() -> Dict[str, Any]:
+            nonlocal received_bytes
+            message = await receive()
+            if message.get("type") == "http.request":
+                body = message.get("body", b"")
+                next_total = received_bytes + len(body)
+                if next_total > GENERATION_MULTIPART_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="上传请求超过容量限制")
+                received_bytes = next_total
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+class LimitedGenerationMultipartRoute(APIRoute):
+    def get_route_handler(self):
+        route_handler = super().get_route_handler()
+
+        async def limited_route_handler(request: Request):
+            content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if request.url.path.startswith("/api/generate/") and content_type == "multipart/form-data":
+                request_form = request.form
+
+                def limited_form(
+                    *,
+                    max_files: int | float = 1000,
+                    max_fields: int | float = 1000,
+                    max_part_size: int = 1024 * 1024,
+                ):
+                    return request_form(
+                        max_files=min(max_files, GENERATION_MULTIPART_MAX_FILES),
+                        max_fields=min(max_fields, GENERATION_MULTIPART_MAX_FIELDS),
+                        max_part_size=min(max_part_size, GENERATION_MULTIPART_MAX_FIELD_BYTES),
+                    )
+
+                request.form = limited_form  # type: ignore[method-assign]
+            return await route_handler(request)
+
+        return limited_route_handler
 
 
 def validate_bind_host(host: str) -> str:
@@ -186,6 +363,11 @@ MARKDOWN_BASE64_IMAGE_PATTERN = re.compile(
     r'!\[[^\]]*\]\(data:(image/(?:png|jpeg|jpg|gif|webp|bmp));base64,([A-Za-z0-9+/=]+)\)',
     re.IGNORECASE,
 )
+CLIENT_ERROR_URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+CLIENT_ERROR_SENSITIVE_KEY_PATTERN = re.compile(
+    r"(?:api[_-]?key|access[_-]?key|token|secret|password|auth(?:orization)?|signature|sig)",
+    re.IGNORECASE,
+)
 
 
 def compact_text(value: str, limit: int = 600) -> str:
@@ -193,6 +375,79 @@ def compact_text(value: str, limit: int = 600) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()}..."
+
+
+def sanitize_client_url(value: str) -> str:
+    raw = str(value or "")
+    trailing = ""
+    while raw and raw[-1] in ".,;!?)]:":
+        trailing = raw[-1] + trailing
+        raw = raw[:-1]
+    try:
+        parsed = urlparse(raw)
+        if not parsed.scheme or not parsed.netloc:
+            return f"[redacted URL]{trailing}"
+        netloc = parsed.netloc
+        if parsed.username is not None or parsed.password is not None:
+            hostname = parsed.hostname or ""
+            if ":" in hostname and not hostname.startswith("["):
+                hostname = f"[{hostname}]"
+            if parsed.port is not None:
+                hostname = f"{hostname}:{parsed.port}"
+            netloc = f"***@{hostname}"
+        query_items = []
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True):
+            query_items.append(
+                (key, "***" if CLIENT_ERROR_SENSITIVE_KEY_PATTERN.search(key) else item)
+            )
+        sanitized = parsed._replace(
+            netloc=netloc,
+            query=urlencode(query_items, safe="*"),
+        ).geturl()
+        return f"{sanitized}{trailing}"
+    except Exception:
+        return f"[redacted URL]{trailing}"
+
+
+def sanitize_client_error(
+    text: str,
+    *,
+    secrets: Optional[List[str]] = None,
+    fallback: str = "请求失败",
+) -> str:
+    redacted = CLIENT_ERROR_URL_PATTERN.sub(
+        lambda match: sanitize_client_url(match.group(0)),
+        str(text or ""),
+    )
+    for secret in secrets or []:
+        secret_text = str(secret or "").strip()
+        if secret_text:
+            redacted = redacted.replace(secret_text, "***")
+    redacted = re.sub(
+        r"(Bearer\s+)[^\s,;]+",
+        r"\1***",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(r"\bsk-[A-Za-z0-9._\-]{4,}\b", "sk-***", redacted, flags=re.IGNORECASE)
+    redacted = re.sub(
+        rf"((?:[\"']?{CLIENT_ERROR_SENSITIVE_KEY_PATTERN.pattern}[\"']?)\s*[:=]\s*)"
+        r"(?:\"[^\"]*\"|'[^']*'|[^\s,;&]+)",
+        r"\1***",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]|\\\\)[^\r\n,;<>\"']+",
+        "[local path]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?<![A-Za-z0-9:/])/(?!/)[^\r\n,;<>\"']+",
+        "[local path]",
+        redacted,
+    )
+    return compact_text(redacted, 400) or fallback
 
 
 def html_error_to_text(value: str) -> str:
@@ -468,12 +723,17 @@ def build_banana_request(
     }
 
 
-def extract_error_message(response: requests.Response) -> str:
+def extract_error_message(
+    response: requests.Response,
+    *,
+    secrets: Optional[List[str]] = None,
+) -> str:
     if response.status_code in UPSTREAM_TIMEOUT_STATUSES:
-        return (
+        return sanitize_client_error(
             f"上游接口返回 {response.status_code}: 上游网关超时。"
             "这通常是模型排队、服务繁忙或图片生成耗时过长导致的；可以稍后重试，"
-            "或调低质量、尺寸、数量后再试。"
+            "或调低质量、尺寸、数量后再试。",
+            secrets=secrets,
         )
 
     try:
@@ -484,19 +744,25 @@ def extract_error_message(response: requests.Response) -> str:
             message = html_error_to_text(raw_text)
         else:
             message = compact_text(raw_text)
-        return compact_text(f"上游接口返回 {response.status_code}: {message}")
+        return sanitize_client_error(
+            f"上游接口返回 {response.status_code}: {message}",
+            secrets=secrets,
+        )
 
     if isinstance(payload, dict):
         error_obj = payload.get("error")
         if isinstance(error_obj, dict):
             message = str(error_obj.get("message") or "").strip()
             if message:
-                return message[:400]
+                return sanitize_client_error(message, secrets=secrets)
         message = payload.get("message")
         if isinstance(message, str) and message.strip():
-            return message.strip()[:400]
+            return sanitize_client_error(message, secrets=secrets)
 
-    return (response_text_utf8_first(response) or "未知错误").strip()[:400]
+    return sanitize_client_error(
+        response_text_utf8_first(response) or "未知错误",
+        secrets=secrets,
+    )
 
 
 def create_requests_session(bypass_proxy: bool = False) -> requests.Session:
@@ -787,6 +1053,26 @@ def extract_image_bytes(src: str) -> Optional[Tuple[bytes, str]]:
         )
     except ImageSafetyError:
         return None
+
+
+def decode_upstream_raster(
+    source: str,
+    budget: UpstreamImageBudget,
+) -> Optional[Tuple[bytes, str]]:
+    budget.ensure_image_slot()
+    remaining_bytes = budget.remaining_bytes
+    decode_limit = min(REMOTE_RESULT_MAX_BYTES, remaining_bytes)
+    try:
+        raw_bytes, mime_type = decode_raster_data_url(
+            source,
+            max_bytes=decode_limit,
+        )
+    except ImageSafetyError as exc:
+        if exc.status_code == 413 and remaining_bytes < REMOTE_RESULT_MAX_BYTES:
+            raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE) from exc
+        return None
+    budget.consume(len(raw_bytes))
+    return raw_bytes, mime_type
 
 
 def cleanup_generated_image_files(
@@ -1668,7 +1954,12 @@ def get_history_payload(limit: int = 120) -> List[Dict[str, Any]]:
     return combined[: max(1, min(limit, HISTORY_MAX_ENTRIES))]
 
 
-def download_remote_image(url: str) -> Optional[Dict[str, str]]:
+def download_remote_image(
+    url: str,
+    budget: Optional[UpstreamImageBudget] = None,
+) -> Optional[Dict[str, str]]:
+    active_budget = budget or UpstreamImageBudget()
+    active_budget.ensure_image_slot()
     response = None
     try:
         response = requests.get(
@@ -1687,26 +1978,37 @@ def download_remote_image(url: str) -> Optional[Dict[str, str]]:
                 parsed_content_length = int(content_length)
             except ValueError:
                 parsed_content_length = 0
+            if parsed_content_length > active_budget.remaining_bytes:
+                raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
             if parsed_content_length > REMOTE_RESULT_MAX_BYTES:
                 raise ImageSafetyError("远程图片超过容量限制", 413)
-        raw_bytes = read_limited_chunks(
-            response.iter_content(64 * 1024),
-            max_bytes=REMOTE_RESULT_MAX_BYTES,
-        )
+        download_limit = min(REMOTE_RESULT_MAX_BYTES, active_budget.remaining_bytes)
+        try:
+            raw_bytes = read_limited_chunks(
+                response.iter_content(64 * 1024),
+                max_bytes=download_limit,
+            )
+        except ImageSafetyError as exc:
+            if exc.status_code == 413 and active_budget.remaining_bytes < REMOTE_RESULT_MAX_BYTES:
+                raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE) from exc
+            raise
         claimed_mime = (
             response.headers.get("Content-Type", "").split(";", 1)[0].strip()
         )
         mime_type = validate_raster_bytes(
             raw_bytes,
-            max_bytes=REMOTE_RESULT_MAX_BYTES,
+            max_bytes=download_limit,
             claimed_mime=claimed_mime,
         )
+        active_budget.consume(len(raw_bytes))
         payload = base64.b64encode(raw_bytes).decode("utf-8")
         return {
             "src": data_url_from_base64(payload, mime_type),
             "mime_type": mime_type,
             "source": "downloaded-url",
         }
+    except UpstreamResultLimitError:
+        raise
     except Exception:
         return None
     finally:
@@ -1740,10 +2042,22 @@ def extract_banana_images(
     response_data: Dict[str, Any],
     *,
     _download_urls: bool = True,
+    budget: Optional[UpstreamImageBudget] = None,
+    max_images: int = 1,
 ) -> Dict[str, Any]:
+    active_budget = budget or UpstreamImageBudget()
+    candidate_limit = max(0, min(int(max_images), active_budget.remaining_images))
     images: List[Dict[str, str]] = []
     messages: List[str] = []
     pending_urls: List[str] = []
+    image_candidates = 0
+
+    def claim_image_candidate() -> bool:
+        nonlocal image_candidates
+        if image_candidates >= candidate_limit:
+            return False
+        image_candidates += 1
+        return True
 
     candidates = response_data.get("candidates") or []
     for candidate in candidates:
@@ -1759,9 +2073,14 @@ def extract_banana_images(
             if isinstance(inline_data, dict):
                 base64_data = inline_data.get("data")
                 mime_type = inline_data.get("mimeType") or "image/png"
-                if isinstance(base64_data, str) and base64_data.strip():
-                    extracted = extract_image_bytes(
+                if (
+                    isinstance(base64_data, str)
+                    and base64_data.strip()
+                    and claim_image_candidate()
+                ):
+                    extracted = decode_upstream_raster(
                         data_url_from_base64(base64_data, mime_type),
+                        active_budget,
                     )
                     if extracted:
                         raw_bytes, detected_mime_type = extracted
@@ -1782,7 +2101,11 @@ def extract_banana_images(
                     or file_data.get("uri")
                     or file_data.get("url")
                 )
-                if isinstance(file_uri, str) and is_image_url(file_uri):
+                if (
+                    isinstance(file_uri, str)
+                    and is_image_url(file_uri)
+                    and claim_image_candidate()
+                ):
                     pending_urls.append(file_uri)
                     continue
 
@@ -1792,8 +2115,11 @@ def extract_banana_images(
                 markdown_matches = MARKDOWN_BASE64_IMAGE_PATTERN.findall(text_content)
                 if markdown_matches:
                     for mime_type, base64_data in markdown_matches:
-                        extracted = extract_image_bytes(
+                        if not claim_image_candidate():
+                            break
+                        extracted = decode_upstream_raster(
                             data_url_from_base64(base64_data, mime_type),
+                            active_budget,
                         )
                         if not extracted:
                             continue
@@ -1811,13 +2137,16 @@ def extract_banana_images(
                 if not text_content:
                     continue
 
-                if is_image_url(text_content):
+                if is_image_url(text_content) and claim_image_candidate():
                     pending_urls.append(text_content)
                     continue
 
                 found_urls = extract_image_urls_from_text(text_content)
                 if found_urls:
-                    pending_urls.extend(found_urls)
+                    for found_url in found_urls:
+                        if not claim_image_candidate():
+                            break
+                        pending_urls.append(found_url)
                     for found_url in found_urls:
                         text_content = text_content.replace(found_url, "").strip()
 
@@ -1825,12 +2154,16 @@ def extract_banana_images(
                     messages.append(text_content)
 
             image_url = part.get("image_url") or part.get("imageUrl") or part.get("url")
-            if isinstance(image_url, str) and is_image_url(image_url):
+            if (
+                isinstance(image_url, str)
+                and is_image_url(image_url)
+                and claim_image_candidate()
+            ):
                 pending_urls.append(image_url)
 
     if _download_urls:
         for image_url in pending_urls:
-            downloaded = download_remote_image(image_url)
+            downloaded = download_remote_image(image_url, active_budget)
             if downloaded:
                 images.append(downloaded)
 
@@ -1847,8 +2180,16 @@ async def extract_banana_images_async(
     response_data: Dict[str, Any],
     *,
     job_id: str = "",
+    budget: Optional[UpstreamImageBudget] = None,
+    max_images: int = 1,
 ) -> Dict[str, Any]:
-    parsed = extract_banana_images(response_data, _download_urls=False)
+    active_budget = budget or UpstreamImageBudget()
+    parsed = extract_banana_images(
+        response_data,
+        _download_urls=False,
+        budget=active_budget,
+        max_images=max_images,
+    )
     pending_urls = parsed.pop("_pending_urls", [])
     for image_url in pending_urls:
         JOB_REGISTRY.raise_if_canceled(job_id)
@@ -1856,6 +2197,7 @@ async def extract_banana_images_async(
             "download",
             download_remote_image,
             image_url,
+            active_budget,
             before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
         )
         JOB_REGISTRY.raise_if_canceled(job_id)
@@ -2134,37 +2476,14 @@ def build_banana_chat_contents(prompt: str, history_messages: Any) -> List[Dict[
 
 
 def redact_diagnostic_text(text: str, secrets: List[str]) -> str:
-    redacted = str(text or "")
-    for secret in secrets:
-        secret_text = str(secret or "").strip()
-        if secret_text:
-            redacted = redacted.replace(secret_text, "***")
-    redacted = re.sub(r"sk-[A-Za-z0-9_\-]{6,}", "sk-***", redacted)
-    redacted = re.sub(r"(Bearer\s+)[A-Za-z0-9._\-]+", r"\1***", redacted, flags=re.IGNORECASE)
-    return compact_text(redacted, 600)
+    return sanitize_client_error(text, secrets=secrets)
 
 
 def redact_diagnostic_endpoint(endpoint: str, secrets: List[str]) -> str:
-    raw_endpoint = str(endpoint or "")
-    try:
-        parsed = urlparse(raw_endpoint)
-        if parsed.scheme and parsed.netloc:
-            netloc = parsed.netloc
-            if parsed.username or parsed.password:
-                host = parsed.hostname or ""
-                if parsed.port:
-                    host = f"{host}:{parsed.port}"
-                netloc = f"***@{host}"
-            query_items = []
-            for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-                if re.search(r"(api[_-]?key|token|secret|password|auth|signature)", key, flags=re.IGNORECASE):
-                    query_items.append((key, "***"))
-                else:
-                    query_items.append((key, value))
-            raw_endpoint = parsed._replace(netloc=netloc, query=urlencode(query_items, safe="*")).geturl()
-    except Exception:
-        pass
-    return redact_diagnostic_text(raw_endpoint, secrets)
+    return sanitize_client_error(
+        sanitize_client_url(str(endpoint or "")),
+        secrets=secrets,
+    )
 
 
 def diagnostic_result(
@@ -2243,10 +2562,13 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
                 model,
                 started_at,
                 response.status_code,
-                redact_diagnostic_text(extract_error_message(response), secrets),
+                extract_error_message(response, secrets=secrets),
             )
         response_data = response_json_utf8_first(response)
-        if not extract_gpt_image_values(response_data if isinstance(response_data, dict) else {}):
+        if not extract_gpt_image_values(
+            response_data if isinstance(response_data, dict) else {},
+            limit=1,
+        ):
             return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
         return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
     except requests.Timeout as exc:
@@ -2294,7 +2616,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
                 model,
                 started_at,
                 response.status_code,
-                redact_diagnostic_text(extract_error_message(response), secrets),
+                extract_error_message(response, secrets=secrets),
             )
         response_data = response_json_utf8_first(response)
         if not extract_openai_chat_reply(response_data if isinstance(response_data, dict) else {}):
@@ -2340,9 +2662,13 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, redact_diagnostic_text(extract_error_message(response), secrets))
+            return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, extract_error_message(response, secrets=secrets))
         response_data = response_json_utf8_first(response)
-        parsed = await extract_banana_images_async(response_data if isinstance(response_data, dict) else {})
+        parsed = await extract_banana_images_async(
+            response_data if isinstance(response_data, dict) else {},
+            budget=UpstreamImageBudget(max_images=1),
+            max_images=1,
+        )
         if not parsed.get("images"):
             return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
         return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
@@ -2382,7 +2708,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, redact_diagnostic_text(extract_error_message(response), secrets))
+            return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, extract_error_message(response, secrets=secrets))
         response_data = response_json_utf8_first(response)
         if not extract_banana_text_reply(response_data if isinstance(response_data, dict) else {}):
             return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, response.status_code, "接口成功但未返回聊天内容")
@@ -2443,25 +2769,39 @@ def estimate_cost(total_tokens: int) -> str:
     return f"${cost:.4f}"
 
 
-def extract_gpt_image_values(payload: Dict[str, Any]) -> List[str]:
+def extract_gpt_image_values(
+    payload: Dict[str, Any],
+    *,
+    limit: int = UPSTREAM_RESULT_MAX_IMAGES,
+) -> List[str]:
     """Collect image values from Images API and Responses API style payloads."""
     values: List[str] = []
+    seen = set()
+    result_limit = max(0, min(int(limit), UPSTREAM_RESULT_MAX_IMAGES))
+
+    def add_value(key: str, item: Any) -> None:
+        if len(values) >= result_limit or not isinstance(item, str):
+            return
+        stripped = item.strip()
+        if not (
+            (key in {"b64_json", "result"} and stripped)
+            or stripped.startswith("data:image")
+            or stripped.startswith("http://")
+            or stripped.startswith("https://")
+            or len(stripped) > 200
+        ):
+            return
+        if stripped in seen:
+            return
+        seen.add(stripped)
+        values.append(stripped)
 
     def visit(value: Any) -> None:
+        if len(values) >= result_limit:
+            return
         if isinstance(value, dict):
             for key in ("b64_json", "url", "image_url", "result"):
-                item = value.get(key)
-                if isinstance(item, str):
-                    stripped = item.strip()
-                    if (
-                        (key in {"b64_json", "result"} and stripped)
-                        or
-                        stripped.startswith("data:image")
-                        or stripped.startswith("http://")
-                        or stripped.startswith("https://")
-                        or len(stripped) > 200
-                    ):
-                        values.append(stripped)
+                add_value(key, value.get(key))
             for child in value.values():
                 visit(child)
             return
@@ -2471,24 +2811,21 @@ def extract_gpt_image_values(payload: Dict[str, Any]) -> List[str]:
                 visit(child)
 
     visit(payload)
-
-    unique: List[str] = []
-    seen = set()
-    for value in values:
-        if value in seen:
-            continue
-        unique.append(value)
-        seen.add(value)
-    return unique
+    return values
 
 
-def normalize_plain_base64_image(value: str) -> Optional[Tuple[str, str]]:
+def normalize_plain_base64_image(
+    value: str,
+    budget: Optional[UpstreamImageBudget] = None,
+) -> Optional[Tuple[str, str]]:
+    active_budget = budget or UpstreamImageBudget()
     cleaned = re.sub(r"\s+", "", value or "")
     if not cleaned:
         return None
     cleaned += "=" * ((-len(cleaned)) % 4)
-    extracted = extract_image_bytes(
+    extracted = decode_upstream_raster(
         data_url_from_base64(cleaned, "image/png"),
+        active_budget,
     )
     if not extracted:
         return None
@@ -2497,9 +2834,14 @@ def normalize_plain_base64_image(value: str) -> Optional[Tuple[str, str]]:
     return data_url_from_base64(encoded, mime_type), mime_type
 
 
-def build_gpt_image_from_value(index: int, image_value: str) -> Optional[Dict[str, str]]:
+def build_gpt_image_from_value(
+    index: int,
+    image_value: str,
+    budget: Optional[UpstreamImageBudget] = None,
+) -> Optional[Dict[str, str]]:
+    active_budget = budget or UpstreamImageBudget()
     if image_value.startswith("data:image"):
-        extracted = extract_image_bytes(image_value)
+        extracted = decode_upstream_raster(image_value, active_budget)
         if not extracted:
             return None
         raw_bytes, mime_type = extracted
@@ -2511,7 +2853,7 @@ def build_gpt_image_from_value(index: int, image_value: str) -> Optional[Dict[st
             "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
         }
 
-    normalized_base64 = normalize_plain_base64_image(image_value)
+    normalized_base64 = normalize_plain_base64_image(image_value, active_budget)
     if not normalized_base64:
         return None
     image_src, mime_type = normalized_base64
@@ -2530,15 +2872,28 @@ def name_downloaded_gpt_image(downloaded: Dict[str, str], index: int) -> Dict[st
     return downloaded
 
 
-def build_gpt_images_from_response(response_data: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_gpt_images_from_response(
+    response_data: Dict[str, Any],
+    *,
+    max_images: Optional[int] = None,
+    budget: Optional[UpstreamImageBudget] = None,
+) -> List[Dict[str, str]]:
+    active_budget = budget or UpstreamImageBudget()
+    result_limit = min(
+        active_budget.remaining_images,
+        int(max_images if max_images is not None else active_budget.remaining_images),
+    )
     images: List[Dict[str, str]] = []
-    for index, image_value in enumerate(extract_gpt_image_values(response_data), start=1):
+    for index, image_value in enumerate(
+        extract_gpt_image_values(response_data, limit=result_limit),
+        start=1,
+    ):
         if image_value.startswith(("http://", "https://")):
-            downloaded = download_remote_image(image_value)
+            downloaded = download_remote_image(image_value, active_budget)
             if downloaded:
                 images.append(name_downloaded_gpt_image(downloaded, index))
             continue
-        image = build_gpt_image_from_value(index, image_value)
+        image = build_gpt_image_from_value(index, image_value, active_budget)
         if image:
             images.append(image)
     return images
@@ -2548,22 +2903,33 @@ async def build_gpt_images_from_response_async(
     response_data: Dict[str, Any],
     *,
     job_id: str = "",
+    max_images: Optional[int] = None,
+    budget: Optional[UpstreamImageBudget] = None,
 ) -> List[Dict[str, str]]:
+    active_budget = budget or UpstreamImageBudget()
+    result_limit = min(
+        active_budget.remaining_images,
+        int(max_images if max_images is not None else active_budget.remaining_images),
+    )
     images: List[Dict[str, str]] = []
-    for index, image_value in enumerate(extract_gpt_image_values(response_data), start=1):
+    for index, image_value in enumerate(
+        extract_gpt_image_values(response_data, limit=result_limit),
+        start=1,
+    ):
         if image_value.startswith(("http://", "https://")):
             JOB_REGISTRY.raise_if_canceled(job_id)
             downloaded = await UPSTREAM_EXECUTOR.run(
                 "download",
                 download_remote_image,
                 image_value,
+                active_budget,
                 before_start=lambda: JOB_REGISTRY.raise_if_canceled(job_id),
             )
             JOB_REGISTRY.raise_if_canceled(job_id)
             if downloaded:
                 images.append(name_downloaded_gpt_image(downloaded, index))
             continue
-        image = build_gpt_image_from_value(index, image_value)
+        image = build_gpt_image_from_value(index, image_value, active_budget)
         if image:
             images.append(image)
     JOB_REGISTRY.raise_if_canceled(job_id)
@@ -2581,6 +2947,8 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
             allow_credentials=False,
         )
+    app.add_middleware(RequestBoundaryMiddleware, allowed_origins=origins)
+    app.router.route_class = LimitedGenerationMultipartRoute
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     studio_assets_dir = STUDIO_STATIC_DIR / "assets"
@@ -2594,7 +2962,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="job_id 无效") from exc
 
     async def generation_job_scope(request: Request) -> AsyncIterator[str]:
-        form = await request.form()
+        form = await request.form(
+            max_files=GENERATION_MULTIPART_MAX_FILES,
+            max_fields=GENERATION_MULTIPART_MAX_FIELDS,
+            max_part_size=GENERATION_MULTIPART_MAX_FIELD_BYTES,
+        )
         explicit = "job_id" in form
         raw_job_id = form.get("job_id") if explicit else None
         normalized = normalized_request_job_id(raw_job_id, allow_empty=not explicit)
@@ -2799,7 +3171,10 @@ def create_app() -> FastAPI:
         try:
             open_local_directory(OUTPUTS_DIR)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"打开 outputs 文件夹失败：{exc}") from exc
+            raise HTTPException(
+                status_code=500,
+                detail=f"打开 outputs 文件夹失败：{sanitize_client_error(str(exc))}",
+            ) from exc
 
         return {
             "ok": True,
@@ -2858,10 +3233,14 @@ def create_app() -> FastAPI:
         except requests.Timeout as exc:
             raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
         except requests.RequestException as exc:
-            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}") from exc
+            safe_error = sanitize_client_error(str(exc), secrets=[api_key])
+            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {safe_error}") from exc
 
         if not response.ok:
-            raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=extract_error_message(response, secrets=[api_key]),
+            )
 
         response_data = response_json_utf8_first(response)
         reply = extract_openai_chat_reply(response_data)
@@ -2932,10 +3311,14 @@ def create_app() -> FastAPI:
         except requests.Timeout as exc:
             raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
         except requests.RequestException as exc:
-            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}") from exc
+            safe_error = sanitize_client_error(str(exc), secrets=[api_key])
+            raise HTTPException(status_code=502, detail=f"聊天网络请求失败：{type(exc).__name__} {safe_error}") from exc
 
         if not response.ok:
-            raise HTTPException(status_code=response.status_code, detail=extract_error_message(response))
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=extract_error_message(response, secrets=[api_key]),
+            )
 
         response_data = response_json_utf8_first(response)
         reply = extract_banana_text_reply(response_data)
@@ -2988,6 +3371,7 @@ def create_app() -> FastAPI:
         messages: List[str] = []
         seeds: List[int] = []
         session = create_requests_session(bypass_proxy=bypass_proxy)
+        result_budget = UpstreamImageBudget()
 
         for index in range(batch_size):
             JOB_REGISTRY.raise_if_canceled(job_id)
@@ -3010,6 +3394,7 @@ def create_app() -> FastAPI:
             timeout = (15, read_timeout)
 
             try:
+                result_budget.ensure_image_slot()
                 JOB_REGISTRY.raise_if_canceled(job_id)
                 response = await UPSTREAM_EXECUTOR.run(
                     "generation",
@@ -3023,13 +3408,15 @@ def create_app() -> FastAPI:
                 )
                 JOB_REGISTRY.raise_if_canceled(job_id)
                 if response.status_code >= 400:
-                    detail = extract_error_message(response)
+                    detail = extract_error_message(response, secrets=[api_key])
                     messages.append(f"第 {index + 1} 批请求失败: {detail}")
                     continue
 
                 parsed = await extract_banana_images_async(
                     response_json_utf8_first(response),
                     job_id=job_id,
+                    budget=result_budget,
+                    max_images=1,
                 )
                 batch_images = parsed["images"]
                 batch_messages = parsed["messages"]
@@ -3044,10 +3431,21 @@ def create_app() -> FastAPI:
                     messages.append(f"第 {index + 1} 批: {message}")
             except JobCancelled:
                 raise
+            except UpstreamResultLimitError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
+                ) from exc
             except requests.RequestException as exc:
-                messages.append(f"第 {index + 1} 批网络异常: {type(exc).__name__} {exc}")
+                messages.append(
+                    f"第 {index + 1} 批网络异常: {type(exc).__name__} "
+                    f"{sanitize_client_error(str(exc), secrets=[api_key])}"
+                )
             except Exception as exc:
-                messages.append(f"第 {index + 1} 批处理失败: {exc}")
+                messages.append(
+                    f"第 {index + 1} 批处理失败: "
+                    f"{sanitize_client_error(str(exc), secrets=[api_key])}"
+                )
 
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
@@ -3291,9 +3689,10 @@ def create_app() -> FastAPI:
                         api_url = fallback_api_url
                         used_yuzapi_fallback = True
                         continue
+                    safe_error = sanitize_client_error(str(exc), secrets=[api_key])
                     raise HTTPException(
                         status_code=502,
-                        detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {compact_text(str(exc), 220)}",
+                        detail=f"GPT Image 2 网络请求失败：{type(exc).__name__} {safe_error}",
                     ) from exc
 
                 if response.status_code == 400:
@@ -3301,12 +3700,13 @@ def create_app() -> FastAPI:
                         error_payload = response_json_utf8_first(response)
                     except Exception:
                         error_payload = {}
-                    error_message = (
+                    raw_error_message = (
                         error_payload.get("error", {}).get("message")
                         if isinstance(error_payload, dict)
                         else None
-                    ) or extract_error_message(response)
-                    unknown_param = unknown_param_pattern.search(error_message or "")
+                    ) or extract_error_message(response, secrets=[api_key])
+                    error_message = str(raw_error_message or "")
+                    unknown_param = unknown_param_pattern.search(error_message)
                     if unknown_param:
                         parameter_name = unknown_param.group(1)
                         if parameter_name in current_payload:
@@ -3317,7 +3717,13 @@ def create_app() -> FastAPI:
                                 current_request_kwargs["data"] = current_payload
                             JOB_REGISTRY.raise_if_canceled(job_id)
                             continue
-                    raise HTTPException(status_code=400, detail=f"GPT Image 2 请求失败: {error_message}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "GPT Image 2 请求失败: "
+                            f"{sanitize_client_error(error_message, secrets=[api_key])}"
+                        ),
+                    )
 
                 if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
                     retryable_count += 1
@@ -3329,7 +3735,7 @@ def create_app() -> FastAPI:
 
                 if response.status_code >= 400:
                     status_code = 504 if response.status_code == 504 else 502
-                    failed_detail = extract_error_message(response)
+                    failed_detail = extract_error_message(response, secrets=[api_key])
                     raise HTTPException(
                         status_code=status_code,
                         detail=f"GPT Image 2 请求失败: {failed_detail}",
@@ -3340,7 +3746,10 @@ def create_app() -> FastAPI:
                 except ValueError as exc:
                     raise HTTPException(
                         status_code=502,
-                        detail=f"GPT Image 2 返回不是 JSON: {extract_error_message(response)}",
+                        detail=(
+                            "GPT Image 2 返回不是 JSON: "
+                            f"{extract_error_message(response, secrets=[api_key])}"
+                        ),
                     ) from exc
                 break
 
@@ -3348,26 +3757,41 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=502, detail="GPT Image 2 请求失败，未获得有效响应")
             return response_data
 
-        response_data = await post_gpt_payload(payload, request_kwargs)
-        response_payloads = [response_data]
-        images = await build_gpt_images_from_response_async(response_data, job_id=job_id)
-        while resolved_endpoint != "/v1/responses" and 0 < len(images) < n:
-            JOB_REGISTRY.raise_if_canceled(job_id)
-            remaining = n - len(images)
-            next_payload = {**payload, "n": remaining}
-            if resolved_endpoint == "/v1/images/edits":
-                next_request_kwargs = {"data": next_payload, "files": files}
-            else:
-                next_request_kwargs = {"json": next_payload}
-            next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
-            next_images = await build_gpt_images_from_response_async(
-                next_response_data,
+        result_budget = UpstreamImageBudget()
+        try:
+            response_data = await post_gpt_payload(payload, request_kwargs)
+            response_payloads = [response_data]
+            images = await build_gpt_images_from_response_async(
+                response_data,
                 job_id=job_id,
+                max_images=n,
+                budget=result_budget,
             )
-            if not next_images:
-                break
-            response_payloads.append(next_response_data)
-            images.extend(next_images)
+            while resolved_endpoint != "/v1/responses" and 0 < len(images) < n:
+                JOB_REGISTRY.raise_if_canceled(job_id)
+                result_budget.ensure_image_slot()
+                remaining = min(n - len(images), result_budget.remaining_images)
+                next_payload = {**payload, "n": remaining}
+                if resolved_endpoint == "/v1/images/edits":
+                    next_request_kwargs = {"data": next_payload, "files": files}
+                else:
+                    next_request_kwargs = {"json": next_payload}
+                next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
+                next_images = await build_gpt_images_from_response_async(
+                    next_response_data,
+                    job_id=job_id,
+                    max_images=remaining,
+                    budget=result_budget,
+                )
+                if not next_images:
+                    break
+                response_payloads.append(next_response_data)
+                images.extend(next_images)
+        except UpstreamResultLimitError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
+            ) from exc
 
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None

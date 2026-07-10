@@ -147,8 +147,9 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(appSource, /function retryQueueJob\(job: QueueJob\)/);
   assert.match(appSource, /function applyQueueJob\(job: QueueJob\)/);
   assert.match(appSource, /function removeQueueJob\(job: QueueJob\)/);
+  assert.match(appSource, /const queueCancellationSettlementsRef = useRef<Map<string, Promise<unknown>>>\(new Map\(\)\);/);
   assert.match(appSource, /const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>\(new Map\(\)\);/);
-  assert.match(appSource, /if \(job\.status === "queued" \|\| job\.status === "running" \|\| pendingQueueRemovalsRef\.current\.has\(jobId\)\) \{[\s\S]*cancelJobThenRemove\(\{/);
+  assert.match(appSource, /void cancelJobThenRemove\(\{[\s\S]*settle:\s*\(\) => settleQueueJobCancellation\(job\),/);
   assert.match(appSource, /queueAbortControllersRef/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.cancel"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.retry"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
@@ -159,7 +160,7 @@ test("queue rows expose cancel retry apply and remove controls", () => {
 });
 
 test("queue and chat requests share backend job cancellation protocol", () => {
-  assert.match(appSource, /import \{ appendJobId, cancelJobBeforeAbort, cancelJobThenRemove, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
+  assert.match(appSource, /import \{ appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, settleQueueCancellation, withJobId \} from "\.\/jobProtocol";/);
   assert.match(appSource, /function createFormData\([\s\S]*jobId: string,[\s\S]*return appendJobId\(data, jobId\);/);
   assert.match(appSource, /function createChatPayload\([\s\S]*jobId: string,[\s\S]*return withJobId\(/);
   assert.match(appSource, /createFormData\([\s\S]*payload\.posterText,[\s\S]*payload\.jobId,[\s\S]*\)/);
@@ -169,17 +170,12 @@ test("queue and chat requests share backend job cancellation protocol", () => {
   const cancelEnd = appSource.indexOf("function retryQueueJob", cancelStart);
   const cancelSource = appSource.slice(cancelStart, cancelEnd);
   assert.notEqual(cancelStart, -1, "cancelQueueJob must be async");
-  assert.match(cancelSource, /await cancelJobBeforeAbort\(\{/);
-  const markCancelingStart = cancelSource.indexOf("markCanceling:");
-  const requestCancelStart = cancelSource.indexOf("requestCancel:", markCancelingStart);
-  const markCancelingSource = cancelSource.slice(markCancelingStart, requestCancelStart);
-  assert.match(markCancelingSource, /cancelingQueueJobsRef\.current\.add\(job\.id\);/);
-  assert.doesNotMatch(markCancelingSource, /delete queuePayloadsRef\.current\[job\.id\];/);
-  assert.match(cancelSource, /requestCancel:\s*async \(\) => \{[\s\S]*await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
-  assert.match(cancelSource, /abort:\s*\(\) => abortController\?\.abort\(\)/);
-  assert.match(cancelSource, /cleanup:\s*\(\) => \{[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
+  assert.match(appSource, /function settleQueueJobCancellation\(job: QueueJob\)[\s\S]*return settleQueueCancellation\(\{/);
+  assert.match(cancelSource, /await settleQueueJobCancellation\(job\)/);
   assert.match(cancelSource, /cancellationNotice\(language\)/);
-  assert.match(appSource, /void cancelJobThenRemove\(\{[\s\S]*cancel:\s*\(\) => cancelQueueJob\(job\),/);
+  assert.match(appSource, /requestCancel:\s*async \(\) => \{[\s\S]*await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
+  assert.match(appSource, /abort:\s*\(\) => abortController\?\.abort\(\)/);
+  assert.match(appSource, /cleanup:\s*\(\) => \{[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
   assert.match(appSource, /onClick=\{\(\) => void cancelQueueJob\(job\)\}/);
 
   assert.match(appSource, /if \(responsePayload\.canceled === true\)/);

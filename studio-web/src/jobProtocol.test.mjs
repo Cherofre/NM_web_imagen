@@ -158,3 +158,114 @@ test("cancel then remove still removes after cancellation fails", async () => {
   assert.equal(removeCalls, 1);
   assert.equal(pending.size, 0);
 });
+
+test("direct cancel then remove reuses one deferred server settlement", async () => {
+  assert.equal(typeof jobProtocol.settleQueueCancellation, "function");
+  const settlements = new Map();
+  const removals = new Map();
+  const events = [];
+  const calls = { request: 0, abort: 0, cleanup: 0, remove: 0 };
+  let resolveCancel = () => {};
+  const deferredCancel = new Promise((resolve) => {
+    resolveCancel = resolve;
+  });
+  const settlementOptions = {
+    jobId: "job-direct-then-remove",
+    pending: settlements,
+    requestCancellation: true,
+    markCanceling: () => events.push("mark"),
+    requestCancel: async () => {
+      events.push("request");
+      calls.request += 1;
+      return deferredCancel;
+    },
+    abort: () => {
+      events.push("abort");
+      calls.abort += 1;
+    },
+    cleanup: () => {
+      events.push("cleanup");
+      calls.cleanup += 1;
+    },
+  };
+
+  const directCancel = jobProtocol.settleQueueCancellation(settlementOptions);
+  const remove = jobProtocol.cancelJobThenRemove({
+    jobId: settlementOptions.jobId,
+    pending: removals,
+    settle: () => jobProtocol.settleQueueCancellation({
+      ...settlementOptions,
+      requestCancellation: false,
+    }),
+    remove: () => {
+      events.push("remove");
+      calls.remove += 1;
+      settlements.delete(settlementOptions.jobId);
+    },
+  });
+  await Promise.resolve();
+
+  assert.equal(settlements.get(settlementOptions.jobId), directCancel);
+  assert.deepEqual(events, ["mark", "request"]);
+  assert.deepEqual(calls, { request: 1, abort: 0, cleanup: 0, remove: 0 });
+
+  resolveCancel("server-canceled");
+  await Promise.all([directCancel, remove]);
+
+  assert.deepEqual(events, ["mark", "request", "abort", "cleanup", "remove"]);
+  assert.deepEqual(calls, { request: 1, abort: 1, cleanup: 1, remove: 1 });
+  assert.equal(settlements.has(settlementOptions.jobId), false);
+  assert.equal(removals.has(settlementOptions.jobId), false);
+});
+
+test("direct cancel rejection is shared and remove still finalizes once", async () => {
+  assert.equal(typeof jobProtocol.settleQueueCancellation, "function");
+  const settlements = new Map();
+  const removals = new Map();
+  const calls = { request: 0, abort: 0, cleanup: 0, remove: 0 };
+  let rejectCancel = () => {};
+  const deferredCancel = new Promise((_resolve, reject) => {
+    rejectCancel = reject;
+  });
+  const settlementOptions = {
+    jobId: "job-direct-reject-remove",
+    pending: settlements,
+    requestCancellation: true,
+    markCanceling: () => {},
+    requestCancel: async () => {
+      calls.request += 1;
+      return deferredCancel;
+    },
+    abort: () => {
+      calls.abort += 1;
+    },
+    cleanup: () => {
+      calls.cleanup += 1;
+    },
+  };
+
+  const directCancel = jobProtocol.settleQueueCancellation(settlementOptions);
+  const remove = jobProtocol.cancelJobThenRemove({
+    jobId: settlementOptions.jobId,
+    pending: removals,
+    settle: () => jobProtocol.settleQueueCancellation({
+      ...settlementOptions,
+      requestCancellation: false,
+    }),
+    remove: () => {
+      calls.remove += 1;
+      settlements.delete(settlementOptions.jobId);
+    },
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(calls, { request: 1, abort: 0, cleanup: 0, remove: 0 });
+  rejectCancel(new Error("server cancel rejected"));
+  const [directResult, removeResult] = await Promise.allSettled([directCancel, remove]);
+
+  assert.equal(directResult.status, "rejected");
+  assert.equal(removeResult.status, "fulfilled");
+  assert.deepEqual(calls, { request: 1, abort: 1, cleanup: 1, remove: 1 });
+  assert.equal(settlements.has(settlementOptions.jobId), false);
+  assert.equal(removals.has(settlementOptions.jobId), false);
+});

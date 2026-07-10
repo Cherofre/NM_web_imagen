@@ -71,19 +71,15 @@ $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 Invoke-Step "Frontend tests" {
   Push-Location $StudioDir
   try {
-    Invoke-NativeCommand -Command "node" -Arguments @(
-      "--test",
-      ".\src\configProfiles.test.mjs",
-      ".\src\configProfileSelection.test.mjs",
-      ".\src\generationQueue.test.mjs",
-      ".\src\queuePersistence.test.mjs",
-      ".\src\queueSessionBoundaries.test.mjs",
-      ".\src\sessionDrafts.test.mjs",
-      ".\src\submissionPayload.test.mjs",
-      ".\src\uiPolish.test.mjs",
-      ".\src\gptSizeSelection.test.mjs",
-      ".\src\i18n.test.mjs"
+    $FrontendTestFiles = @(
+      Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs" -File |
+        Sort-Object Name |
+        ForEach-Object { ".\src\$($_.Name)" }
     )
+    if ($FrontendTestFiles.Count -eq 0) {
+      throw "No frontend test modules were found."
+    }
+    Invoke-NativeCommand -Command "node" -Arguments (@("--test") + $FrontendTestFiles)
   } finally {
     Pop-Location
   }
@@ -101,7 +97,7 @@ Invoke-Step "Frontend build" {
 Invoke-Step "Backend checks" {
   $env:PYTHONUTF8 = "1"
   Invoke-NativeCommand -Command "python" -Arguments @("-m", "py_compile", ".\app.py")
-  Invoke-NativeCommand -Command "python" -Arguments @("-m", "unittest", "tests.test_studio_sessions", "tests.test_release_cache_busting")
+  Invoke-NativeCommand -Command "python" -Arguments @("-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py")
 }
 
 Invoke-Step "Package clean zip" {
