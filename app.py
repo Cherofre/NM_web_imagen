@@ -1095,11 +1095,13 @@ def normalize_studio_reference(
                     handle.flush()
                     os.fsync(handle.fileno())
             except Exception:
+                removed = False
                 try:
                     target_path.unlink(missing_ok=True)
+                    removed = not target_path.exists()
                 except OSError:
                     pass
-                if created_paths is not None:
+                if removed and created_paths is not None:
                     created_paths.discard(resolved_target)
                 raise
             break

@@ -354,6 +354,57 @@ class StudioSessionTests(unittest.TestCase):
         )
         self.assertEqual([], list(self.outputs.rglob("*.tmp")))
 
+    def test_session_reference_write_failure_retries_transient_cleanup(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        old_bytes = old_path.read_bytes()
+        payload = studio_session_payload(
+            "写入失败回滚",
+            expected_revision=current["revision"],
+            references=[
+                {
+                    "id": "ref-1",
+                    "name": "replacement.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW + b"partial-write"),
+                }
+            ],
+        )
+        reference_root = (self.outputs / "session_refs").resolve()
+        old_resolved = old_path.resolve()
+        new_unlink_attempts = []
+        path_type = type(old_path)
+        original_unlink = path_type.unlink
+
+        def flaky_new_reference_unlink(path, *args, **kwargs):
+            resolved = path.resolve()
+            if resolved != old_resolved and reference_root in resolved.parents:
+                new_unlink_attempts.append(resolved)
+                if len(new_unlink_attempts) == 1:
+                    raise OSError("transient unlink failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with (
+            patch.object(webapp.os, "fsync", side_effect=OSError("reference fsync failed")),
+            patch.object(
+                path_type,
+                "unlink",
+                autospec=True,
+                side_effect=flaky_new_reference_unlink,
+            ),
+        ):
+            with self.assertRaisesRegex(OSError, "reference fsync failed"):
+                webapp.write_studio_session_state(payload)
+
+        self.assertGreaterEqual(len(new_unlink_attempts), 2)
+        self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
+        self.assertTrue(old_path.exists())
+        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(
+            {old_resolved},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
+
     def test_session_reference_uuid_collisions_never_delete_current_reference(self) -> None:
         colliding_hex = "a" * 32
         with patch.object(webapp, "uuid4", return_value=SimpleNamespace(hex=colliding_hex)):
