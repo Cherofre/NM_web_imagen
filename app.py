@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qsl, quote, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
 
 import requests
 import uvicorn
@@ -22,6 +22,18 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFil
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+from image_safety import (
+    REFERENCE_IMAGE_MAX_BYTES,
+    REFERENCE_REQUEST_MAX_BYTES,
+    REMOTE_RESULT_MAX_BYTES,
+    ImageSafetyError,
+    decode_raster_data_url,
+    detect_raster_mime,
+    read_limited_chunks,
+    resolve_output_image,
+    validate_raster_bytes,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -60,7 +72,21 @@ ENGINE_FORM_IDS = {
     "gpt-image-2": "gpt-image-2-form",
 }
 FORM_ENGINES = {value: key for key, value in ENGINE_FORM_IDS.items()}
-LOCAL_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+
+
+def dev_cors_origins() -> List[str]:
+    return [
+        item.strip().rstrip("/")
+        for item in os.getenv("IMAGE_TOOL_DEV_CORS_ORIGINS", "").split(",")
+        if item.strip()
+    ]
+
+
+def validate_bind_host(host: str) -> str:
+    value = str(host or "").strip().lower()
+    if value not in {"127.0.0.1", "localhost", "::1", "[::1]"}:
+        raise ValueError("当前版本只允许绑定本机回环地址；不支持无认证局域网共享。")
+    return host
 
 
 def read_app_version() -> str:
@@ -715,7 +741,7 @@ def path_from_output_url(value: str) -> Optional[Path]:
     source = str(value or "").strip()
     if not source.startswith(f"{OUTPUTS_URL_PREFIX}/"):
         return None
-    relative = source[len(OUTPUTS_URL_PREFIX):].lstrip("/")
+    relative = unquote(source[len(OUTPUTS_URL_PREFIX):].lstrip("/"))
     candidate = (OUTPUTS_DIR / relative).resolve()
     try:
         candidate.relative_to(OUTPUTS_DIR.resolve())
@@ -724,40 +750,18 @@ def path_from_output_url(value: str) -> Optional[Path]:
     return candidate
 
 
-def extract_image_bytes(src: str, fallback_mime_type: str = "image/png") -> Optional[Tuple[bytes, str]]:
+def extract_image_bytes(src: str) -> Optional[Tuple[bytes, str]]:
+    """Decode embedded raster data only; remote URLs use download_remote_image()."""
     source = str(src or "").strip()
-    if not source:
+    if not source.startswith("data:"):
         return None
-
-    if source.startswith("data:"):
-        match = re.match(r"^data:(image/[^;]+);base64,(.+)$", source, re.IGNORECASE | re.DOTALL)
-        if not match:
-            return None
-        raw_bytes = base64.b64decode(match.group(2), validate=False)
-        mime_type = detect_image_mime_type(raw_bytes, match.group(1) or fallback_mime_type)
-        return raw_bytes, mime_type
-
-    if source.startswith(("http://", "https://")):
-        try:
-            response = requests.get(
-                source,
-                timeout=(15, 45),
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "image/*,*/*;q=0.8",
-                },
-            )
-            response.raise_for_status()
-        except Exception:
-            return None
-
-        content_type = response.headers.get("Content-Type", fallback_mime_type).split(";", 1)[0].strip()
-        mime_type = detect_image_mime_type(response.content, content_type or fallback_mime_type)
-        if not mime_type.startswith("image/"):
-            return None
-        return response.content, mime_type
-
-    return None
+    try:
+        return decode_raster_data_url(
+            source,
+            max_bytes=REMOTE_RESULT_MAX_BYTES,
+        )
+    except ImageSafetyError:
+        return None
 
 
 def save_generated_images(engine: str, images: List[Dict[str, str]]) -> int:
@@ -771,7 +775,7 @@ def save_generated_images(engine: str, images: List[Dict[str, str]]) -> int:
 
     for index, image in enumerate(images, start=1):
         try:
-            extracted = extract_image_bytes(image.get("src", ""), image.get("mime_type", "image/png"))
+            extracted = extract_image_bytes(image.get("src", ""))
             if not extracted:
                 image["save_status"] = "skipped"
                 continue
@@ -874,29 +878,50 @@ def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, ind
         pass
 
     if src:
-        existing_path = path_from_output_url(src)
-        if existing_path and existing_path.is_file():
-            normalized["src"] = src
-            return normalized
+        try:
+            if src.startswith(f"{OUTPUTS_URL_PREFIX}/"):
+                existing_path = path_from_output_url(src)
+                if existing_path is None:
+                    raise ImageSafetyError("参考图输出路径无效")
+                relative_path = existing_path.relative_to(OUTPUTS_DIR.resolve())
+                validated_path = resolve_output_image(OUTPUTS_DIR, str(relative_path))
+                with validated_path.open("rb") as handle:
+                    detected_mime_type = detect_raster_mime(handle.read(16))
+                normalized["src"] = src
+                normalized["mime_type"] = detected_mime_type
+                normalized["size"] = validated_path.stat().st_size
+                return normalized
 
-        extracted = extract_image_bytes(src, normalized["mime_type"])
-        if extracted:
-            raw_bytes, detected_mime_type = extracted
-            extension = guess_extension(detected_mime_type)
-            filename = (
-                f"{safe_filename_part(session_id, 'session')}-"
-                f"{safe_filename_part(turn_id, 'turn')}-"
-                f"{index + 1:02d}-{safe_filename_part(name, 'reference')}{extension}"
+            if src.startswith(("http://", "https://")):
+                raise ImageSafetyError("参考图不允许使用远程 URL")
+            if not src.startswith("data:"):
+                raise ImageSafetyError("参考图只支持本工具输出图片或 data URL")
+
+            raw_bytes, detected_mime_type = decode_raster_data_url(
+                src,
+                max_bytes=REFERENCE_IMAGE_MAX_BYTES,
             )
-            SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
-            target_path = SESSION_REFS_DIR / filename
-            target_path.write_bytes(raw_bytes)
-            normalized["src"] = output_url_for_path(target_path)
-            normalized["mime_type"] = detected_mime_type
-            normalized["size"] = len(raw_bytes)
-            dimensions = detect_image_dimensions(raw_bytes, detected_mime_type)
-            if dimensions:
-                normalized["dimensions"] = dimensions
+        except ImageSafetyError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=str(exc),
+            ) from exc
+
+        extension = guess_extension(detected_mime_type)
+        filename = (
+            f"{safe_filename_part(session_id, 'session')}-"
+            f"{safe_filename_part(turn_id, 'turn')}-"
+            f"{index + 1:02d}-{safe_filename_part(name, 'reference')}{extension}"
+        )
+        SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
+        target_path = SESSION_REFS_DIR / filename
+        target_path.write_bytes(raw_bytes)
+        normalized["src"] = output_url_for_path(target_path)
+        normalized["mime_type"] = detected_mime_type
+        normalized["size"] = len(raw_bytes)
+        dimensions = detect_image_dimensions(raw_bytes, detected_mime_type)
+        if dimensions:
+            normalized["dimensions"] = dimensions
     return normalized
 
 
@@ -1343,22 +1368,34 @@ def download_remote_image(url: str) -> Optional[Dict[str, str]]:
         response = requests.get(
             url,
             timeout=(15, 30),
+            stream=True,
             headers={
                 "User-Agent": "Mozilla/5.0",
                 "Accept": "image/*,*/*;q=0.8",
             },
         )
         response.raise_for_status()
-        mime_type = (
-            response.headers.get("Content-Type", "image/png").split(";", 1)[0].strip()
-            or "image/png"
+        content_length = str(response.headers.get("Content-Length") or "").strip()
+        if content_length:
+            try:
+                parsed_content_length = int(content_length)
+            except ValueError:
+                parsed_content_length = 0
+            if parsed_content_length > REMOTE_RESULT_MAX_BYTES:
+                raise ImageSafetyError("远程图片超过容量限制", 413)
+        raw_bytes = read_limited_chunks(
+            response.iter_content(64 * 1024),
+            max_bytes=REMOTE_RESULT_MAX_BYTES,
         )
-        if not mime_type.startswith("image/"):
-            detected_mime_type = detect_image_mime_type(response.content, fallback="")
-            if not detected_mime_type.startswith("image/"):
-                return None
-            mime_type = detected_mime_type
-        payload = base64.b64encode(response.content).decode("utf-8")
+        claimed_mime = (
+            response.headers.get("Content-Type", "").split(";", 1)[0].strip()
+        )
+        mime_type = validate_raster_bytes(
+            raw_bytes,
+            max_bytes=REMOTE_RESULT_MAX_BYTES,
+            claimed_mime=claimed_mime,
+        )
+        payload = base64.b64encode(raw_bytes).decode("utf-8")
         return {
             "src": data_url_from_base64(payload, mime_type),
             "mime_type": mime_type,
@@ -1406,14 +1443,20 @@ def extract_banana_images(response_data: Dict[str, Any]) -> Dict[str, Any]:
                 base64_data = inline_data.get("data")
                 mime_type = inline_data.get("mimeType") or "image/png"
                 if isinstance(base64_data, str) and base64_data.strip():
-                    images.append(
-                        {
-                            "src": data_url_from_base64(base64_data, mime_type),
-                            "mime_type": mime_type,
-                            "source": "inlineData",
-                        }
+                    extracted = extract_image_bytes(
+                        data_url_from_base64(base64_data, mime_type),
                     )
-                    continue
+                    if extracted:
+                        raw_bytes, detected_mime_type = extracted
+                        encoded = base64.b64encode(raw_bytes).decode("utf-8")
+                        images.append(
+                            {
+                                "src": data_url_from_base64(encoded, detected_mime_type),
+                                "mime_type": detected_mime_type,
+                                "source": "inlineData",
+                            }
+                        )
+                        continue
 
             file_data = part.get("fileData")
             if isinstance(file_data, dict):
@@ -1432,10 +1475,17 @@ def extract_banana_images(response_data: Dict[str, Any]) -> Dict[str, Any]:
                 markdown_matches = MARKDOWN_BASE64_IMAGE_PATTERN.findall(text_content)
                 if markdown_matches:
                     for mime_type, base64_data in markdown_matches:
+                        extracted = extract_image_bytes(
+                            data_url_from_base64(base64_data, mime_type),
+                        )
+                        if not extracted:
+                            continue
+                        raw_bytes, detected_mime_type = extracted
+                        encoded = base64.b64encode(raw_bytes).decode("utf-8")
                         images.append(
                             {
-                                "src": data_url_from_base64(base64_data, mime_type),
-                                "mime_type": mime_type,
+                                "src": data_url_from_base64(encoded, detected_mime_type),
+                                "mime_type": detected_mime_type,
                                 "source": "markdown-base64",
                             }
                         )
@@ -1465,14 +1515,6 @@ def extract_banana_images(response_data: Dict[str, Any]) -> Dict[str, Any]:
         downloaded = download_remote_image(image_url)
         if downloaded:
             images.append(downloaded)
-        else:
-            images.append(
-                {
-                    "src": image_url,
-                    "mime_type": "image/*",
-                    "source": "remote-url",
-                }
-            )
 
     return {
         "images": images,
@@ -1489,18 +1531,33 @@ async def read_upload_assets(
         raise HTTPException(status_code=400, detail=f"参考图最多支持 {limit} 张")
 
     assets: List[Dict[str, Any]] = []
+    total_bytes = 0
     for index, upload in enumerate(uploads, start=1):
-        raw_bytes = await upload.read()
+        raw_bytes = await upload.read(REFERENCE_IMAGE_MAX_BYTES + 1)
         if not raw_bytes:
             continue
-        mime_type = (
+        claimed_mime = (
             upload.content_type
             or mimetypes.guess_type(upload.filename or "")[0]
-            or "image/png"
+            or ""
         )
-        if not mime_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail="上传的参考文件必须是图片")
-        mime_type = detect_image_mime_type(raw_bytes, mime_type)
+        try:
+            mime_type = validate_raster_bytes(
+                raw_bytes,
+                max_bytes=REFERENCE_IMAGE_MAX_BYTES,
+                claimed_mime=claimed_mime,
+            )
+        except ImageSafetyError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=str(exc),
+            ) from exc
+        total_bytes += len(raw_bytes)
+        if total_bytes > REFERENCE_REQUEST_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="参考图总大小超过 150 MiB 限制",
+            )
         encoded = base64.b64encode(raw_bytes).decode("utf-8")
         filename = upload.filename or f"reference-{index}{guess_extension(mime_type)}"
         asset = {
@@ -2014,17 +2071,6 @@ def estimate_cost(total_tokens: int) -> str:
     return f"${cost:.4f}"
 
 
-def try_download_or_keep_url(url: str) -> Dict[str, str]:
-    downloaded = download_remote_image(url)
-    if downloaded:
-        return downloaded
-    return {
-        "src": url,
-        "mime_type": "image/*",
-        "source": "remote-url",
-    }
-
-
 def extract_gpt_image_values(payload: Dict[str, Any]) -> List[str]:
     """Collect image values from Images API and Responses API style payloads."""
     values: List[str] = []
@@ -2069,13 +2115,12 @@ def normalize_plain_base64_image(value: str) -> Optional[Tuple[str, str]]:
     if not cleaned:
         return None
     cleaned += "=" * ((-len(cleaned)) % 4)
-    try:
-        raw_bytes = base64.b64decode(cleaned, validate=False)
-    except Exception:
+    extracted = extract_image_bytes(
+        data_url_from_base64(cleaned, "image/png"),
+    )
+    if not extracted:
         return None
-    mime_type = detect_image_mime_type(raw_bytes, "")
-    if not mime_type.startswith("image/"):
-        return None
+    raw_bytes, mime_type = extracted
     encoded = base64.b64encode(raw_bytes).decode("utf-8")
     return data_url_from_base64(encoded, mime_type), mime_type
 
@@ -2084,17 +2129,24 @@ def build_gpt_images_from_response(response_data: Dict[str, Any]) -> List[Dict[s
     images: List[Dict[str, str]] = []
     for index, image_value in enumerate(extract_gpt_image_values(response_data), start=1):
         if image_value.startswith(("http://", "https://")):
-            kept = try_download_or_keep_url(image_value)
-            kept["name"] = f"gpt-image-2-{index:02d}{guess_extension(kept['mime_type'])}"
-            images.append(kept)
+            downloaded = download_remote_image(image_value)
+            if not downloaded:
+                continue
+            downloaded["name"] = (
+                f"gpt-image-2-{index:02d}{guess_extension(downloaded['mime_type'])}"
+            )
+            images.append(downloaded)
             continue
 
         if image_value.startswith("data:image"):
-            mime_match = re.match(r"data:(image/[^;]+);base64,", image_value)
-            mime_type = mime_match.group(1) if mime_match else "image/png"
+            extracted = extract_image_bytes(image_value)
+            if not extracted:
+                continue
+            raw_bytes, mime_type = extracted
+            encoded = base64.b64encode(raw_bytes).decode("utf-8")
             images.append(
                 {
-                    "src": image_value,
+                    "src": data_url_from_base64(encoded, mime_type),
                     "mime_type": mime_type,
                     "source": "data-url",
                     "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
@@ -2119,20 +2171,20 @@ def build_gpt_images_from_response(response_data: Dict[str, Any]) -> List[Dict[s
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Image Generate Web Tool", version="1.0.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[],
-        allow_origin_regex=LOCAL_CORS_ORIGIN_REGEX,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        allow_credentials=False,
-    )
+    origins = dev_cors_origins()
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            allow_credentials=False,
+        )
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     studio_assets_dir = STUDIO_STATIC_DIR / "assets"
     if studio_assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(studio_assets_dir)), name="studio-assets")
-    app.mount(OUTPUTS_URL_PREFIX, StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 
     @app.exception_handler(Exception)
     async def handle_unexpected_exception(_request: Request, exc: Exception) -> JSONResponse:
@@ -2157,6 +2209,19 @@ def create_app() -> FastAPI:
     @app.get("/classic")
     async def classic_index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/outputs/{relative_path:path}")
+    async def output_image(relative_path: str) -> FileResponse:
+        try:
+            path = resolve_output_image(OUTPUTS_DIR, relative_path)
+            with path.open("rb") as handle:
+                mime_type = detect_raster_mime(handle.read(16))
+        except (ImageSafetyError, OSError) as exc:
+            raise HTTPException(status_code=404, detail="图片不存在") from exc
+        response = FileResponse(path, media_type=mime_type)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Cache-Control"] = "private, max-age=3600"
+        return response
 
     @app.get("/api/health")
     async def health() -> Dict[str, Any]:
@@ -2847,6 +2912,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7861)
     args = parser.parse_args()
+    validate_bind_host(args.host)
     uvicorn.run(app, host=args.host, port=args.port)
 
 
