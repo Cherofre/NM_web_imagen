@@ -2795,10 +2795,12 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
                 secrets,
             )
         response_data = response_json_utf8_first(response)
-        if not extract_gpt_image_values(
+        parsed_images = await build_gpt_images_from_response_async(
             response_data if isinstance(response_data, dict) else {},
-            limit=1,
-        ):
+            max_images=1,
+            budget=UpstreamImageBudget(max_images=1),
+        )
+        if not parsed_images:
             return diagnostic_result(
                 "generation",
                 "生图",

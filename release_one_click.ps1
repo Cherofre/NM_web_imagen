@@ -80,6 +80,7 @@ Invoke-Step "Frontend tests" {
       throw "No frontend test modules were found."
     }
     Invoke-NativeCommand -Command "node" -Arguments (@("--test") + $FrontendTestFiles)
+    Invoke-NativeCommand -Command "npm" -Arguments @("run", "test:size")
   } finally {
     Pop-Location
   }

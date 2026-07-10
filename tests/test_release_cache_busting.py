@@ -537,6 +537,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertEqual(14, len(node_modules), node_modules)
         for module in NEW_NODE_GATE_MODULES:
             self.assertIn(module, node_modules)
+        self.assertIn('-Command "npm" -Arguments @("run", "test:size")', script)
         self.assertIn('-Command "npm" -Arguments @("run", "build")', script)
         self.assertIn('-Command "python" -Arguments @("-m", "py_compile", ".\\app.py")', script)
         self.assertIn('"-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"', script)

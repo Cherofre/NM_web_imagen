@@ -1719,6 +1719,29 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "E_LOCAL_OPEN_OUTPUTS",
         )
 
+    async def test_gpt_generation_diagnostic_requires_a_valid_raster_result(self) -> None:
+        with patch.object(
+            webapp.requests,
+            "post",
+            return_value=FakeJsonResponse({"data": [{"b64_json": "not-a-raster"}]}),
+        ):
+            response = await self.client.post(
+                "/api/diagnostics",
+                json={
+                    "engine": "gpt-image-2",
+                    "checks": ["generation"],
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        result = response.json()["results"][0]
+        self.assertFalse(result["ok"])
+        self.assertEqual(502, result.get("status_code"))
+        self.assertEqual("E_UPSTREAM_RESPONSE", result.get("error_code"))
+
     async def test_all_diagnostics_use_public_status_classification(self) -> None:
         class BananaSession:
             def __init__(self, outcome):
