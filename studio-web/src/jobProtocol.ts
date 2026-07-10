@@ -21,3 +21,26 @@ export function cancellationNotice(language: JobProtocolLanguage) {
     ? "Canceled locally. If the provider already accepted the request, it may still run or be billed."
     : "已在本地取消；如果上游已经接单，仍可能继续运行或计费。";
 }
+
+export async function cancelJobBeforeAbort<Result>({
+  markCanceling,
+  requestCancel,
+  abort,
+  cleanup,
+}: {
+  markCanceling: () => void;
+  requestCancel: () => Result | Promise<Result>;
+  abort: () => void;
+  cleanup: () => void;
+}) {
+  markCanceling();
+  try {
+    return await requestCancel();
+  } finally {
+    try {
+      abort();
+    } finally {
+      cleanup();
+    }
+  }
+}

@@ -1068,28 +1068,45 @@ def normalize_studio_reference(
         if raw_bytes is None:
             raise HTTPException(status_code=400, detail="参考图内容无效")
         extension = guess_extension(detected_mime_type)
-        filename = (
-            f"{safe_filename_part(session_id, 'session')[:32]}-"
-            f"{safe_filename_part(turn_id, 'turn')[:32]}-"
-            f"{index + 1:02d}-{uuid4().hex}-"
-            f"{safe_filename_part(Path(name).stem, 'reference')[:48]}{extension}"
-        )
         SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
-        target_path = SESSION_REFS_DIR / filename
-        resolved_target = target_path.resolve()
-        if created_paths is not None:
-            created_paths.add(resolved_target)
-        try:
-            with target_path.open("xb") as handle:
-                handle.write(raw_bytes)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except Exception:
+        target_path: Optional[Path] = None
+        last_collision: Optional[FileExistsError] = None
+        for _ in range(8):
+            filename = (
+                f"{safe_filename_part(session_id, 'session')[:32]}-"
+                f"{safe_filename_part(turn_id, 'turn')[:32]}-"
+                f"{index + 1:02d}-{uuid4().hex}-"
+                f"{safe_filename_part(Path(name).stem, 'reference')[:48]}{extension}"
+            )
+            candidate_path = SESSION_REFS_DIR / filename
             try:
-                target_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
+                handle = candidate_path.open("xb")
+            except FileExistsError as exc:
+                last_collision = exc
+                continue
+
+            target_path = candidate_path
+            resolved_target = target_path.resolve()
+            if created_paths is not None:
+                created_paths.add(resolved_target)
+            try:
+                with handle:
+                    handle.write(raw_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except Exception:
+                try:
+                    target_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                if created_paths is not None:
+                    created_paths.discard(resolved_target)
+                raise
+            break
+        if target_path is None:
+            if last_collision is not None:
+                raise last_collision
+            raise FileExistsError("无法创建唯一的会话参考图文件")
         normalized["src"] = output_url_for_path(target_path)
         normalized["mime_type"] = detected_mime_type
         normalized["size"] = len(raw_bytes)
@@ -2194,7 +2211,6 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             endpoint,
             headers=gpt_headers(
                 api_key,
-                accept="application/json",
                 content_type="application/json",
             ),
             json={
@@ -2251,7 +2267,6 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             endpoint,
             headers=gpt_headers(
                 api_key,
-                accept="application/json",
                 content_type="application/json",
             ),
             json=chat_payload,
@@ -2564,10 +2579,11 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="job_id 无效") from exc
 
-    async def generation_job_scope(
-        job_id: Optional[str] = Form(default=None),
-    ) -> AsyncIterator[str]:
-        normalized = normalized_request_job_id(job_id, allow_empty=job_id is None)
+    async def generation_job_scope(request: Request) -> AsyncIterator[str]:
+        form = await request.form()
+        explicit = "job_id" in form
+        raw_job_id = form.get("job_id") if explicit else None
+        normalized = normalized_request_job_id(raw_job_id, allow_empty=not explicit)
         if normalized:
             JOB_REGISTRY.register(normalized)
         try:
@@ -2653,7 +2669,7 @@ def create_app() -> FastAPI:
             "features": {"studio_sessions": True, "session_reference_files": True},
         }
 
-    @app.post("/api/jobs/{job_id}/cancel")
+    @app.post("/api/jobs/{job_id:path}/cancel")
     async def cancel_job(job_id: str) -> Dict[str, Any]:
         normalized = normalized_request_job_id(job_id, allow_empty=False)
         JOB_REGISTRY.cancel(normalized)

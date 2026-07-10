@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+import * as sessionRevision from "./sessionRevision.ts";
+
+const {
   buildSessionSavePayload,
   mergeSessionsByUpdatedAt,
   nextSessionSaveAttempt,
   normalizeSessionRevision,
-} from "./sessionRevision.ts";
+} = sessionRevision;
 
 test("session save payload carries the expected backend revision exactly", () => {
   const sessions = [{ id: "s1", updatedAt: "2026-07-10T10:00:00Z" }];
@@ -72,4 +74,101 @@ test("session conflict retry decision permits only one retry", () => {
   assert.deepEqual(firstConflict, { retry: true, nextRetryCount: 1 });
   assert.deepEqual(secondConflict, { retry: false, nextRetryCount: 1 });
   assert.deepEqual(nextSessionSaveAttempt(0, 500), { retry: false, nextRetryCount: 0 });
+});
+
+test("session save retry helper succeeds on the first response", async () => {
+  assert.equal(typeof sessionRevision.runSessionSaveWithRetry, "function");
+  const initialState = { name: "initial" };
+  const sends = [];
+  let conflictCalls = 0;
+
+  const result = await sessionRevision.runSessionSaveWithRetry({
+    initialState,
+    send: async (state, attempt) => {
+      sends.push({ state, attempt });
+      return { ok: true, status: 200, payload: { revision: 2 } };
+    },
+    resolveConflict: async () => {
+      conflictCalls += 1;
+      return null;
+    },
+  });
+
+  assert.equal(result.kind, "success");
+  assert.equal(result.attempts, 1);
+  assert.equal(result.state, initialState);
+  assert.deepEqual(sends, [{ state: initialState, attempt: 0 }]);
+  assert.equal(conflictCalls, 0);
+});
+
+test("session save retry helper resolves one conflict then succeeds", async () => {
+  assert.equal(typeof sessionRevision.runSessionSaveWithRetry, "function");
+  const initialState = { name: "initial" };
+  const mergedState = { name: "merged" };
+  const sends = [];
+  const conflicts = [];
+
+  const result = await sessionRevision.runSessionSaveWithRetry({
+    initialState,
+    send: async (state, attempt) => {
+      sends.push({ state, attempt });
+      return attempt === 0
+        ? { ok: false, status: 409, payload: { current: { revision: 2 } } }
+        : { ok: true, status: 200, payload: { revision: 3 } };
+    },
+    resolveConflict: async (response, state) => {
+      conflicts.push({ response, state });
+      return mergedState;
+    },
+  });
+
+  assert.equal(result.kind, "success");
+  assert.equal(result.attempts, 2);
+  assert.equal(result.state, mergedState);
+  assert.deepEqual(sends, [
+    { state: initialState, attempt: 0 },
+    { state: mergedState, attempt: 1 },
+  ]);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].state, initialState);
+});
+
+test("session save retry helper exhausts after a second conflict", async () => {
+  assert.equal(typeof sessionRevision.runSessionSaveWithRetry, "function");
+  const initialState = { name: "initial" };
+  const mergedState = { name: "merged" };
+  const sends = [];
+  let conflictCalls = 0;
+
+  const result = await sessionRevision.runSessionSaveWithRetry({
+    initialState,
+    send: async (state, attempt) => {
+      sends.push({ state, attempt });
+      return { ok: false, status: 409, payload: { current: { revision: attempt + 2 } } };
+    },
+    resolveConflict: async () => {
+      conflictCalls += 1;
+      return mergedState;
+    },
+  });
+
+  assert.equal(result.kind, "exhausted");
+  assert.equal(result.attempts, 2);
+  assert.equal(result.state, mergedState);
+  assert.deepEqual(sends, [
+    { state: initialState, attempt: 0 },
+    { state: mergedState, attempt: 1 },
+  ]);
+  assert.equal(conflictCalls, 1);
+});
+
+test("session save skip token matches only the exact merged state", () => {
+  assert.equal(typeof sessionRevision.shouldSkipSessionSave, "function");
+  const mergedSessions = [{ id: "s1" }];
+  const token = { sessions: mergedSessions, activeSessionId: "s1" };
+
+  assert.equal(sessionRevision.shouldSkipSessionSave(token, mergedSessions, "s1"), true);
+  assert.equal(sessionRevision.shouldSkipSessionSave(token, [...mergedSessions], "s1"), false);
+  assert.equal(sessionRevision.shouldSkipSessionSave(token, mergedSessions, "s2"), false);
+  assert.equal(sessionRevision.shouldSkipSessionSave(null, mergedSessions, "s1"), false);
 });

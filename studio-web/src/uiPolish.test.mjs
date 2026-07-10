@@ -158,7 +158,7 @@ test("queue rows expose cancel retry apply and remove controls", () => {
 });
 
 test("queue and chat requests share backend job cancellation protocol", () => {
-  assert.match(appSource, /import \{ appendJobId, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
+  assert.match(appSource, /import \{ appendJobId, cancelJobBeforeAbort, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
   assert.match(appSource, /function createFormData\([\s\S]*jobId: string,[\s\S]*return appendJobId\(data, jobId\);/);
   assert.match(appSource, /function createChatPayload\([\s\S]*jobId: string,[\s\S]*return withJobId\(/);
   assert.match(appSource, /createFormData\([\s\S]*payload\.posterText,[\s\S]*payload\.jobId,[\s\S]*\)/);
@@ -168,10 +168,11 @@ test("queue and chat requests share backend job cancellation protocol", () => {
   const cancelEnd = appSource.indexOf("function retryQueueJob", cancelStart);
   const cancelSource = appSource.slice(cancelStart, cancelEnd);
   assert.notEqual(cancelStart, -1, "cancelQueueJob must be async");
-  assert.match(cancelSource, /await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)/);
-  assert.match(cancelSource, /if \(!response\.ok\) throw new Error/);
-  assert.match(cancelSource, /finally\s*\{[\s\S]*\.abort\(\);[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
-  assert.ok(cancelSource.indexOf("await fetch") < cancelSource.indexOf(".abort()"), "backend cancel must settle before local abort");
+  assert.match(cancelSource, /await cancelJobBeforeAbort\(\{/);
+  assert.match(cancelSource, /markCanceling:\s*\(\) => \{[\s\S]*cancelingQueueJobsRef\.current\.add\(job\.id\);[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
+  assert.match(cancelSource, /requestCancel:\s*async \(\) => \{[\s\S]*await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
+  assert.match(cancelSource, /abort:\s*\(\) => abortController\?\.abort\(\)/);
+  assert.match(cancelSource, /cleanup:\s*\(\) => \{[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
   assert.match(cancelSource, /cancellationNotice\(language\)/);
   assert.match(appSource, /void cancelQueueJob\(job\);/);
   assert.match(appSource, /onClick=\{\(\) => void cancelQueueJob\(job\)\}/);
@@ -239,7 +240,7 @@ test("session persistence defers heavy storage work while typing", () => {
 });
 
 test("session persistence merges one revision conflict and retries exactly once", () => {
-  assert.match(appSource, /import \{ buildSessionSavePayload, mergeSessionsByUpdatedAt, nextSessionSaveAttempt, normalizeSessionRevision \} from "\.\/sessionRevision";/);
+  assert.match(appSource, /import \{ buildSessionSavePayload, mergeSessionsByUpdatedAt, normalizeSessionRevision, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
   assert.match(appSource, /function normalizeSessionStatePayload\([\s\S]*revision:\s*normalizeSessionRevision\(source\.revision\)/);
   assert.match(appSource, /const sessionsRef = useRef<WorkbenchSession\[\]>\(sessions\);/);
   assert.match(appSource, /const sessionRevisionRef = useRef\(1\);/);
@@ -251,20 +252,23 @@ test("session persistence merges one revision conflict and retries exactly once"
   const saveEnd = appSource.indexOf("useEffect(() =>", saveStart);
   const saveSource = appSource.slice(saveStart, saveEnd);
   assert.notEqual(saveStart, -1, "Missing bounded session save helper");
-  assert.match(saveSource, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
-  assert.match(saveSource, /buildSessionSavePayload\(sessionRevisionRef\.current, attemptActiveSessionId, attemptSessions\)/);
-  assert.match(saveSource, /const decision = nextSessionSaveAttempt\(retryCount, response\.status\);/);
-  assert.match(saveSource, /const currentPayload = responsePayload\.current;/);
+  assert.match(saveSource, /await runSessionSaveWithRetry\(\{/);
+  assert.match(saveSource, /initialState:\s*\{ sessions: localSessions, activeSessionId: activeId \}/);
+  assert.match(saveSource, /send:\s*async \(state, _attempt\) => \{[\s\S]*buildSessionSavePayload\(sessionRevisionRef\.current, state\.activeSessionId, state\.sessions\)/);
+  assert.match(saveSource, /resolveConflict:\s*\(response\) => \{/);
+  assert.match(saveSource, /const currentPayload = response\.payload\.current;/);
   assert.match(saveSource, /const latestLocalSessions = compactSessionsForStorage\(sessionsRef\.current\);/);
   assert.match(saveSource, /mergeSessionsByUpdatedAt\(latestLocalSessions, normalizedCurrent\.sessions\)/);
   assert.match(saveSource, /skipNextSessionSaveRef\.current = \{ sessions: mergedSessions, activeSessionId: mergedActiveSessionId \};/);
   assert.match(saveSource, /setSessions\(mergedSessions\);/);
-  assert.match(saveSource, /retryCount = decision\.nextRetryCount;/);
-  assert.match(saveSource, /setNotice\(t\("status\.sessionConflictRefresh"\)\)/);
+  assert.match(saveSource, /return \{[\s\S]*sessions:\s*compactSessionsForStorage\(mergedSessions\),[\s\S]*activeSessionId:\s*mergedActiveSessionId/);
+  assert.match(saveSource, /if \(result\.kind === "exhausted"\) \{[\s\S]*setNotice\(t\("status\.sessionConflictRefresh"\)\)/);
+  assert.match(saveSource, /if \(result\.kind === "unresolved"\) \{[\s\S]*setNotice\(t\("status\.sessionSaveFailed"\)\)/);
+  assert.doesNotMatch(saveSource, /for \(let attempt = 0; attempt < 2;/);
   assert.doesNotMatch(saveSource, /(?:return|await)\s+saveStudioSessionsOnce\(/);
   assert.match(saveSource, /catch \(error\) \{[\s\S]*setNotice\(error instanceof Error && error\.message \? error\.message : t\("status\.sessionSaveFailed"\)\);/);
 
-  assert.match(appSource, /const skipSave = skipNextSessionSaveRef\.current;[\s\S]*skipNextSessionSaveRef\.current = null;[\s\S]*if \(skipSave && skipSave\.sessions === sessions && skipSave\.activeSessionId === activeSessionId\) \{[\s\S]*return undefined;/);
+  assert.match(appSource, /const skipSave = skipNextSessionSaveRef\.current;[\s\S]*skipNextSessionSaveRef\.current = null;[\s\S]*if \(shouldSkipSessionSave\(skipSave, sessions, activeSessionId\)\) \{[\s\S]*return undefined;/);
   assert.match(i18nSource, /"status\.sessionConflictRefresh": "会话已在其他页面更新；自动合并重试仍冲突，请刷新页面后再继续。"/);
   assert.match(i18nSource, /"status\.sessionConflictRefresh": "This chat changed in another tab\. Automatic merge still conflicted; refresh the page before continuing\."/);
 });

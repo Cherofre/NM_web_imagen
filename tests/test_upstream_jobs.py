@@ -515,6 +515,91 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             [call["kind"] for call in executor.calls],
         )
 
+    async def test_gpt_request_headers_match_each_endpoint_contract(self) -> None:
+        executor = RecordingExecutor()
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", side_effect=self._gpt_post),
+        ):
+            diagnostic = await self.client.post(
+                "/api/diagnostics",
+                json={
+                    "engine": "gpt-image-2",
+                    "checks": ["generation", "chat"],
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "chat_model": "gpt-test",
+                },
+            )
+            chat = await self.client.post(
+                "/api/chat/gpt-image-2",
+                json={
+                    "prompt": "hello",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "chat_model": "gpt-test",
+                },
+            )
+            generation = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                },
+            )
+            edit = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "edit square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "api_endpoint": "/v1/images/edits",
+                },
+                files={
+                    "reference_files": (
+                        "reference.png",
+                        base64.b64decode(PNG_1X1),
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertTrue(all(response.status_code == 200 for response in (diagnostic, chat, generation, edit)))
+        self.assertEqual(5, len(executor.calls))
+        self.assertEqual(
+            [
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Accept": "*/*",
+                    "Content-Type": "application/json",
+                },
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Accept": "*/*",
+                    "Content-Type": "application/json",
+                },
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Accept": "*/*",
+                    "Content-Type": "application/json",
+                },
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Accept": "*/*",
+                },
+            ],
+            [call["kwargs"]["headers"] for call in executor.calls],
+        )
+
     async def test_production_remote_results_use_download_executor_kind(self) -> None:
         executor = RecordingExecutor()
         banana_payload = {
@@ -724,6 +809,94 @@ class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
             if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
         ]
 
+    @staticmethod
+    def _generation_cases():
+        return [
+            (
+                "/api/generate/gpt-image-2",
+                {
+                    "prompt": "square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                },
+            ),
+            (
+                "/api/generate/banana",
+                {
+                    "prompt": "square",
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                    "batch_size": "1",
+                },
+            ),
+        ]
+
+    async def test_generation_without_job_id_remains_compatible(self) -> None:
+        executor = RecordingExecutor()
+
+        class FakeBananaSession:
+            def post(_self, *_args, **_kwargs):
+                return FakeBananaImageResponse()
+
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", return_value=self._gpt_image_response()),
+            patch.object(webapp, "create_requests_session", return_value=FakeBananaSession()),
+        ):
+            responses = [
+                await self.client.post(endpoint, data=data)
+                for endpoint, data in self._generation_cases()
+            ]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(["generation", "generation"], [call["kind"] for call in executor.calls])
+
+    async def test_generation_rejects_explicit_invalid_job_ids_before_executor(self) -> None:
+        executor = RecordingExecutor()
+
+        class FakeBananaSession:
+            def post(_self, *_args, **_kwargs):
+                return FakeBananaImageResponse()
+
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", return_value=self._gpt_image_response()),
+            patch.object(webapp, "create_requests_session", return_value=FakeBananaSession()),
+        ):
+            for endpoint, base_data in self._generation_cases():
+                for invalid_job_id in ("", "   ", "!!!"):
+                    with self.subTest(endpoint=endpoint, job_id=invalid_job_id):
+                        response = await self.client.post(
+                            endpoint,
+                            data={**base_data, "job_id": invalid_job_id},
+                        )
+                        self.assertEqual(400, response.status_code)
+
+        self.assertEqual([], executor.calls)
+
+    async def test_generation_normalizes_valid_job_ids_before_register(self) -> None:
+        executor = RecordingExecutor()
+
+        class FakeBananaSession:
+            def post(_self, *_args, **_kwargs):
+                return FakeBananaImageResponse()
+
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", return_value=self._gpt_image_response()),
+            patch.object(webapp, "create_requests_session", return_value=FakeBananaSession()),
+            patch.object(self.registry, "register", wraps=self.registry.register) as register,
+        ):
+            responses = [
+                await self.client.post(endpoint, data={**data, "job_id": "job/a"})
+                for endpoint, data in self._generation_cases()
+            ]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(["job-a", "job-a"], [call.args[0] for call in register.call_args_list])
+
     async def test_cancel_route_normalizes_id_and_rejects_empty_normalization(self) -> None:
         raw_job_id = "job 中文 !!! 123"
         response = await self.client.post(f"/api/jobs/{quote(raw_job_id, safe='')}/cancel")
@@ -748,6 +921,33 @@ class JobCancellationApiTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
         self.assertEqual(400, invalid_entry.status_code)
+        upstream_post.assert_not_called()
+
+    async def test_slash_job_id_uses_same_normalization_for_chat_and_cancel_route(self) -> None:
+        raw_job_id = "job/a"
+        cancel = await self.client.post(f"/api/jobs/{quote(raw_job_id, safe='')}/cancel")
+
+        self.assertEqual(200, cancel.status_code)
+        self.assertEqual("job-a", cancel.json()["job_id"])
+
+        with (
+            patch.object(self.registry, "register", wraps=self.registry.register) as register,
+            patch.object(webapp.requests, "post") as upstream_post,
+        ):
+            chat = await self.client.post(
+                "/api/chat/gpt-image-2",
+                json={
+                    "prompt": "hello",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "chat_model": "gpt-test",
+                    "job_id": raw_job_id,
+                },
+            )
+
+        self.assertEqual(200, chat.status_code)
+        self.assertTrue(chat.json()["canceled"])
+        register.assert_called_once_with("job-a")
         upstream_post.assert_not_called()
 
     async def test_cancel_before_register_skips_upstream_and_same_id_can_be_reused(self) -> None:

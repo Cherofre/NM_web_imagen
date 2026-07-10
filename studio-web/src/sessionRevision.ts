@@ -99,3 +99,61 @@ export function nextSessionSaveAttempt(retryCount: number, status: number) {
   }
   return { retry: false, nextRetryCount: normalizedRetryCount };
 }
+
+export type SessionSaveTransportResponse<Payload> = {
+  ok: boolean;
+  status: number;
+  payload: Payload;
+};
+
+export async function runSessionSaveWithRetry<State, Payload>({
+  initialState,
+  send,
+  resolveConflict,
+}: {
+  initialState: State;
+  send: (state: State, attempt: number) => Promise<SessionSaveTransportResponse<Payload>>;
+  resolveConflict: (
+    response: SessionSaveTransportResponse<Payload>,
+    state: State,
+  ) => State | null | Promise<State | null>;
+}) {
+  let state = initialState;
+  let retryCount = 0;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await send(state, attempt);
+    if (response.ok) {
+      return { kind: "success" as const, state, response, attempts: attempt + 1 };
+    }
+
+    const decision = nextSessionSaveAttempt(retryCount, response.status);
+    if (response.status !== 409) {
+      return { kind: "failure" as const, state, response, attempts: attempt + 1 };
+    }
+    if (!decision.retry) {
+      return { kind: "exhausted" as const, state, response, attempts: attempt + 1 };
+    }
+
+    const resolvedState = await resolveConflict(response, state);
+    if (resolvedState == null) {
+      return { kind: "unresolved" as const, state, response, attempts: attempt + 1 };
+    }
+    state = resolvedState;
+    retryCount = decision.nextRetryCount;
+  }
+
+  throw new Error("unreachable session save retry state");
+}
+
+export function shouldSkipSessionSave<Session>(
+  token: { sessions: readonly Session[]; activeSessionId: string } | null,
+  currentSessions: readonly Session[],
+  activeSessionId: string,
+) {
+  return Boolean(
+    token
+      && token.sessions === currentSessions
+      && token.activeSessionId === activeSessionId,
+  );
+}
