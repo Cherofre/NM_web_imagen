@@ -2,19 +2,19 @@
 
 ## Now
 - [x] Approved the v1.0.6 design/plan, created isolated branch `codex/p1-hardening-v1.0.6`, and verified the v1.0.5 baseline (backend 44/44, frontend 61/61, TypeScript, size rules).
-- [x] Execute and independently review Task 1: local API, outputs, strict raster validation, capacity limits, SSRF closure, and loopback-only host.
-- [x] Execute and independently review Task 2: remove browser Key persistence, make chat references truthful, hide unsupported controls, and fix Banana diagnostics.
-- [x] Execute and independently review Task 3: bounded threaded upstream requests, server-visible cancellation, atomic JSON persistence, Windows replace retry, and revision-bound three-way session conflict handling.
+- [x] Execute and independently review Tasks 1-3: local/image security boundaries, truthful browser behavior, cancellable bounded upstream work, atomic persistence, and revision-bound session merging.
 - [x] Execute and independently review Task 4: PowerShell 5.1 UTF-8 BOM, runtime fingerprint and instance ID, exact-manifest packaging, extracted-package smoke, native failure short-circuiting, and local-before-G release order.
-- [ ] Execute Task 5: bump to 1.0.6, run the full local release/browser matrix, then and only then sync and verify the G: destination.
+- [x] Execute and independently review Task 5: bump to 1.0.6, pass the full local release/API/browser matrix, sync the clean package, and verify the G: destination.
+- [ ] Run final whole-branch review against the approved P1 spec/plan and resolve every Critical/Important finding.
+- [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: Task 5 Step 1 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`, worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`, verified HEAD `7d6e027`.
-- Do not redo: P1 audit, design, plan, worktree setup, baseline, or Tasks 1-4 implementation/reviews. Latest controller evidence is Python 176/176, Node 97/97, size/build/compile/PS5.1 PASS, and a clean 53-file extracted-package smoke.
-- Verify next: update the release-cache version expectation, bump `VERSION` to `1.0.6`, and run the targeted check before rebuilding so stale 1.0.5 assets/package produce the intended RED.
-- Do not claim: a v1.0.6 package, local preflight, API/browser smoke, G: sync, destination verification, or final release-candidate review is complete yet.
-- Release boundary: do not write G: until the complete 1.0.6 local matrix, exact-manifest package, extracted-package smoke, API/browser smoke, and `release_preflight.ps1 -LocalOnly` all pass.
-- Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; edits are detected by strictly newer `updatedAt`; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact manifests intentionally make future new assets/runtime files fail packaging until explicitly allowed, and their validation logic currently exists in three scripts guarded by shared negative tests.
+- Start here: final whole-branch review at verified HEAD `120c3d4` in worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
+- Do not redo: P1 audit, design, plan, worktree setup, or Tasks 1-5 implementation/reviews. Latest controller evidence is Python 176/176, Node 97/97, compile/size/build PASS, exact 52-file package, package smoke, LocalOnly, API/Playwright smoke, G sync, and destination preflight.
+- Verify next: review the complete branch diff against `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md` and `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; if clean, invoke `finishing-a-development-branch` and present integration choices.
+- Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
+- Release boundary: if review changes any packaged file, rebuild/package/smoke/preflight/browser and resync G before restoring the verified-release claim.
+- Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
 
 ## Prior Release Context
 - Historical start point: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.

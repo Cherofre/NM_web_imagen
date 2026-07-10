@@ -1,30 +1,37 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-10 +08:00
-- Phase: v1.0.6 P1 hardening Tasks 1-4 complete; Task 5 release candidate ready
-- Superpowers Phase: subagent-driven development; Task 5 version, local release gates, browser smoke, then G: verification
+- Last Updated: 2026-07-11 +08:00
+- Phase: v1.0.6 P1 hardening Tasks 1-5 complete; release candidate verified and synced
+- Superpowers Phase: final whole-branch review, then finishing-a-development-branch integration decision
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: Task 4 is implemented and independently approved. Windows launch/release scripts are UTF-8 BOM and PowerShell 5.1 compatible; runtime reuse is keyed by portable-Python/requirements/wheel fingerprints; backend reuse requires a resolved-root instance ID; packaging accepts only the exact Classic/Studio/vendor manifest; every native release command fails fast; package smoke and local preflight run before any G: sync. Task 5 now bumps to 1.0.6 and proves the final local package, API/UI behavior, browser compatibility, and destination sync.
-- Latest Verification: Fresh controller matrix at `7d6e027` passed Python 176/176, Node 97/97, four-module `py_compile`, `npm run test:size`, TypeScript/Vite build (1658 modules; `index-DATFWeo_.js` / `index-Gv_GDUKl.css`), and explicit Windows PowerShell 5.1.22621.6133 BOM/parser checks for all six release scripts. A unique TEMP package contained exactly 53 files, zero forbidden matches, SHA256 `0386e622987529cbd41144007f1349c53af9098a206707469dcda2ab833edc12`, and passed fresh portable-runtime smoke at version 1.0.5 with instance ID `47b7b9b68f8658a68e8c`; the TEMP ZIP was removed. Task 4 spec and code-quality reviews report no Critical/Important. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: All approved P1 slices are implemented and independently reviewed. v1.0.6 is built as an exact-manifest offline package, verified through source tests, extracted-package startup, API boundaries, real browser DOM checks, local preflight, G: clean sync, and destination preflight. The remaining work is a final whole-branch review and the user's integration choice; no push, tag, GitHub Release, or merge has been performed.
+- Latest Verification: Fresh controller matrix at `120c3d4` passed Python 176/176, Node 97/97, four-module `py_compile`, `npm run test:size`, and TypeScript/Vite build (1658 modules; `index-DATFWeo_.js` / `index-Gv_GDUKl.css`) with no generated diff. The normalized package manifest contains exactly 52 files and zero forbidden matches; package smoke and `release_preflight.ps1 -ExpectedVersion 1.0.6 -LocalOnly` passed. The final local and G: ZIP SHA256 is `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`. Destination preflight passed with G: folder version 1.0.6, 52 files, zero forbidden matches, and the older v1.0.5 ZIP preserved. Task 5 spec and code-quality reviews report no Critical/Important. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
 
 ## Task 4 Verification
 - RED evidence reproduced that the previous package accepted nested credentials/certificates/databases/internal scripts, accepted missing release-tree contents, and could continue release gates after `py_compile` exited 7.
 - GREEN evidence: `tests.test_release_cache_busting` passed 32/32; source, staged directory, ZIP, preflight, and sync validators reject unknown/missing files, traversal, absolute/drive paths, duplicate paths, and case-insensitive collisions.
-- Compatibility evidence: the valid package keeps Classic's three files, Studio `index.html`, all eight current/fallback hashed JS/CSS assets, the fixed portable Python ZIP, and 25 wheels. No G: write or paid upstream API call occurred in Task 4.
+- Compatibility evidence: the valid normalized manifest contains 52 files and keeps Classic's three files, Studio `index.html`, all eight current/fallback hashed JS/CSS assets, the fixed portable Python ZIP, and 25 wheels. No G: write or paid upstream API call occurred in Task 4.
 - Review result: spec compliant; code quality Ready to proceed. Remaining non-blocking maintenance note: manifest validation is duplicated across package/preflight/sync scripts, so future release-manifest changes must update all three; the shared negative-test matrix currently guards drift.
 
+## Task 5 Verification
+- TDD evidence: the exact release-version test first failed with `1.0.6 != 1.0.5`, then passed after the minimal `VERSION` bump. Before packaging, LocalOnly preflight rejected the missing v1.0.6 ZIP instead of accepting the old v1.0.5 package.
+- Local matrix: Python 176/176, Node 97/97, four-module compile, size rules, deterministic Studio build, 52-file exact ZIP, zero forbidden files, extracted portable-runtime smoke, and LocalOnly preflight all passed.
+- API/browser smoke on temporary port `18765`: health returned version 1.0.6 and instance ID `c876d5708838963ae54f`; history JSON and SVG returned 404; a valid PNG returned 200 with `nosniff`. Playwright confirmed Studio rendered, chat selected with reference upload disabled and “暂不发送参考图” disclosure, GPT advanced controls contained neither edit mode nor reference strength, and `/classic` loaded without either field. The temporary listener, fixtures, and this Playwright session/artifacts were removed; no paid API was called.
+- Sync evidence: clean package mirrored to `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; destination folder contains 52 files and zero forbidden matches. Local/share v1.0.6 ZIP hashes both equal `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`; v1.0.5 ZIP remains for rollback; sync temp directories are absent.
+- Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
+
 ## Resume Here
-- Start with: Task 5 Step 1 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md` at verified HEAD `7d6e027` on branch `codex/p1-hardening-v1.0.6`.
-- Superpowers phase: use `subagent-driven-development` and TDD; update the release-version assertion and bump `VERSION` to 1.0.6, then verify the expected stale build/package RED before rebuilding.
+- Start with: final whole-branch review of `codex/p1-hardening-v1.0.6` at verified HEAD `120c3d4`, then use `finishing-a-development-branch` to present integration options.
+- Superpowers phase: do not redo Tasks 1-5. Review the complete P1 branch against the approved spec/plan and fresh evidence; fix any Critical/Important finding before presenting merge/PR/keep choices.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
-- Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
-- Sync target after every local release gate passes in Task 5: this machine uses `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; scripts also allow the older `G:\su\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen` mount if that anchor exists.
+- Current release candidate package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`.
+- Verified sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; share ZIP is its sibling `NM_web_imagen-v1.0.6.zip` with the same hash. The older v1.0.5 ZIP remains.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
-- Current-project release rule: Task 5 must pass local tests, build, exact-manifest package, extracted-package smoke, API/browser smoke, and local preflight before any G: sync. Internal ledger files remain excluded from packages and sync.
+- Current-project release rule: if final review changes any packaged file, rerun the complete affected test/build/package/smoke/local-preflight/browser matrix and resync/reverify G:. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, or GitHub Release without an explicit successful action.
 
 ## v1.0.3 Planning Draft
 - Confirmed scope:
