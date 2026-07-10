@@ -1,6 +1,10 @@
 # Decisions
 
 ## Active Decisions
+- 2026-07-10: Task 3 concurrency limits track the lifetime of the real blocking thread, not merely the awaiting coroutine. Every job-aware upstream call rechecks cancellation after acquiring its permit; save/history disk work runs off the event loop so a separate cancel request can arrive and trigger compensation.
+- 2026-07-10: Atomic JSON replacement retries only transient `PermissionError` failures with a short bounded delay. Non-permission disk errors and locks that outlast the retry budget still fail visibly; the old JSON remains intact and UUID temp files are cleaned best-effort.
+- 2026-07-10: Studio session conflict handling uses a server baseline atomically bound to its revision. Three-way merge preserves true concurrent edits, respects deletion of unchanged sessions, rejects stale success/GET/409 responses, and never sends more than one automatic retry per save operation.
+- 2026-07-10: v1.0.6 release work must pass local tests, build, allowlist packaging, extracted-package smoke, browser smoke, and local preflight before any G: write. Older ledger notes that say to sync after every update are superseded for this hardening branch.
 - 2026-07-10: Browser persistence strips `api_key` recursively, but backend `config.local.json` remains the deliberate secret store. Chat reference intake is guarded in the UI and again against the latest submit mode before and after asynchronous image loads, so text-only chat cannot accidentally accept a late reference result.
 - 2026-07-10: Public `/outputs` access requires an allowed raster extension that matches the detected magic bytes. Session references apply both the 25 MiB per-image limit and the 150 MiB request budget before any session-reference write; generated WebP uses a deterministic `.webp` suffix.
 - 2026-07-10: Execute the approved v1.0.6 implementation plan with fresh task implementers plus spec and code-quality review in the same isolated worktree. The execution skill requires this workflow when subagent support is available; tasks remain sequential on one branch to avoid shared-file conflicts.
