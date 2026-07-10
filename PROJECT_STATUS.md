@@ -1,15 +1,25 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-11 +08:00
-- Phase: v1.0.6 P1 hardening final review found five Important gaps; remediation required
-- Superpowers Phase: TDD fix loop for final whole-branch review findings, then full release re-verification
+- Last Updated: 2026-07-11 05:03 +08:00
+- Phase: v1.0.6 P1 hardening remediation and release re-verification complete; final whole-branch review pending
+- Superpowers Phase: fresh final verification and whole-branch review, then `finishing-a-development-branch`
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: The complete branch review rejected the previously synced candidate with five Important gaps: cross-site unsafe requests plus multipart parsing before byte limits; unbounded upstream result count/aggregate bytes; captured upstream errors leaking secrets/URLs/paths; direct cancel followed by remove bypassing shared server settlement; and one-click release omitting the new P1 test modules. These findings are technically reproduced and must be fixed before release evidence or branch finishing is restored.
-- Latest Verification: Pre-finding evidence at `120c3d4` passed Python 176/176, Node 97/97, compile/size/build, exact package, package smoke, API/browser smoke, LocalOnly, G: sync, and destination preflight. That evidence no longer authorizes release because the final review exposed uncovered behaviors. The local/G candidate SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d` is a rejected pre-fix candidate and must be rebuilt and resynced after remediation. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: All reproduced final-review gaps are fixed through `baf20c5`: unsafe cross-site/body parsing, upstream result budgets, public error redaction, cancel/remove settlement, complete release gates, trusted Host/DNS-rebinding boundaries, diagnostics classification, runtime queue cleanup, and legacy metadata read sanitization. The remaining gate is a fresh complete verification plus final review of base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest ledger commit.
+- Latest Verification: Python 215/215 and Node 101/101 passed, along with four-module compile, frontend size rules, TypeScript/Vite build, PowerShell 5.1 parsing/BOM checks, exact-manifest packaging, portable-runtime smoke, and LocalOnly preflight. API/browser smoke on port `18767` passed without paid upstream calls. Local and G: v1.0.6 ZIPs now share SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7`; the G: folder has 52 files and zero forbidden items, while v1.0.5 remains for rollback. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+
+## Final Remediation Verification
+- Security and behavior: trusted loopback Host validation runs before CORS and request parsing; foreign/DNS-rebinding hosts return 403, foreign unsafe Origin returns 403, production preflight does not expose CORS, and multipart/urlencoded/other generation bodies are byte-limited before form parsing.
+- Upstream and errors: URL/base64 results share count and aggregate-byte budgets; network/upstream failures return stable Chinese explanations and `error_code` values without provider bodies, exception classes, keys, sensitive URLs, or local paths; diagnostics preserve only sanitized status classes.
+- Cancellation and persistence: clear-completed reuses the single-remove settlement path, waits for server cancellation settlement, and clears all runtime job tracking; legacy history/session metadata is sanitized on read without rewriting disk on GET.
+- Local matrix: Python 215/215; 14 Node modules with 101/101; `npm run test:size`; TypeScript/Vite build; `py_compile` for `app.py`, `image_safety.py`, `storage.py`, and `upstream.py`; six UTF-8 BOM and PowerShell 5.1 parser checks.
+- Package matrix: canonical ZIP contains 52 release files plus one zero-length directory entry; package SHA256 is `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7`; bundled portable Python smoke and LocalOnly preflight passed; package smoke instance ID was `4df46e034212146d7fb0`.
+- Runtime smoke: port `18767` health returned v1.0.6 and instance ID `c876d5708838963ae54f`; evil Host and DNS-rebinding Host returned 403; foreign unsafe Origin returned 403; same/no Origin requests succeeded; JSON/SVG returned 404; PNG returned 200 with `nosniff`. Playwright confirmed Studio rendering, chat reference disablement plus “暂不发送参考图”, no GPT edit/reference-strength controls, and a working `/classic` without those fields. The only console error was the non-blocking missing `favicon.ico` 404. The listener, fixtures, and Playwright artifacts were removed.
+- G: sync: `sync_release_to_g.ps1 -SkipPackage` and full `release_preflight.ps1 -ExpectedVersion 1.0.6` passed. The destination has 52 files, zero forbidden items, no sync temp directories, and the same final SHA256; v1.0.5 SHA256 remains `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.
+- Review state: targeted spec and code-quality re-reviews have zero unresolved Critical/Important findings. A final whole-branch review after this ledger commit is still required before offering integration choices.
 
 ## Task 4 Verification
 - RED evidence reproduced that the previous package accepted nested credentials/certificates/databases/internal scripts, accepted missing release-tree contents, and could continue release gates after `py_compile` exited 7.
@@ -17,7 +27,7 @@
 - Compatibility evidence: the valid normalized manifest contains 52 files and keeps Classic's three files, Studio `index.html`, all eight current/fallback hashed JS/CSS assets, the fixed portable Python ZIP, and 25 wheels. No G: write or paid upstream API call occurred in Task 4.
 - Review result: spec compliant; code quality Ready to proceed. Remaining non-blocking maintenance note: manifest validation is duplicated across package/preflight/sync scripts, so future release-manifest changes must update all three; the shared negative-test matrix currently guards drift.
 
-## Task 5 Verification
+## Original Task 5 Verification (superseded candidate)
 - TDD evidence: the exact release-version test first failed with `1.0.6 != 1.0.5`, then passed after the minimal `VERSION` bump. Before packaging, LocalOnly preflight rejected the missing v1.0.6 ZIP instead of accepting the old v1.0.5 package.
 - Local matrix: Python 176/176, Node 97/97, four-module compile, size rules, deterministic Studio build, 52-file exact ZIP, zero forbidden files, extracted portable-runtime smoke, and LocalOnly preflight all passed.
 - API/browser smoke on temporary port `18765`: health returned version 1.0.6 and instance ID `c876d5708838963ae54f`; history JSON and SVG returned 404; a valid PNG returned 200 with `nosniff`. Playwright confirmed Studio rendered, chat selected with reference upload disabled and “暂不发送参考图” disclosure, GPT advanced controls contained neither edit mode nor reference strength, and `/classic` loaded without either field. The temporary listener, fixtures, and this Playwright session/artifacts were removed; no paid API was called.
@@ -25,13 +35,13 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: fix the five final-review Important findings from HEAD `dbe050a` on `codex/p1-hardening-v1.0.6` using TDD and the same implementer→spec→quality loop.
-- Superpowers phase: add RED tests for Origin/body limits, aggregate result budgets, error redaction, direct-cancel→remove settlement, and complete one-click test gates; implement one item at a time and rerun affected suites after each.
+- Start with: commit this ledger update, then run fresh full verification and a final whole-branch review from `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest HEAD.
+- Superpowers phase: require zero unresolved Critical/Important findings; if review changes code, rerun the affected tests, rebuild/repackage/resync if any packaged file changes, and update this ledger again.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
-- Current release candidate package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`.
-- Verified sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; share ZIP is its sibling `NM_web_imagen-v1.0.6.zip` with the same hash. The older v1.0.5 ZIP remains.
+- Current release candidate package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7`.
+- Verified sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; share ZIP is its sibling `NM_web_imagen-v1.0.6.zip` with the same final hash. The older v1.0.5 ZIP remains.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
-- Current-project release rule: the current v1.0.6 local/G package is rejected. After fixes, rerun the complete Python/Node/PowerShell/build/package/smoke/API/browser/LocalOnly matrix, overwrite and reverify G:, then repeat final review. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, or GitHub Release without an explicit successful action.
+- Current-project release rule: the final package and G: candidate are verified, but branch completion still requires fresh final verification and whole-branch review. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, pull request, GitHub Release, or cleanup without an explicit successful action.
 
 ## v1.0.3 Planning Draft
 - Confirmed scope:

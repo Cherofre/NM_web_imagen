@@ -1,20 +1,18 @@
 # Next Actions
 
 ## Now
-- [x] Approved the design/plan, isolated the branch, verified the baseline, and completed/reviewed Tasks 1-3 covering security boundaries, truthful browser behavior, cancellable upstream work, atomic persistence, and revision-bound session merging.
-- [x] Execute and independently review Task 4: PowerShell 5.1 UTF-8 BOM, runtime fingerprint and instance ID, exact-manifest packaging, extracted-package smoke, native failure short-circuiting, and local-before-G release order.
-- [x] Execute and independently review Task 5: bump to 1.0.6, pass the full local release/API/browser matrix, sync the clean package, and verify the G: destination.
-- [ ] Fix all five final-review Important findings with RED/GREEN tests and two-stage re-review.
-- [ ] Rebuild, rerun the complete release/API/browser matrix, overwrite the rejected G: candidate, and verify the new destination hash.
-- [ ] Repeat final whole-branch review until no Critical/Important remains.
+- [x] Complete and review approved Tasks 1-5: application security/behavior/concurrency/persistence hardening, Windows release hardening, v1.0.6 build, package, and initial release verification.
+- [x] Fix all final-review Important findings with RED/GREEN tests and targeted spec/code-quality re-review.
+- [x] Rebuild, rerun the complete release/API/browser matrix, overwrite the rejected G: candidate, and verify final SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7`.
+- [ ] Run fresh complete verification and repeat final whole-branch review until no Critical/Important remains; record the evidence and exact final HEAD in the ledger.
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: final-review remediation at HEAD `dbe050a` in worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
-- Do not redo: Tasks 1-5 implementation or their earlier per-task reviews. Preserve the existing architecture and compatibility; address only the reproduced final-review gaps.
-- Verify next: write failing tests for (1) foreign Origin and pre-parse body/file limits, (2) shared URL/base64 result count+byte budget, (3) captured error redaction, (4) direct cancel then remove deferred settlement, and (5) complete one-click Python/Node suite plus failure short-circuit.
+- Start here: commit the ledger update, run fresh final verification, then review base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest HEAD in worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
+- Do not redo: Tasks 1-5, final-review remediation through `baf20c5`, canonical packaging, browser/API smoke on port `18767`, or the verified G: overwrite unless review changes a packaged file.
+- Verify next: full Python/Node/size/build/compile/PowerShell/package/preflight matrix, then requirements/spec/code-quality review with zero unresolved Critical/Important findings.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
-- Release boundary: local/G v1.0.6 SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d` is rejected. Any completion claim requires a new package hash, complete local gates, G overwrite, destination preflight, and final re-review.
+- Release boundary: local/G v1.0.6 SHA256 `51f75e9d001cbee5529905dcc106568bdc4142f87416dbe8fdda08061e2dc9a7` is the current verified candidate. The rejected `958334…` and intermediate `c355…` candidates are superseded. Final review is still required before branch finishing.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
 
 ## Prior Release Context
