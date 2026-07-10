@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$OutputPath = ""
 )
 
@@ -20,102 +20,26 @@ $OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromP
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_web_imagen_package_" + [System.Guid]::NewGuid().ToString("N"))
 $TempAppDir = Join-Path $TempRoot $AppName
 
-$ExcludedDirs = @(
-  ".codex",
-  ".chrome-debug",
-  ".venv",
-  ".runtime",
-  ".playwright-mcp",
-  ".git",
-  ".svn",
-  "_release",
-  "__pycache__",
-  "dist",
-  "node_modules",
-  "studio-web",
-  "tests",
-  "logs",
-  "output",
-  "outputs",
-  "saved_images"
+$ReleaseFiles = @(
+  "app.py",
+  "image_safety.py",
+  "storage.py",
+  "upstream.py",
+  "requirements.txt",
+  "VERSION",
+  "config.example.json",
+  "start_web.ps1",
+  "stop_web.ps1",
+  "start_web.bat",
+  "stop_web.bat",
+  "一键启动.bat",
+  "一键停止.bat"
 )
 
-$ExcludedFiles = @(
-  "*.pyc",
-  "*.pyo",
-  "*.zip",
-  "GwenImageGen.exe",
-  "AGENTS.md",
-  "PROJECT_STATUS.md",
-  "NEXT_ACTIONS.md",
-  "DECISIONS.md",
-  "package_web_tool.ps1",
-  "release_one_click.ps1",
-  "release_preflight.ps1",
-  "sync_release_to_g.ps1",
-  "config.local.json",
-  "tsconfig.tsbuildinfo",
-  "page-check*.png",
-  "release-check*.png",
-  "ui-*.png",
-  "drawer-*.png",
-  "mobile-*.png",
-  "PixPin_*.png",
-  "企业微信截图*.png",
-  "gpt-image-playground-home.png",
-  "server.err.log",
-  "server.out.log"
+$ReleaseTrees = @(
+  "static",
+  "vendor"
 )
-
-function Test-IsExcludedFile {
-  param(
-    [System.IO.FileInfo]$File,
-    [string]$RelativePath
-  )
-
-  $NormalizedRelativePath = $RelativePath -replace "\\", "/"
-  if ($NormalizedRelativePath -like "vendor/python/python-*-embed-amd64.zip") {
-    return $false
-  }
-
-  if ($NormalizedRelativePath -notlike "*/*") {
-    if ($File.Extension -in @(".png", ".jpg", ".jpeg", ".webp")) {
-      return $true
-    }
-  }
-
-  if ($NormalizedRelativePath -like "vendor/wheels/*.whl") {
-    $WheelName = $File.Name
-    if (
-      $WheelName -match "-cp(310|311|313)-" -or
-      $WheelName -match "-cp(310|311|313)-cp(310|311|313)-"
-    ) {
-      return $true
-    }
-  }
-
-  $Segments = $RelativePath -split "[\\/]"
-  foreach ($Segment in $Segments) {
-    if ($ExcludedDirs -contains $Segment) {
-      return $true
-    }
-  }
-
-  foreach ($Pattern in $ExcludedFiles) {
-    if ($File.Name -like $Pattern) {
-      return $true
-    }
-  }
-
-  if ($NormalizedRelativePath -notlike "*/*" -and $File.Extension -ieq ".bat") {
-    $BatText = Get-Content -LiteralPath $File.FullName -Raw -ErrorAction SilentlyContinue
-    if ($BatText -like "*release_one_click.ps1*") {
-      return $true
-    }
-  }
-
-  return $false
-}
 
 function Write-PackageReadme {
   $ReadmePath = Join-Path $TempAppDir "README.md"
@@ -181,6 +105,7 @@ function Get-ForbiddenPackagePatterns {
     "^$AppName/studio-web/",
     "^$AppName/package_web_tool\.ps1$",
     "^$AppName/release_one_click\.ps1$",
+    "^$AppName/release_package_smoke\.ps1$",
     "^$AppName/release_preflight\.ps1$",
     "^$AppName/sync_release_to_g\.ps1$",
     "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$",
@@ -200,6 +125,7 @@ function Test-TextClean {
   $BadTokens = @(
     "package_web_tool.ps1",
     "release_one_click.ps1",
+    "release_package_smoke.ps1",
     "release_preflight.ps1",
     "sync_release_to_g.ps1",
     "C:\Users\",
@@ -273,16 +199,20 @@ if (Test-Path -LiteralPath $TempRoot) {
 New-Item -ItemType Directory -Path $TempAppDir -Force | Out-Null
 
 try {
-  Get-ChildItem -LiteralPath $ScriptDir -Recurse -Force -File | ForEach-Object {
-    $RelativePath = $_.FullName.Substring($ScriptDir.Length).TrimStart("\", "/")
-    if (Test-IsExcludedFile -File $_ -RelativePath $RelativePath) {
-      return
+  foreach ($RelativePath in $ReleaseFiles) {
+    $SourcePath = Join-Path $ScriptDir $RelativePath
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+      throw "Required release file is missing: $RelativePath"
     }
+    Copy-Item -LiteralPath $SourcePath -Destination (Join-Path $TempAppDir $RelativePath) -Force
+  }
 
-    $TargetPath = Join-Path $TempAppDir $RelativePath
-    $TargetDir = Split-Path -Parent $TargetPath
-    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-    Copy-Item -LiteralPath $_.FullName -Destination $TargetPath -Force
+  foreach ($RelativePath in $ReleaseTrees) {
+    $SourcePath = Join-Path $ScriptDir $RelativePath
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
+      throw "Required release tree is missing: $RelativePath"
+    }
+    Copy-Item -LiteralPath $SourcePath -Destination $TempAppDir -Recurse -Force
   }
 
   Write-PackageReadme
@@ -299,8 +229,8 @@ try {
   Compress-Archive -Path $TempAppDir -DestinationPath $OutputPath -Force
   Test-PackageZipClean -ZipPath $OutputPath
   Write-Host "Package created: $OutputPath"
-  Write-Host "Win64 offline package: kept portable Python 3.12 and compatible wheels only."
-  Write-Host "Excluded release scripts, development sources/tests, local config, outputs, logs, saved images, local .venv/.runtime, browser cache and Python cache."
+  Write-Host "Win64 offline package: copied only the explicit release files and trees."
+  Write-Host "Release scripts, tests, ledgers, local config, outputs, logs, saved images, local .venv/.runtime and browser caches remain outside the package."
 } finally {
   if (Test-Path -LiteralPath $TempRoot) {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$DestinationRoot = "",
   [switch]$SkipPackage
 )
@@ -122,6 +122,7 @@ function Assert-CleanPackageZip {
     "^$AppName/studio-web/",
     "^$AppName/package_web_tool\.ps1$",
     "^$AppName/release_one_click\.ps1$",
+    "^$AppName/release_package_smoke\.ps1$",
     "^$AppName/release_preflight\.ps1$",
     "^$AppName/sync_release_to_g\.ps1$",
     "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$",

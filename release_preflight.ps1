@@ -1,6 +1,7 @@
-param(
+﻿param(
   [string]$DestinationRoot = "",
-  [string]$ExpectedVersion = ""
+  [string]$ExpectedVersion = "",
+  [switch]$LocalOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,6 +121,7 @@ function Get-ForbiddenReleasePatterns {
     "^$AppName/studio-web/tsconfig\.tsbuildinfo$",
     "^$AppName/package_web_tool\.ps1$",
     "^$AppName/release_one_click\.ps1$",
+    "^$AppName/release_package_smoke\.ps1$",
     "^$AppName/release_preflight\.ps1$",
     "^$AppName/sync_release_to_g\.ps1$",
     "^$AppName/(AGENTS|PROJECT_STATUS|NEXT_ACTIONS|DECISIONS)\.md$",
@@ -144,6 +146,17 @@ function Get-StreamSha256 {
   }
 }
 
+function Get-FileSha256 {
+  param([string]$Path)
+
+  $Stream = [System.IO.File]::OpenRead($Path)
+  try {
+    return Get-StreamSha256 -Stream $Stream
+  } finally {
+    $Stream.Dispose()
+  }
+}
+
 function Test-TextClean {
   param(
     [string]$Name,
@@ -153,6 +166,7 @@ function Test-TextClean {
   $BadTokens = @(
     "package_web_tool.ps1",
     "release_one_click.ps1",
+    "release_package_smoke.ps1",
     "release_preflight.ps1",
     "sync_release_to_g.ps1",
     "C:\Users\mumengfei",
@@ -215,7 +229,7 @@ function Get-DirectoryFileManifest {
     [pscustomobject]@{
       Path = ($_.FullName.Substring($PrefixLength) -replace "\\", "/")
       Length = [int64]$_.Length
-      Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+      Hash = Get-FileSha256 -Path $_.FullName
     }
   } | Sort-Object Path)
 }
@@ -317,10 +331,6 @@ function Test-ZipClean {
   }
 }
 
-$DestinationRoot = Resolve-CompanyShareRoot -RequestedRoot $DestinationRoot
-$DestinationRootInfo = Assert-AllowedCompanyShareRoot -DestinationRoot $DestinationRoot
-$DestinationRoot = $DestinationRootInfo.Root
-
 Write-Step "Version"
 if (-not (Test-Path -LiteralPath $VersionPath)) {
   throw "VERSION was not found."
@@ -367,9 +377,19 @@ Write-Host "Studio CSS: $ExpectedCss"
 Write-Step "Local release artifacts"
 $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 Test-ZipClean -ZipPath $VersionedZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
-$LocalZipHash = (Get-FileHash -LiteralPath $VersionedZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$LocalZipHash = Get-FileSha256 -Path $VersionedZip
 Write-Host "Local versioned package OK: $VersionedZip"
 Write-Host "Local versioned package SHA256: $LocalZipHash"
+
+if ($LocalOnly) {
+  Write-Step "Result"
+  Write-Host "Local release preflight passed."
+  exit 0
+}
+
+$DestinationRoot = Resolve-CompanyShareRoot -RequestedRoot $DestinationRoot
+$DestinationRootInfo = Assert-AllowedCompanyShareRoot -DestinationRoot $DestinationRoot
+$DestinationRoot = $DestinationRootInfo.Root
 
 Write-Step "G drive sync target"
 $DestinationAppDir = Join-Path $DestinationRoot $AppName
@@ -378,7 +398,7 @@ if (-not (Test-Path -LiteralPath $DestinationAppDir)) {
   throw "G: sync folder was not found: $DestinationAppDir"
 }
 Test-ZipClean -ZipPath $DestinationZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
-$DestinationZipHash = (Get-FileHash -LiteralPath $DestinationZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$DestinationZipHash = Get-FileSha256 -Path $DestinationZip
 if ($DestinationZipHash -ne $LocalZipHash) {
   throw "G: versioned package hash differs from local package."
 }

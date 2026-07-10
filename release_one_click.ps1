@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$DestinationRoot = ""
 )
 
@@ -7,6 +7,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $StudioDir = Join-Path $ScriptDir "studio-web"
 $VersionPath = Join-Path $ScriptDir "VERSION"
 $PackageScript = Join-Path $ScriptDir "package_web_tool.ps1"
+$SmokeScript = Join-Path $ScriptDir "release_package_smoke.ps1"
 $PreflightScript = Join-Path $ScriptDir "release_preflight.ps1"
 $SyncScript = Join-Path $ScriptDir "sync_release_to_g.ps1"
 $AppName = "NM_web_imagen"
@@ -43,6 +44,9 @@ if (-not (Test-Path -LiteralPath $SyncScript)) {
 if (-not (Test-Path -LiteralPath $PackageScript)) {
   throw "package_web_tool.ps1 was not found."
 }
+if (-not (Test-Path -LiteralPath $SmokeScript)) {
+  throw "release_package_smoke.ps1 was not found."
+}
 if (-not (Test-Path -LiteralPath $VersionPath)) {
   throw "VERSION was not found."
 }
@@ -78,6 +82,14 @@ Invoke-Step "Package clean zip" {
   powershell -NoProfile -ExecutionPolicy Bypass -File $PackageScript -OutputPath $VersionedZip
 }
 
+Invoke-Step "Package smoke" {
+  powershell -NoProfile -ExecutionPolicy Bypass -File $SmokeScript -ZipPath $VersionedZip
+}
+
+Invoke-Step "Local release preflight" {
+  powershell -NoProfile -ExecutionPolicy Bypass -File $PreflightScript -ExpectedVersion $Version -LocalOnly
+}
+
 Invoke-Step "Sync clean package" {
   $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SyncScript)
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
@@ -87,7 +99,7 @@ Invoke-Step "Sync clean package" {
   powershell @Args
 }
 
-Invoke-Step "Release preflight" {
+Invoke-Step "Destination verification" {
   $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PreflightScript)
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
     $Args += @("-DestinationRoot", $DestinationRoot)

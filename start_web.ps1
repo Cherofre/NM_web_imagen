@@ -1,6 +1,8 @@
-param(
+﻿param(
   [ValidateRange(1, 65535)]
-  [int]$Port = 7861
+  [int]$Port = 7861,
+  [switch]$PrepareOnly,
+  [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +19,7 @@ $RuntimeDir = Join-Path $ScriptDir ".runtime"
 $RuntimePythonDir = Join-Path $RuntimeDir "python"
 $RuntimeSitePackages = Join-Path $RuntimeDir "site-packages"
 $RuntimePythonPath = Join-Path $RuntimePythonDir "python.exe"
+$RuntimeFingerprintPath = Join-Path $RuntimeDir "runtime.fingerprint"
 $Url = "http://127.0.0.1:$Port"
 $AppVersion = "0.0.0"
 if (Test-Path -LiteralPath $VersionPath) {
@@ -45,6 +48,22 @@ function Write-Section {
   Write-Host ""
 }
 
+function Get-InstanceId {
+  param([string]$RootPath = $ScriptDir)
+
+  $ResolvedRoot = (Get-Item -LiteralPath $RootPath).FullName
+  $NormalizedRoot = $ResolvedRoot.Replace("/", "\").TrimEnd("\", "/").ToLowerInvariant()
+  $Sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $Hash = $Sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($NormalizedRoot))
+    return ([BitConverter]::ToString($Hash)).Replace("-", "").ToLowerInvariant().Substring(0, 20)
+  } finally {
+    $Sha.Dispose()
+  }
+}
+
+$InstanceId = Get-InstanceId -RootPath $ScriptDir
+
 function Test-LocalServer {
   try {
     $Response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 1
@@ -62,7 +81,8 @@ function Test-BackendVersion {
     }
 
     $HealthPayload = $Response.Content | ConvertFrom-Json
-    return $HealthPayload.version -eq $AppVersion
+    return $HealthPayload.version -eq $AppVersion -and
+      $HealthPayload.instance_id -eq $InstanceId
   } catch {
     return $false
   }
@@ -304,6 +324,51 @@ function Ensure-PortablePythonZip {
   throw "Bundled Python is missing: vendor\python\python-3.12.10-embed-amd64.zip. Please use the complete NM_web_imagen.zip package."
 }
 
+function Get-RuntimeFingerprint {
+  if (-not (Test-Path -LiteralPath $PortablePythonZip)) {
+    throw "Bundled Python ZIP was not found while computing the runtime fingerprint."
+  }
+  if (-not (Test-Path -LiteralPath $RequirementsPath)) {
+    throw "requirements.txt was not found while computing the runtime fingerprint."
+  }
+  if (-not (Test-Path -LiteralPath $WheelDir)) {
+    throw "Bundled wheels were not found while computing the runtime fingerprint."
+  }
+
+  $GetFileSha256 = {
+    param([string]$Path)
+
+    $FileStream = [System.IO.File]::OpenRead($Path)
+    $FileSha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $FileHash = $FileSha.ComputeHash($FileStream)
+      return ([BitConverter]::ToString($FileHash)).Replace("-", "").ToLowerInvariant()
+    } finally {
+      $FileSha.Dispose()
+      $FileStream.Dispose()
+    }
+  }
+
+  $Parts = @(
+    "python:$(& $GetFileSha256 $PortablePythonZip)",
+    "requirements:$(& $GetFileSha256 $RequirementsPath)"
+  )
+  $WheelFiles = @(Get-ChildItem -LiteralPath $WheelDir -Filter "*.whl" -File | Sort-Object Name)
+  foreach ($Wheel in $WheelFiles) {
+    $WheelHash = & $GetFileSha256 $Wheel.FullName
+    $Parts += "wheel:$($Wheel.Name):$WheelHash"
+  }
+
+  $Sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $Payload = $Parts -join "`n"
+    $Hash = $Sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Payload))
+    return ([BitConverter]::ToString($Hash)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $Sha.Dispose()
+  }
+}
+
 function Ensure-PortablePython {
   param([switch]$Rebuild)
 
@@ -320,9 +385,8 @@ function Ensure-PortablePython {
     try {
       Expand-Archive -LiteralPath $PortablePythonZip -DestinationPath $RuntimePythonDir -Force
     } catch {
-      Remove-Item -LiteralPath $PortablePythonZip -Force -ErrorAction SilentlyContinue
-      Ensure-PortablePythonZip
-      Expand-Archive -LiteralPath $PortablePythonZip -DestinationPath $RuntimePythonDir -Force
+      Remove-ChildDirectory -Path $RuntimeDir -Name "incomplete .runtime"
+      throw "Failed to extract bundled portable Python. The vendor ZIP was preserved; please verify the package and try again."
     }
     Configure-PortablePythonPath
   } else {
@@ -417,24 +481,38 @@ if (-not (Test-Path -LiteralPath $RequirementsPath)) {
   throw "requirements.txt was not found. Dependencies cannot be checked."
 }
 
-if (Test-LocalServer) {
-  if ((Test-BackendVersion) -and (Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
-    Write-Host "Backend service is already running. Opening:"
-    Write-Host $OpenUrl
-    Start-Process $OpenUrl
-    exit 0
-  }
-
-  Write-Host "Backend service responded, but current version, Studio assets, or API routes did not match."
-  Write-Host "Restarting current web tool service..."
-  $Stopped = Stop-ExistingWebToolProcesses
-  if ($Stopped -eq 0) {
-    throw "Could not restart the existing backend service. Please run stop_web.bat, then start again."
-  }
-  Start-Sleep -Milliseconds 800
+if (-not $PrepareOnly) {
   if (Test-LocalServer) {
-    throw "Port $Port is still occupied after restart attempt. Please run stop_web.bat, then start again."
+    if ((Test-BackendVersion) -and (Test-StudioAssets) -and (Test-RequiredApiRoutes)) {
+      Write-Host "Backend service is already running. Opening:"
+      Write-Host $OpenUrl
+      if (-not $NoBrowser) {
+        Start-Process $OpenUrl
+      }
+      exit 0
+    }
+
+    Write-Host "Backend service responded, but current version, Studio assets, or API routes did not match."
+    Write-Host "Restarting current web tool service..."
+    $Stopped = Stop-ExistingWebToolProcesses
+    if ($Stopped -eq 0) {
+      throw "Could not restart the existing backend service. Please run stop_web.bat, then start again."
+    }
+    Start-Sleep -Milliseconds 800
+    if (Test-LocalServer) {
+      throw "Port $Port is still occupied after restart attempt. Please run stop_web.bat, then start again."
+    }
   }
+}
+
+$ExpectedRuntimeFingerprint = Get-RuntimeFingerprint
+$StoredRuntimeFingerprint = ""
+if (Test-Path -LiteralPath $RuntimeFingerprintPath) {
+  $StoredRuntimeFingerprint = (Get-Content -LiteralPath $RuntimeFingerprintPath -Encoding ASCII -TotalCount 1).Trim()
+}
+if ($StoredRuntimeFingerprint -ne $ExpectedRuntimeFingerprint) {
+  Write-Host "Bundled runtime inputs changed. Rebuilding portable runtime..."
+  Remove-ChildDirectory -Path $RuntimeDir -Name ".runtime"
 }
 
 $Python = Ensure-PortablePython
@@ -453,6 +531,14 @@ if (-not (Test-PythonDependencies -Python $Python)) {
   throw "Bundled runtime setup failed. Please make sure vendor\wheels is complete and extract the complete NM_web_imagen.zip package again."
 }
 
+Set-Content -LiteralPath $RuntimeFingerprintPath -Value $ExpectedRuntimeFingerprint -Encoding ASCII
+
+if ($PrepareOnly) {
+  Write-Host "Portable runtime is ready."
+  Write-Host "Runtime fingerprint: $ExpectedRuntimeFingerprint"
+  exit 0
+}
+
 Write-Host "Opening:"
 Write-Host $OpenUrl
 Write-Host ""
@@ -460,6 +546,8 @@ Write-Host "Keep this window open while using the web tool."
 Write-Host "To stop the service, close this window, press Ctrl+C, or run stop_web.bat."
 Write-Host ""
 
-Start-Process $OpenUrl
+if (-not $NoBrowser) {
+  Start-Process $OpenUrl
+}
 Invoke-SelectedPython -Python $Python -Arguments @($ResolvedAppPath, "--host", "127.0.0.1", "--port", "$Port")
 exit $LASTEXITCODE

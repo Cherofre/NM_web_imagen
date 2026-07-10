@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import base64
 from datetime import datetime
+import hashlib
 import math
 from html import unescape
 import json
@@ -68,6 +69,11 @@ CONFIG_FILE_CANDIDATES = [
     ROOT_DIR / "config.defaults.json",
 ]
 PRIMARY_CONFIG_FILE = ROOT_DIR / "config.local.json"
+
+
+def compute_instance_id(root: Path = ROOT_DIR) -> str:
+    normalized_root = str(Path(root).resolve()).replace("/", "\\").rstrip("\\").casefold()
+    return hashlib.sha256(normalized_root.encode("utf-8")).hexdigest()[:20]
 
 DEFAULT_BANANA_BASE_URL = "https://banana-api.example.com"
 DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
@@ -2673,6 +2679,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "app": "image-generate-web-tool",
             "version": read_app_version(),
+            "instance_id": compute_instance_id(),
             "engines": ["banana", "gpt-image-2"],
             "features": {"studio_sessions": True, "session_reference_files": True},
         }
