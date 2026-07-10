@@ -157,6 +157,37 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(cssBlock(".queue-job-actions button"), /width:\s*26px;[\s\S]*height:\s*26px;/);
 });
 
+test("queue and chat requests share backend job cancellation protocol", () => {
+  assert.match(appSource, /import \{ appendJobId, cancellationNotice, cancelJobUrl, withJobId \} from "\.\/jobProtocol";/);
+  assert.match(appSource, /function createFormData\([\s\S]*jobId: string,[\s\S]*return appendJobId\(data, jobId\);/);
+  assert.match(appSource, /function createChatPayload\([\s\S]*jobId: string,[\s\S]*return withJobId\(/);
+  assert.match(appSource, /createFormData\([\s\S]*payload\.posterText,[\s\S]*payload\.jobId,[\s\S]*\)/);
+  assert.match(appSource, /createChatPayload\([\s\S]*chatContextMessages,[\s\S]*queueJobId,[\s\S]*\)/);
+
+  const cancelStart = appSource.indexOf("async function cancelQueueJob(job: QueueJob)");
+  const cancelEnd = appSource.indexOf("function retryQueueJob", cancelStart);
+  const cancelSource = appSource.slice(cancelStart, cancelEnd);
+  assert.notEqual(cancelStart, -1, "cancelQueueJob must be async");
+  assert.match(cancelSource, /await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)/);
+  assert.match(cancelSource, /if \(!response\.ok\) throw new Error/);
+  assert.match(cancelSource, /finally\s*\{[\s\S]*\.abort\(\);[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
+  assert.ok(cancelSource.indexOf("await fetch") < cancelSource.indexOf(".abort()"), "backend cancel must settle before local abort");
+  assert.match(cancelSource, /cancellationNotice\(language\)/);
+  assert.match(appSource, /void cancelQueueJob\(job\);/);
+  assert.match(appSource, /onClick=\{\(\) => void cancelQueueJob\(job\)\}/);
+
+  assert.match(appSource, /if \(responsePayload\.canceled === true\)/);
+  const chatStart = appSource.indexOf('if (currentMode === "chat")');
+  const chatEnd = appSource.indexOf("let submitGptForm", chatStart);
+  const chatSource = appSource.slice(chatStart, chatEnd);
+  assert.match(chatSource, /if \(payload\.canceled === true\)/);
+  assert.match(chatSource, /status:\s*"error"[\s\S]*error:\s*t\("status\.chatCanceled"\)/);
+  assert.match(i18nSource, /"status\.queueCanceled": "已在本地取消队列任务"/);
+  assert.match(i18nSource, /"status\.queueCanceled": "Queue job canceled locally"/);
+  assert.match(i18nSource, /"status\.chatCanceled": "聊天已取消"/);
+  assert.match(i18nSource, /"status\.chatCanceled": "Chat canceled"/);
+});
+
 test("queue rows show multi-image results as a thumbnail collage", () => {
   assert.match(appSource, /type PreviewImage = \{[\s\S]*gallery\?: PreviewImage\[\];[\s\S]*galleryIndex\?: number;/);
   assert.match(appSource, /function openPreviewImages\(images: GeneratedImage\[\], index = 0\)/);
@@ -204,7 +235,38 @@ test("session persistence defers heavy storage work while typing", () => {
   assert.doesNotMatch(beforeTimer, /compactSessionsForStorage\(sessions\)/);
   assert.doesNotMatch(beforeTimer, /localStorage\.setItem\(sessionsStorageKey/);
   assert.match(timerBody, /localStorage\.setItem\(sessionsStorageKey, JSON\.stringify\(compactSessionsForStorage\(sessions\)\)\)/);
-  assert.match(timerBody, /fetch\("\/api\/studio\/sessions"/);
+  assert.match(timerBody, /void saveStudioSessionsOnce\(compactSessionsForStorage\(sessions\), activeSessionId\)/);
+});
+
+test("session persistence merges one revision conflict and retries exactly once", () => {
+  assert.match(appSource, /import \{ buildSessionSavePayload, mergeSessionsByUpdatedAt, nextSessionSaveAttempt, normalizeSessionRevision \} from "\.\/sessionRevision";/);
+  assert.match(appSource, /function normalizeSessionStatePayload\([\s\S]*revision:\s*normalizeSessionRevision\(source\.revision\)/);
+  assert.match(appSource, /const sessionsRef = useRef<WorkbenchSession\[\]>\(sessions\);/);
+  assert.match(appSource, /const sessionRevisionRef = useRef\(1\);/);
+  assert.match(appSource, /const skipNextSessionSaveRef = useRef<\{ sessions: WorkbenchSession\[\]; activeSessionId: string \} \| null>\(null\);/);
+  assert.match(appSource, /sessionsRef\.current = sessions;/);
+  assert.match(appSource, /sessionRevisionRef\.current = Math\.max\(sessionRevisionRef\.current, normalized\.revision\);/);
+
+  const saveStart = appSource.indexOf("async function saveStudioSessionsOnce(");
+  const saveEnd = appSource.indexOf("useEffect(() =>", saveStart);
+  const saveSource = appSource.slice(saveStart, saveEnd);
+  assert.notEqual(saveStart, -1, "Missing bounded session save helper");
+  assert.match(saveSource, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
+  assert.match(saveSource, /buildSessionSavePayload\(sessionRevisionRef\.current, attemptActiveSessionId, attemptSessions\)/);
+  assert.match(saveSource, /const decision = nextSessionSaveAttempt\(retryCount, response\.status\);/);
+  assert.match(saveSource, /const currentPayload = responsePayload\.current;/);
+  assert.match(saveSource, /const latestLocalSessions = compactSessionsForStorage\(sessionsRef\.current\);/);
+  assert.match(saveSource, /mergeSessionsByUpdatedAt\(latestLocalSessions, normalizedCurrent\.sessions\)/);
+  assert.match(saveSource, /skipNextSessionSaveRef\.current = \{ sessions: mergedSessions, activeSessionId: mergedActiveSessionId \};/);
+  assert.match(saveSource, /setSessions\(mergedSessions\);/);
+  assert.match(saveSource, /retryCount = decision\.nextRetryCount;/);
+  assert.match(saveSource, /setNotice\(t\("status\.sessionConflictRefresh"\)\)/);
+  assert.doesNotMatch(saveSource, /(?:return|await)\s+saveStudioSessionsOnce\(/);
+  assert.match(saveSource, /catch \(error\) \{[\s\S]*setNotice\(error instanceof Error && error\.message \? error\.message : t\("status\.sessionSaveFailed"\)\);/);
+
+  assert.match(appSource, /const skipSave = skipNextSessionSaveRef\.current;[\s\S]*skipNextSessionSaveRef\.current = null;[\s\S]*if \(skipSave && skipSave\.sessions === sessions && skipSave\.activeSessionId === activeSessionId\) \{[\s\S]*return undefined;/);
+  assert.match(i18nSource, /"status\.sessionConflictRefresh": "会话已在其他页面更新；自动合并重试仍冲突，请刷新页面后再继续。"/);
+  assert.match(i18nSource, /"status\.sessionConflictRefresh": "This chat changed in another tab\. Automatic merge still conflicted; refresh the page before continuing\."/);
 });
 
 test("generation queue does not block additional generation submissions", () => {

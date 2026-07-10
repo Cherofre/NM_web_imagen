@@ -13,12 +13,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
+from uuid import uuid4
 
 import requests
 import uvicorn
-from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +35,16 @@ from image_safety import (
     read_limited_chunks,
     resolve_output_image,
     validate_raster_bytes,
+)
+from storage import atomic_write_json, mutate_json, read_json
+from upstream import (
+    JobCancelled,
+    JobRegistry,
+    UpstreamExecutor,
+    banana_headers,
+    bounded_timeout,
+    gpt_headers,
+    normalize_job_id,
 )
 
 
@@ -63,6 +74,10 @@ DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_GPT_BASE_URL = "https://gpt-image-api.example.com"
 DEFAULT_GPT_MODEL = "gpt-image-2"
 DEFAULT_GPT_CHAT_MODEL = "gpt-5.4"
+MAX_CHAT_TIMEOUT = 600
+MAX_GENERATION_TIMEOUT = 1800
+UPSTREAM_EXECUTOR = UpstreamExecutor()
+JOB_REGISTRY = JobRegistry()
 GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh"}
 CONFIG_CONNECTION_FIELDS = {
     "banana-form": {"api_key", "api_base_url", "model_type"},
@@ -379,18 +394,6 @@ def build_banana_api_url(base_url: str, model_type: str) -> str:
     if "/models/" in base:
         return f"{base}:generateContent"
     return f"{base}/v1beta/models/{model}:generateContent"
-
-
-def banana_headers(api_key: str) -> Dict[str, str]:
-    key = (api_key or "").strip()
-    return {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}",
-        "X-API-Key": key,
-        "x-goog-api-key": key,
-        "X-Banana-Client": "image-generate-web-tool",
-    }
 
 
 def build_banana_request(
@@ -780,7 +783,42 @@ def extract_image_bytes(src: str) -> Optional[Tuple[bytes, str]]:
         return None
 
 
-def save_generated_images(engine: str, images: List[Dict[str, str]]) -> int:
+def cleanup_generated_image_files(
+    images: List[Dict[str, Any]],
+    extra_paths: Optional[List[Path]] = None,
+) -> None:
+    paths = list(extra_paths or [])
+    for image in images:
+        raw_path = str(image.get("saved_path") or "").strip()
+        raw_name = str(image.get("saved_name") or "").strip()
+        if raw_path:
+            paths.append(ROOT_DIR / raw_path)
+        elif raw_name:
+            paths.append(OUTPUTS_DIR / Path(raw_name).name)
+
+    outputs_root = OUTPUTS_DIR.resolve()
+    for path in paths:
+        try:
+            resolved = path.resolve()
+            if resolved == outputs_root or outputs_root not in resolved.parents:
+                continue
+            if resolved.is_file():
+                resolved.unlink()
+        except Exception:
+            continue
+
+    for image in images:
+        for key in ("saved_name", "saved_path", "saved_url", "save_status", "save_error"):
+            image.pop(key, None)
+
+
+def save_generated_images(
+    engine: str,
+    images: List[Dict[str, str]],
+    *,
+    job_id: str = "",
+) -> int:
+    JOB_REGISTRY.raise_if_canceled(job_id)
     if not images:
         return 0
 
@@ -788,33 +826,43 @@ def save_generated_images(engine: str, images: List[Dict[str, str]]) -> int:
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     engine_name = safe_filename_part(engine, "engine")
     saved_count = 0
+    saved_paths: List[Path] = []
 
-    for index, image in enumerate(images, start=1):
-        try:
-            extracted = extract_image_bytes(image.get("src", ""))
-            if not extracted:
-                image["save_status"] = "skipped"
-                continue
+    try:
+        for index, image in enumerate(images, start=1):
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            try:
+                extracted = extract_image_bytes(image.get("src", ""))
+                if not extracted:
+                    image["save_status"] = "skipped"
+                    continue
 
-            raw_bytes, mime_type = extracted
-            filename = f"{run_id}-{engine_name}-{index:02d}{guess_extension(mime_type)}"
-            output_path = OUTPUTS_DIR / filename
-            output_path.write_bytes(raw_bytes)
-            dimensions = detect_image_dimensions(raw_bytes, mime_type)
+                raw_bytes, mime_type = extracted
+                filename = f"{run_id}-{engine_name}-{index:02d}{guess_extension(mime_type)}"
+                output_path = OUTPUTS_DIR / filename
+                output_path.write_bytes(raw_bytes)
+                saved_paths.append(output_path)
+                JOB_REGISTRY.raise_if_canceled(job_id)
+                dimensions = detect_image_dimensions(raw_bytes, mime_type)
 
-            image["mime_type"] = mime_type
-            image["saved_name"] = filename
-            image["saved_path"] = str(output_path.relative_to(ROOT_DIR)).replace("\\", "/")
-            image["saved_url"] = f"{OUTPUTS_URL_PREFIX}/{quote(filename)}"
-            image["save_status"] = "saved"
-            if dimensions:
-                image["dimensions"] = dimensions
-            saved_count += 1
-        except Exception as exc:
-            image["save_status"] = "failed"
-            image["save_error"] = compact_text(str(exc), 220)
-
-    return saved_count
+                image["mime_type"] = mime_type
+                image["saved_name"] = filename
+                image["saved_path"] = str(output_path.relative_to(ROOT_DIR)).replace("\\", "/")
+                image["saved_url"] = f"{OUTPUTS_URL_PREFIX}/{quote(filename)}"
+                image["save_status"] = "saved"
+                if dimensions:
+                    image["dimensions"] = dimensions
+                saved_count += 1
+            except JobCancelled:
+                raise
+            except Exception as exc:
+                image["save_status"] = "failed"
+                image["save_error"] = compact_text(str(exc), 220)
+        JOB_REGISTRY.raise_if_canceled(job_id)
+        return saved_count
+    except JobCancelled:
+        cleanup_generated_image_files(images, saved_paths)
+        raise
 
 
 def public_url_hint(value: str) -> str:
@@ -830,48 +878,80 @@ def public_url_hint(value: str) -> str:
         return re.sub(r"^https?://", "", text, flags=re.IGNORECASE)
 
 
-def read_history_entries() -> List[Dict[str, Any]]:
-    if not HISTORY_FILE.exists():
-        return []
-    try:
-        payload = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+def history_entries_from_payload(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         entries = payload.get("entries", [])
-    else:
+    elif isinstance(payload, list):
         entries = payload
+    else:
+        entries = []
     return [entry for entry in entries if isinstance(entry, dict)]
 
 
-def write_history_entries(entries: List[Dict[str, Any]]) -> None:
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
+def history_payload(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
         "version": 1,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "entries": entries[:HISTORY_MAX_ENTRIES],
     }
-    temp_path = HISTORY_FILE.with_suffix(".tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(HISTORY_FILE)
 
 
-def read_studio_session_state() -> Dict[str, Any]:
-    if not STUDIO_SESSIONS_FILE.exists():
-        return {"version": 1, "sessions": [], "active_session_id": ""}
+def read_history_entries() -> List[Dict[str, Any]]:
+    return history_entries_from_payload(read_json(HISTORY_FILE, []))
+
+
+def write_history_entries(entries: List[Dict[str, Any]]) -> None:
+    atomic_write_json(HISTORY_FILE, history_payload(entries))
+
+
+def empty_studio_session_state() -> Dict[str, Any]:
+    return {
+        "version": 1,
+        "revision": 1,
+        "sessions": [],
+        "active_session_id": "",
+    }
+
+
+def normalize_studio_revision(value: Any) -> int:
     try:
-        payload = json.loads(STUDIO_SESSIONS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {"version": 1, "sessions": [], "active_session_id": ""}
+        revision = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, revision)
+
+
+def studio_session_state_from_payload(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        return {"version": 1, "sessions": [], "active_session_id": ""}
+        return empty_studio_session_state()
     sessions = payload.get("sessions")
     return {
-        "version": int(payload.get("version") or 1),
+        "version": normalize_studio_revision(payload.get("version")),
+        "revision": normalize_studio_revision(payload.get("revision")),
         "updated_at": payload.get("updated_at"),
         "active_session_id": str(payload.get("active_session_id") or ""),
         "sessions": sessions if isinstance(sessions, list) else [],
     }
+
+
+def read_studio_session_state() -> Dict[str, Any]:
+    payload = read_json(STUDIO_SESSIONS_FILE, empty_studio_session_state())
+    return studio_session_state_from_payload(payload)
+
+
+class SessionRevisionConflict(Exception):
+    def __init__(self, current: Dict[str, Any]):
+        super().__init__("Studio session revision conflict")
+        self.current = current
+
+
+def expected_studio_revision(payload: Dict[str, Any]) -> Optional[int]:
+    if "expected_revision" not in payload:
+        return None
+    value = payload.get("expected_revision")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise HTTPException(status_code=400, detail="expected_revision 必须是正整数")
+    return value
 
 
 def inspect_studio_reference_source(
@@ -944,7 +1024,13 @@ def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
                     )
 
 
-def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, index: int) -> Optional[Dict[str, Any]]:
+def normalize_studio_reference(
+    snapshot: Any,
+    session_id: str,
+    turn_id: str,
+    index: int,
+    created_paths: Optional[set[Path]] = None,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(snapshot, dict):
         return None
     name = str(snapshot.get("name") or f"reference-{index + 1}.png").strip()[:180]
@@ -983,13 +1069,27 @@ def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, ind
             raise HTTPException(status_code=400, detail="参考图内容无效")
         extension = guess_extension(detected_mime_type)
         filename = (
-            f"{safe_filename_part(session_id, 'session')}-"
-            f"{safe_filename_part(turn_id, 'turn')}-"
-            f"{index + 1:02d}-{safe_filename_part(name, 'reference')}{extension}"
+            f"{safe_filename_part(session_id, 'session')[:32]}-"
+            f"{safe_filename_part(turn_id, 'turn')[:32]}-"
+            f"{index + 1:02d}-{uuid4().hex}-"
+            f"{safe_filename_part(Path(name).stem, 'reference')[:48]}{extension}"
         )
         SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
         target_path = SESSION_REFS_DIR / filename
-        target_path.write_bytes(raw_bytes)
+        resolved_target = target_path.resolve()
+        if created_paths is not None:
+            created_paths.add(resolved_target)
+        try:
+            with target_path.open("xb") as handle:
+                handle.write(raw_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         normalized["src"] = output_url_for_path(target_path)
         normalized["mime_type"] = detected_mime_type
         normalized["size"] = len(raw_bytes)
@@ -999,7 +1099,11 @@ def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, ind
     return normalized
 
 
-def compact_studio_turn(turn: Any, session_id: str) -> Optional[Dict[str, Any]]:
+def compact_studio_turn(
+    turn: Any,
+    session_id: str,
+    created_paths: Optional[set[Path]] = None,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(turn, dict):
         return None
     now = datetime.now().isoformat(timespec="seconds")
@@ -1027,7 +1131,15 @@ def compact_studio_turn(turn: Any, session_id: str) -> Optional[Dict[str, Any]]:
         refs = [
             normalized
             for index, snapshot in enumerate(snapshots[:STUDIO_MAX_REFS_PER_TURN])
-            if (normalized := normalize_studio_reference(snapshot, session_id, turn_id, index))
+            if (
+                normalized := normalize_studio_reference(
+                    snapshot,
+                    session_id,
+                    turn_id,
+                    index,
+                    created_paths,
+                )
+            )
         ]
         if refs:
             compact["referenceSnapshots"] = refs
@@ -1046,7 +1158,10 @@ def session_timestamp_value(session: Dict[str, Any]) -> float:
     return 0.0
 
 
-def compact_studio_session(session: Any) -> Optional[Dict[str, Any]]:
+def compact_studio_session(
+    session: Any,
+    created_paths: Optional[set[Path]] = None,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(session, dict):
         return None
     now = datetime.now().isoformat(timespec="seconds")
@@ -1055,7 +1170,7 @@ def compact_studio_session(session: Any) -> Optional[Dict[str, Any]]:
     turns = [
         compact_turn
         for turn in raw_turns[-STUDIO_MAX_TURNS:]
-        if (compact_turn := compact_studio_turn(turn, session_id))
+        if (compact_turn := compact_studio_turn(turn, session_id, created_paths))
     ]
     compact_session = {
         "id": session_id,
@@ -1106,10 +1221,70 @@ def collect_referenced_output_paths(sessions: List[Dict[str, Any]]) -> set[Path]
     return paths
 
 
+def collect_session_reference_paths(sessions: List[Dict[str, Any]]) -> set[Path]:
+    try:
+        reference_root = SESSION_REFS_DIR.resolve()
+    except OSError:
+        return set()
+    paths: set[Path] = set()
+    for path in collect_referenced_output_paths(sessions):
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(reference_root)
+        except (OSError, ValueError):
+            continue
+        if resolved != reference_root:
+            paths.add(resolved)
+    return paths
+
+
+def validate_session_reference_capacity(sessions: List[Dict[str, Any]]) -> None:
+    referenced = collect_session_reference_paths(sessions)
+    if len(referenced) > STUDIO_MAX_REF_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"会话参考图文件数量超过 {STUDIO_MAX_REF_FILES} 个上限",
+        )
+
+    total_bytes = 0
+    for path in referenced:
+        try:
+            total_bytes += path.stat().st_size
+        except OSError:
+            continue
+        if total_bytes > STUDIO_MAX_REF_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="会话参考图文件总容量超过上限",
+            )
+
+
+def cleanup_created_session_reference_files(
+    created_paths: set[Path],
+    protected_paths: set[Path],
+) -> None:
+    try:
+        reference_root = SESSION_REFS_DIR.resolve()
+    except OSError:
+        return
+    for path in created_paths:
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(reference_root)
+        except (OSError, ValueError):
+            continue
+        if resolved == reference_root or resolved in protected_paths:
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def prune_session_reference_files(sessions: List[Dict[str, Any]]) -> None:
     if not SESSION_REFS_DIR.exists():
         return
-    referenced = collect_referenced_output_paths(sessions)
+    referenced = collect_session_reference_paths(sessions)
     files = [path for path in SESSION_REFS_DIR.iterdir() if path.is_file()]
     for path in files:
         if path.resolve() not in referenced:
@@ -1118,31 +1293,16 @@ def prune_session_reference_files(sessions: List[Dict[str, Any]]) -> None:
             except OSError:
                 pass
 
-    remaining = sorted(
-        [path for path in SESSION_REFS_DIR.iterdir() if path.is_file()],
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
-    total = 0
-    for index, path in enumerate(remaining):
-        try:
-            size = path.stat().st_size
-        except OSError:
-            continue
-        total += size
-        if index >= STUDIO_MAX_REF_FILES or total > STUDIO_MAX_REF_BYTES:
-            try:
-                path.unlink()
-            except OSError:
-                pass
 
-
-def normalize_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_studio_session_state(
+    payload: Dict[str, Any],
+    created_paths: Optional[set[Path]] = None,
+) -> Dict[str, Any]:
     sessions_value = payload.get("sessions") if isinstance(payload, dict) else []
     sessions = [
         compact_session
         for session in (sessions_value if isinstance(sessions_value, list) else [])
-        if (compact_session := compact_studio_session(session))
+        if (compact_session := compact_studio_session(session, created_paths))
     ]
     sessions = sorted(sessions, key=session_timestamp_value, reverse=True)[:STUDIO_MAX_SESSIONS]
     active_session_id = str(payload.get("active_session_id") or payload.get("activeSessionId") or "").strip()
@@ -1157,14 +1317,38 @@ def normalize_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def write_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
-    preflight_studio_reference_request(payload)
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    normalized = normalize_studio_session_state(payload)
-    prune_session_reference_files(normalized["sessions"])
-    temp_path = STUDIO_SESSIONS_FILE.with_suffix(".tmp")
-    temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(STUDIO_SESSIONS_FILE)
-    return normalized
+    created_paths: set[Path] = set()
+    protected_paths: set[Path] = set()
+    committed = False
+
+    def mutate_sessions(current_payload: Any) -> Dict[str, Any]:
+        current = studio_session_state_from_payload(current_payload)
+        protected_paths.update(collect_session_reference_paths(current["sessions"]))
+        expected_revision = expected_studio_revision(payload)
+        if expected_revision is not None and expected_revision != current["revision"]:
+            raise SessionRevisionConflict(current)
+        preflight_studio_reference_request(payload)
+        normalized = normalize_studio_session_state(payload, created_paths)
+        normalized["revision"] = current["revision"] + 1
+        validate_session_reference_capacity(normalized["sessions"])
+        return normalized
+
+    def after_write(normalized: Dict[str, Any]) -> None:
+        nonlocal committed
+        committed = True
+        prune_session_reference_files(normalized["sessions"])
+
+    try:
+        return mutate_json(
+            STUDIO_SESSIONS_FILE,
+            empty_studio_session_state(),
+            mutate_sessions,
+            after_write=after_write,
+        )
+    except Exception:
+        if not committed:
+            cleanup_created_session_reference_files(created_paths, protected_paths)
+        raise
 
 
 def normalize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -1173,28 +1357,38 @@ def normalize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+class _HistoryEntryNotFound(Exception):
+    pass
+
+
 def update_history_entry(entry_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     target_id = str(entry_id or "").strip()
     if not target_id:
         return None
 
-    entries = read_history_entries()
     updated_entry: Optional[Dict[str, Any]] = None
-    next_entries: List[Dict[str, Any]] = []
     allowed_keys = {"favorite"}
     clean_updates = {key: updates[key] for key in allowed_keys if key in updates}
-    for entry in entries:
-        if str(entry.get("id") or "") == target_id:
-            entry = dict(entry)
-            if "favorite" in clean_updates:
-                entry["favorite"] = bool(clean_updates["favorite"])
-            updated_entry = entry
-        next_entries.append(entry)
 
-    if updated_entry is None:
+    def mutate_history(payload: Any) -> Dict[str, Any]:
+        nonlocal updated_entry
+        next_entries: List[Dict[str, Any]] = []
+        for entry in history_entries_from_payload(payload):
+            if str(entry.get("id") or "") == target_id:
+                entry = dict(entry)
+                if "favorite" in clean_updates:
+                    entry["favorite"] = bool(clean_updates["favorite"])
+                updated_entry = entry
+            next_entries.append(entry)
+        if updated_entry is None:
+            raise _HistoryEntryNotFound
+        return history_payload(next_entries)
+
+    try:
+        mutate_json(HISTORY_FILE, [], mutate_history)
+    except _HistoryEntryNotFound:
         return None
-
-    write_history_entries(next_entries)
+    assert updated_entry is not None
     return normalize_history_entry(updated_entry)
 
 
@@ -1290,10 +1484,19 @@ def delete_history_entry(entry_id: str, *, delete_files: bool = False, legacy_pa
     if target_id.startswith("legacy-") and delete_files:
         return delete_legacy_output_entry(target_id, legacy_path)
 
-    entries = read_history_entries()
-    removed_entries = [entry for entry in entries if str(entry.get("id") or "") == target_id]
-    next_entries = [entry for entry in entries if str(entry.get("id") or "") != target_id]
-    if not removed_entries:
+    removed_entries: List[Dict[str, Any]] = []
+
+    def mutate_history(payload: Any) -> Dict[str, Any]:
+        entries = history_entries_from_payload(payload)
+        removed_entries.extend(entry for entry in entries if str(entry.get("id") or "") == target_id)
+        if not removed_entries:
+            raise _HistoryEntryNotFound
+        next_entries = [entry for entry in entries if str(entry.get("id") or "") != target_id]
+        return history_payload(next_entries)
+
+    try:
+        mutate_json(HISTORY_FILE, [], mutate_history)
+    except _HistoryEntryNotFound:
         return False, []
 
     deleted_files: List[str] = []
@@ -1311,7 +1514,6 @@ def delete_history_entry(entry_id: str, *, delete_files: bool = False, legacy_pa
                 except Exception:
                     continue
 
-    write_history_entries(next_entries)
     return True, deleted_files
 
 
@@ -1364,7 +1566,7 @@ def append_generation_history(
 
     created_at = datetime.now().isoformat(timespec="seconds")
     entry = {
-        "id": f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{safe_filename_part(engine, 'engine')}",
+        "id": f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{safe_filename_part(engine, 'engine')}-{uuid4().hex}",
         "created_at": created_at,
         "engine": engine,
         "favorite": False,
@@ -1375,8 +1577,11 @@ def append_generation_history(
         "messages": [compact_text(str(message), 400) for message in (messages or []) if message],
         "images": image_records,
     }
-    entries = read_history_entries()
-    write_history_entries([entry, *entries])
+    def mutate_history(payload: Any) -> Dict[str, Any]:
+        entries = history_entries_from_payload(payload)
+        return history_payload([entry, *entries])
+
+    mutate_json(HISTORY_FILE, [], mutate_history)
     return entry
 
 
@@ -1506,7 +1711,11 @@ def extract_image_urls_from_text(text: str) -> List[str]:
     return [url for url in urls if is_image_url(url)]
 
 
-def extract_banana_images(response_data: Dict[str, Any]) -> Dict[str, Any]:
+def extract_banana_images(
+    response_data: Dict[str, Any],
+    *,
+    _download_urls: bool = True,
+) -> Dict[str, Any]:
     images: List[Dict[str, str]] = []
     messages: List[str] = []
     pending_urls: List[str] = []
@@ -1594,15 +1803,36 @@ def extract_banana_images(response_data: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(image_url, str) and is_image_url(image_url):
                 pending_urls.append(image_url)
 
-    for image_url in pending_urls:
-        downloaded = download_remote_image(image_url)
-        if downloaded:
-            images.append(downloaded)
+    if _download_urls:
+        for image_url in pending_urls:
+            downloaded = download_remote_image(image_url)
+            if downloaded:
+                images.append(downloaded)
 
-    return {
+    result: Dict[str, Any] = {
         "images": images,
         "messages": [message for message in messages if message],
     }
+    if not _download_urls:
+        result["_pending_urls"] = pending_urls
+    return result
+
+
+async def extract_banana_images_async(
+    response_data: Dict[str, Any],
+    *,
+    job_id: str = "",
+) -> Dict[str, Any]:
+    parsed = extract_banana_images(response_data, _download_urls=False)
+    pending_urls = parsed.pop("_pending_urls", [])
+    for image_url in pending_urls:
+        JOB_REGISTRY.raise_if_canceled(job_id)
+        downloaded = await UPSTREAM_EXECUTOR.run("download", download_remote_image, image_url)
+        JOB_REGISTRY.raise_if_canceled(job_id)
+        if downloaded:
+            parsed["images"].append(downloaded)
+    JOB_REGISTRY.raise_if_canceled(job_id)
+    return parsed
 
 
 async def read_upload_assets(
@@ -1948,19 +2178,25 @@ def summarize_diagnostic_warning(results: List[Dict[str, Any]]) -> str:
     return ""
 
 
-def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
     api_key = str(payload.get("api_key") or "").strip()
     base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
     model = str(payload.get("model") or DEFAULT_GPT_MODEL).strip()
-    timeout = max(5, min(int(payload.get("timeout") or 45), 120))
+    timeout = bounded_timeout(payload.get("timeout"), default=45, maximum=120)
     endpoint = build_gpt_api_url(base_url, "/v1/images/generations")
     started_at = time.monotonic()
     if not api_key:
         return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
     try:
-        response = requests.post(
+        response = await UPSTREAM_EXECUTOR.run(
+            "generation",
+            requests.post,
             endpoint,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers=gpt_headers(
+                api_key,
+                accept="application/json",
+                content_type="application/json",
+            ),
             json={
                 "model": model,
                 "prompt": "diagnostic connectivity test, simple neutral square",
@@ -1992,12 +2228,12 @@ def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
         return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
 
 
-def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
     api_key = str(payload.get("api_key") or "").strip()
     base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
     model = str(payload.get("chat_model") or payload.get("model") or DEFAULT_GPT_CHAT_MODEL).strip()
     reasoning_effort = str(payload.get("reasoning_effort") or "auto").strip()
-    timeout = max(5, min(int(payload.get("timeout") or 45), 120))
+    timeout = bounded_timeout(payload.get("timeout"), default=45, maximum=120)
     endpoint = build_openai_chat_url(base_url)
     started_at = time.monotonic()
     if not api_key:
@@ -2009,9 +2245,15 @@ def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict
     if reasoning_effort in GPT_REASONING_EFFORTS and reasoning_effort != "auto":
         chat_payload["reasoning_effort"] = reasoning_effort
     try:
-        response = requests.post(
+        response = await UPSTREAM_EXECUTOR.run(
+            "chat",
+            requests.post,
             endpoint,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers=gpt_headers(
+                api_key,
+                accept="application/json",
+                content_type="application/json",
+            ),
             json=chat_payload,
             timeout=timeout,
         )
@@ -2038,18 +2280,24 @@ def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict
         return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
 
 
-def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
     api_key = str(payload.get("api_key") or "").strip()
     api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
     model = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
-    timeout = max(5, min(int(payload.get("timeout_seconds") or payload.get("timeout") or 45), 120))
+    timeout = bounded_timeout(
+        payload.get("timeout_seconds", payload.get("timeout")),
+        default=45,
+        maximum=120,
+    )
     endpoint = build_banana_api_url(api_base_url, model)
     started_at = time.monotonic()
     if not api_key:
         return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error="缺少 API Key")
     try:
         session = create_requests_session(bool(payload.get("bypass_proxy")))
-        response = session.post(
+        response = await UPSTREAM_EXECUTOR.run(
+            "generation",
+            session.post,
             endpoint,
             headers=banana_headers(api_key),
             json=build_banana_request(
@@ -2066,7 +2314,7 @@ def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]
         if not response.ok:
             return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, redact_diagnostic_text(extract_error_message(response), secrets))
         response_data = response_json_utf8_first(response)
-        parsed = extract_banana_images(response_data if isinstance(response_data, dict) else {})
+        parsed = await extract_banana_images_async(response_data if isinstance(response_data, dict) else {})
         if not parsed.get("images"):
             return diagnostic_result("generation", "生图", False, endpoint, model, started_at, response.status_code, "接口成功但未返回图片")
         return diagnostic_result("generation", "生图", True, endpoint, model, started_at, response.status_code)
@@ -2078,18 +2326,24 @@ def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]
         return diagnostic_result("generation", "生图", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
 
 
-def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
+async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> Dict[str, Any]:
     api_key = str(payload.get("api_key") or "").strip()
     api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
     model = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
-    timeout = max(5, min(int(payload.get("timeout_seconds") or payload.get("timeout") or 45), 120))
+    timeout = bounded_timeout(
+        payload.get("timeout_seconds", payload.get("timeout")),
+        default=45,
+        maximum=120,
+    )
     endpoint = build_banana_api_url(api_base_url, model)
     started_at = time.monotonic()
     if not api_key:
         return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error="缺少 API Key")
     try:
         session = create_requests_session(bool(payload.get("bypass_proxy")))
-        response = session.post(
+        response = await UPSTREAM_EXECUTOR.run(
+            "chat",
+            session.post,
             endpoint,
             headers=banana_headers(api_key),
             json={
@@ -2113,7 +2367,7 @@ def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> D
         return diagnostic_result("chat", "聊天", False, endpoint, model, started_at, error=redact_diagnostic_text(str(exc), secrets))
 
 
-def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = str(payload.get("engine") or "gpt-image-2").strip()
     if engine not in {"gpt-image-2", "banana"}:
         engine = "gpt-image-2"
@@ -2124,14 +2378,14 @@ def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     if engine == "banana":
         if "generation" in checks:
-            results.append(run_banana_generation_diagnostic(payload, secrets))
+            results.append(await run_banana_generation_diagnostic(payload, secrets))
         if "chat" in checks:
-            results.append(run_banana_chat_diagnostic(payload, secrets))
+            results.append(await run_banana_chat_diagnostic(payload, secrets))
     else:
         if "generation" in checks:
-            results.append(run_gpt_generation_diagnostic(payload, secrets))
+            results.append(await run_gpt_generation_diagnostic(payload, secrets))
         if "chat" in checks:
-            results.append(run_gpt_chat_diagnostic(payload, secrets))
+            results.append(await run_gpt_chat_diagnostic(payload, secrets))
     ok = all(bool(item.get("ok")) for item in results)
     return {
         "ok": ok,
@@ -2215,47 +2469,75 @@ def normalize_plain_base64_image(value: str) -> Optional[Tuple[str, str]]:
     return data_url_from_base64(encoded, mime_type), mime_type
 
 
+def build_gpt_image_from_value(index: int, image_value: str) -> Optional[Dict[str, str]]:
+    if image_value.startswith("data:image"):
+        extracted = extract_image_bytes(image_value)
+        if not extracted:
+            return None
+        raw_bytes, mime_type = extracted
+        encoded = base64.b64encode(raw_bytes).decode("utf-8")
+        return {
+            "src": data_url_from_base64(encoded, mime_type),
+            "mime_type": mime_type,
+            "source": "data-url",
+            "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
+        }
+
+    normalized_base64 = normalize_plain_base64_image(image_value)
+    if not normalized_base64:
+        return None
+    image_src, mime_type = normalized_base64
+    return {
+        "src": image_src,
+        "mime_type": mime_type,
+        "source": "b64_json",
+        "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
+    }
+
+
+def name_downloaded_gpt_image(downloaded: Dict[str, str], index: int) -> Dict[str, str]:
+    downloaded["name"] = (
+        f"gpt-image-2-{index:02d}{guess_extension(downloaded['mime_type'])}"
+    )
+    return downloaded
+
+
 def build_gpt_images_from_response(response_data: Dict[str, Any]) -> List[Dict[str, str]]:
     images: List[Dict[str, str]] = []
     for index, image_value in enumerate(extract_gpt_image_values(response_data), start=1):
         if image_value.startswith(("http://", "https://")):
             downloaded = download_remote_image(image_value)
-            if not downloaded:
-                continue
-            downloaded["name"] = (
-                f"gpt-image-2-{index:02d}{guess_extension(downloaded['mime_type'])}"
-            )
-            images.append(downloaded)
+            if downloaded:
+                images.append(name_downloaded_gpt_image(downloaded, index))
             continue
+        image = build_gpt_image_from_value(index, image_value)
+        if image:
+            images.append(image)
+    return images
 
-        if image_value.startswith("data:image"):
-            extracted = extract_image_bytes(image_value)
-            if not extracted:
-                continue
-            raw_bytes, mime_type = extracted
-            encoded = base64.b64encode(raw_bytes).decode("utf-8")
-            images.append(
-                {
-                    "src": data_url_from_base64(encoded, mime_type),
-                    "mime_type": mime_type,
-                    "source": "data-url",
-                    "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
-                }
-            )
-            continue
 
-        normalized_base64 = normalize_plain_base64_image(image_value)
-        if not normalized_base64:
+async def build_gpt_images_from_response_async(
+    response_data: Dict[str, Any],
+    *,
+    job_id: str = "",
+) -> List[Dict[str, str]]:
+    images: List[Dict[str, str]] = []
+    for index, image_value in enumerate(extract_gpt_image_values(response_data), start=1):
+        if image_value.startswith(("http://", "https://")):
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            downloaded = await UPSTREAM_EXECUTOR.run(
+                "download",
+                download_remote_image,
+                image_value,
+            )
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            if downloaded:
+                images.append(name_downloaded_gpt_image(downloaded, index))
             continue
-        image_src, mime_type = normalized_base64
-        images.append(
-            {
-                "src": image_src,
-                "mime_type": mime_type,
-                "source": "b64_json",
-                "name": f"gpt-image-2-{index:02d}{guess_extension(mime_type)}",
-            }
-        )
+        image = build_gpt_image_from_value(index, image_value)
+        if image:
+            images.append(image)
+    JOB_REGISTRY.raise_if_canceled(job_id)
     return images
 
 
@@ -2276,12 +2558,60 @@ def create_app() -> FastAPI:
     if studio_assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(studio_assets_dir)), name="studio-assets")
 
+    def normalized_request_job_id(value: Any, *, allow_empty: bool) -> str:
+        try:
+            return normalize_job_id(value, allow_empty=allow_empty)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="job_id 无效") from exc
+
+    async def generation_job_scope(
+        job_id: Optional[str] = Form(default=None),
+    ) -> AsyncIterator[str]:
+        normalized = normalized_request_job_id(job_id, allow_empty=job_id is None)
+        if normalized:
+            JOB_REGISTRY.register(normalized)
+        try:
+            yield normalized
+        finally:
+            if normalized:
+                JOB_REGISTRY.forget(normalized)
+
+    async def chat_job_scope(request: Request) -> AsyncIterator[str]:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        explicit = isinstance(payload, dict) and "job_id" in payload
+        raw_job_id = payload.get("job_id") if explicit else None
+        normalized = normalized_request_job_id(raw_job_id, allow_empty=not explicit)
+        if normalized:
+            JOB_REGISTRY.register(normalized)
+        try:
+            yield normalized
+        finally:
+            if normalized:
+                JOB_REGISTRY.forget(normalized)
+
+    @app.exception_handler(JobCancelled)
+    async def handle_job_cancelled(_request: Request, _exc: JobCancelled) -> JSONResponse:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": False,
+                "canceled": True,
+                "images": [],
+                "messages": [],
+                "history_entry": None,
+                "reply": "",
+                "meta": {},
+            },
+        )
+
     @app.exception_handler(Exception)
-    async def handle_unexpected_exception(_request: Request, exc: Exception) -> JSONResponse:
-        message = compact_text(str(exc), 360) or "没有返回具体错误"
+    async def handle_unexpected_exception(_request: Request, _exc: Exception) -> JSONResponse:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"后端内部错误：{exc.__class__.__name__} - {message}"},
+            content={"detail": "后端内部错误，请重试。", "error_code": "E_INTERNAL"},
         )
 
     @app.get("/")
@@ -2323,6 +2653,17 @@ def create_app() -> FastAPI:
             "features": {"studio_sessions": True, "session_reference_files": True},
         }
 
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str) -> Dict[str, Any]:
+        normalized = normalized_request_job_id(job_id, allow_empty=False)
+        JOB_REGISTRY.cancel(normalized)
+        return {
+            "ok": True,
+            "job_id": normalized,
+            "canceled": True,
+            "warning": "任务已在本地取消；如果上游已经接单，仍可能继续运行或计费。",
+        }
+
     @app.get("/api/config/defaults")
     async def config_defaults() -> Dict[str, Any]:
         payload = build_runtime_defaults()
@@ -2338,10 +2679,7 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        PRIMARY_CONFIG_FILE.write_text(
-            json.dumps(normalized, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(PRIMARY_CONFIG_FILE, normalized, backup=True)
         return {
             "ok": True,
             "path": str(PRIMARY_CONFIG_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
@@ -2349,7 +2687,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/diagnostics")
     async def diagnostics(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        return run_diagnostics(payload)
+        return await run_diagnostics(payload)
 
     @app.get("/api/history")
     async def generation_history(limit: int = 120) -> Dict[str, Any]:
@@ -2369,8 +2707,17 @@ def create_app() -> FastAPI:
         }
 
     @app.put("/api/studio/sessions")
-    async def write_studio_sessions(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        state = write_studio_session_state(payload)
+    async def write_studio_sessions(payload: Dict[str, Any] = Body(...)) -> Any:
+        try:
+            state = write_studio_session_state(payload)
+        except SessionRevisionConflict as exc:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "会话已被其他页面更新，请刷新后重试。",
+                    "current": exc.current,
+                },
+            )
         return {
             "ok": True,
             "path": str(STUDIO_SESSIONS_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
@@ -2429,13 +2776,21 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/chat/gpt-image-2")
-    async def chat_gpt_image_2(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    async def chat_gpt_image_2(
+        payload: Dict[str, Any] = Body(...),
+        job_id: str = Depends(chat_job_scope),
+    ) -> Dict[str, Any]:
+        JOB_REGISTRY.raise_if_canceled(job_id)
         prompt = str(payload.get("prompt") or "").strip()
         api_key = str(payload.get("api_key") or "").strip()
         base_url = str(payload.get("base_url") or DEFAULT_GPT_BASE_URL).strip()
         model = str(payload.get("chat_model") or payload.get("model") or DEFAULT_GPT_CHAT_MODEL).strip()
         reasoning_effort = str(payload.get("reasoning_effort") or "auto").strip().lower()
-        timeout = int(payload.get("timeout") or 120)
+        timeout = bounded_timeout(
+            payload.get("timeout"),
+            default=120,
+            maximum=MAX_CHAT_TIMEOUT,
+        )
         if not api_key:
             raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
         if not prompt:
@@ -2454,16 +2809,20 @@ def create_app() -> FastAPI:
             chat_payload["reasoning_effort"] = reasoning_effort
         started_at = time.time()
         try:
-            response = requests.post(
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            response = await UPSTREAM_EXECUTOR.run(
+                "chat",
+                requests.post,
                 api_url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
+                headers=gpt_headers(
+                    api_key,
+                    accept="application/json",
+                    content_type="application/json",
+                ),
                 json=chat_payload,
-                timeout=max(10, timeout),
+                timeout=timeout,
             )
+            JOB_REGISTRY.raise_if_canceled(job_id)
         except requests.Timeout as exc:
             raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
         except requests.RequestException as exc:
@@ -2494,13 +2853,21 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/chat/banana")
-    async def chat_banana(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    async def chat_banana(
+        payload: Dict[str, Any] = Body(...),
+        job_id: str = Depends(chat_job_scope),
+    ) -> Dict[str, Any]:
+        JOB_REGISTRY.raise_if_canceled(job_id)
         prompt = str(payload.get("prompt") or "").strip()
         api_key = str(payload.get("api_key") or "").strip()
         api_base_url = str(payload.get("api_base_url") or DEFAULT_BANANA_BASE_URL).strip()
         model_type = str(payload.get("model_type") or DEFAULT_BANANA_MODEL).strip()
         top_p = float(payload.get("top_p") or 0.95)
-        timeout_seconds = int(payload.get("timeout_seconds") or 60)
+        timeout_seconds = bounded_timeout(
+            payload.get("timeout_seconds"),
+            default=60,
+            maximum=MAX_CHAT_TIMEOUT,
+        )
         bypass_proxy = bool(payload.get("bypass_proxy") or False)
         disable_ssl = bool(payload.get("disable_ssl") or False)
         if not api_key:
@@ -2511,9 +2878,11 @@ def create_app() -> FastAPI:
         api_url = build_banana_api_url(api_base_url, model_type)
         started_at = time.time()
         session = create_requests_session(bypass_proxy=bypass_proxy)
-        read_timeout = None if timeout_seconds <= 0 else max(10, timeout_seconds)
         try:
-            response = session.post(
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            response = await UPSTREAM_EXECUTOR.run(
+                "chat",
+                session.post,
                 api_url,
                 json={
                     "contents": build_banana_chat_contents(prompt, payload.get("messages")),
@@ -2523,9 +2892,10 @@ def create_app() -> FastAPI:
                     },
                 },
                 headers=banana_headers(api_key),
-                timeout=(15, read_timeout),
+                timeout=(15, timeout_seconds),
                 verify=not disable_ssl,
             )
+            JOB_REGISTRY.raise_if_canceled(job_id)
         except requests.Timeout as exc:
             raise HTTPException(status_code=504, detail="聊天请求超时：上游接口长时间没有返回。") from exc
         except requests.RequestException as exc:
@@ -2569,7 +2939,9 @@ def create_app() -> FastAPI:
         bypass_proxy: bool = Form(False),
         disable_ssl: bool = Form(False),
         reference_files: Optional[List[UploadFile]] = File(default=None),
+        job_id: str = Depends(generation_job_scope),
     ) -> Dict[str, Any]:
+        JOB_REGISTRY.raise_if_canceled(job_id)
         if not api_key.strip():
             raise HTTPException(status_code=400, detail="请填写 Banana API Key")
         if batch_size < 1 or batch_size > 8:
@@ -2585,6 +2957,7 @@ def create_app() -> FastAPI:
         session = create_requests_session(bypass_proxy=bypass_proxy)
 
         for index in range(batch_size):
+            JOB_REGISTRY.raise_if_canceled(job_id)
             current_seed = seed + index if seed >= 0 else -1
             seeds.append(current_seed)
             payload = build_banana_request(
@@ -2596,23 +2969,34 @@ def create_app() -> FastAPI:
                 reference_assets=reference_assets,
             )
             api_url = build_banana_api_url(api_base_url, model_type)
-            read_timeout = None if infinite_timeout or timeout_seconds <= 0 else max(60, timeout_seconds)
+            read_timeout = bounded_timeout(
+                0 if infinite_timeout else timeout_seconds,
+                default=60,
+                maximum=MAX_GENERATION_TIMEOUT,
+            )
             timeout = (15, read_timeout)
 
             try:
-                response = session.post(
+                JOB_REGISTRY.raise_if_canceled(job_id)
+                response = await UPSTREAM_EXECUTOR.run(
+                    "generation",
+                    session.post,
                     api_url,
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                     headers=banana_headers(api_key),
                     timeout=timeout,
                     verify=not disable_ssl,
                 )
+                JOB_REGISTRY.raise_if_canceled(job_id)
                 if response.status_code >= 400:
                     detail = extract_error_message(response)
                     messages.append(f"第 {index + 1} 批请求失败: {detail}")
                     continue
 
-                parsed = extract_banana_images(response_json_utf8_first(response))
+                parsed = await extract_banana_images_async(
+                    response_json_utf8_first(response),
+                    job_id=job_id,
+                )
                 batch_images = parsed["images"]
                 batch_messages = parsed["messages"]
                 if batch_images:
@@ -2624,61 +3008,72 @@ def create_app() -> FastAPI:
 
                 for message in batch_messages:
                     messages.append(f"第 {index + 1} 批: {message}")
+            except JobCancelled:
+                raise
             except requests.RequestException as exc:
                 messages.append(f"第 {index + 1} 批网络异常: {type(exc).__name__} {exc}")
             except Exception as exc:
                 messages.append(f"第 {index + 1} 批处理失败: {exc}")
 
         elapsed_seconds = round(time.time() - started_at, 2)
-        saved_count = save_generated_images("banana", generated_images)
-        meta = {
-            "model_type": model_type,
-            "api_base_url": api_base_url,
-            "batch_size": batch_size,
-            "aspect_ratio": aspect_ratio,
-            "effective_aspect_ratio": effective_aspect_ratio or "Auto",
-            "image_size": image_size,
-            "top_p": top_p,
-            "timeout_seconds": timeout_seconds,
-            "infinite_timeout": infinite_timeout,
-            "reference_count": len(reference_assets),
-            "image_count": len(generated_images),
-            "saved_count": saved_count,
-            "output_dir": "outputs",
-            "elapsed_seconds": elapsed_seconds,
-            "seeds": seeds,
-        }
-        form_state = {
-            "prompt": prompt,
-            "context_prompt": compact_text(context_prompt.strip(), 1800),
-            "batch_size": batch_size,
-            "aspect_ratio": aspect_ratio,
-            "image_size": image_size,
-            "seed": seed,
-            "top_p": top_p,
-            "timeout_seconds": timeout_seconds,
-            "infinite_timeout": infinite_timeout,
-            "bypass_proxy": bypass_proxy,
-            "disable_ssl": disable_ssl,
-        }
-        history_entry = append_generation_history(
-            engine="banana",
-            prompt=prompt,
-            form_state=form_state,
-            meta=meta,
-            messages=messages,
-            images=generated_images,
-        )
-        if history_entry:
-            meta["history_id"] = history_entry["id"]
-        return {
-            "ok": bool(generated_images),
-            "engine": "banana",
-            "images": generated_images,
-            "messages": messages,
-            "meta": meta,
-            "history_entry": history_entry,
-        }
+        history_entry: Optional[Dict[str, Any]] = None
+        try:
+            saved_count = save_generated_images("banana", generated_images, job_id=job_id)
+            meta = {
+                "model_type": model_type,
+                "api_base_url": api_base_url,
+                "batch_size": batch_size,
+                "aspect_ratio": aspect_ratio,
+                "effective_aspect_ratio": effective_aspect_ratio or "Auto",
+                "image_size": image_size,
+                "top_p": top_p,
+                "timeout_seconds": timeout_seconds,
+                "infinite_timeout": infinite_timeout,
+                "reference_count": len(reference_assets),
+                "image_count": len(generated_images),
+                "saved_count": saved_count,
+                "output_dir": "outputs",
+                "elapsed_seconds": elapsed_seconds,
+                "seeds": seeds,
+            }
+            form_state = {
+                "prompt": prompt,
+                "context_prompt": compact_text(context_prompt.strip(), 1800),
+                "batch_size": batch_size,
+                "aspect_ratio": aspect_ratio,
+                "image_size": image_size,
+                "seed": seed,
+                "top_p": top_p,
+                "timeout_seconds": timeout_seconds,
+                "infinite_timeout": infinite_timeout,
+                "bypass_proxy": bypass_proxy,
+                "disable_ssl": disable_ssl,
+            }
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            history_entry = append_generation_history(
+                engine="banana",
+                prompt=prompt,
+                form_state=form_state,
+                meta=meta,
+                messages=messages,
+                images=generated_images,
+            )
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            if history_entry:
+                meta["history_id"] = history_entry["id"]
+            return {
+                "ok": bool(generated_images),
+                "engine": "banana",
+                "images": generated_images,
+                "messages": messages,
+                "meta": meta,
+                "history_entry": history_entry,
+            }
+        except JobCancelled:
+            if history_entry:
+                delete_history_entry(str(history_entry.get("id") or ""))
+            cleanup_generated_image_files(generated_images)
+            raise
 
     @app.post("/api/generate/gpt-image-2")
     async def generate_gpt_image_2(
@@ -2704,7 +3099,9 @@ def create_app() -> FastAPI:
         custom_size: str = Form("1536x864"),
         api_endpoint: str = Form("auto"),
         reference_files: Optional[List[UploadFile]] = File(default=None),
+        job_id: str = Depends(generation_job_scope),
     ) -> Dict[str, Any]:
+        JOB_REGISTRY.raise_if_canceled(job_id)
         if not api_key.strip():
             raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
         if not prompt.strip():
@@ -2759,10 +3156,7 @@ def create_app() -> FastAPI:
             payload["safety_check"] = False
 
         image_data_urls = [asset["data_url"] for asset in reference_assets]
-        headers: Dict[str, str] = {
-            "Authorization": f"Bearer {api_key.strip()}",
-            "Accept": "*/*",
-        }
+        headers = gpt_headers(api_key)
         request_kwargs: Dict[str, Any]
         files: List[Tuple[str, Tuple[str, bytes, str]]] = []
 
@@ -2808,7 +3202,11 @@ def create_app() -> FastAPI:
                 payload["image"] = image_data_urls
             request_kwargs = {"json": payload}
 
-        timeout_value = None if infinite_timeout else timeout
+        timeout_value = bounded_timeout(
+            0 if infinite_timeout else timeout,
+            default=300,
+            maximum=MAX_GENERATION_TIMEOUT,
+        )
         started_at = time.time()
         unknown_param_pattern = re.compile(
             r"(?:Unknown parameter|Unrecognized request argument)[^A-Za-z0-9_.]+([A-Za-z_][A-Za-z0-9_.]*)",
@@ -2824,15 +3222,19 @@ def create_app() -> FastAPI:
             retryable_count = 0
             for _ in range(max(8, len(current_payload) + 1)):
                 try:
-                    response = await asyncio.to_thread(
+                    JOB_REGISTRY.raise_if_canceled(job_id)
+                    response = await UPSTREAM_EXECUTOR.run(
+                        "generation",
                         requests.post,
                         api_url,
                         headers=headers,
-                        timeout=None if timeout_value is None else timeout_value,
+                        timeout=timeout_value,
                         **current_request_kwargs,
                     )
+                    JOB_REGISTRY.raise_if_canceled(job_id)
                 except requests.Timeout as exc:
                     if fallback_api_url and not used_yuzapi_fallback:
+                        JOB_REGISTRY.raise_if_canceled(job_id)
                         api_url = fallback_api_url
                         used_yuzapi_fallback = True
                         continue
@@ -2842,6 +3244,7 @@ def create_app() -> FastAPI:
                     ) from exc
                 except requests.RequestException as exc:
                     if fallback_api_url and not used_yuzapi_fallback:
+                        JOB_REGISTRY.raise_if_canceled(job_id)
                         api_url = fallback_api_url
                         used_yuzapi_fallback = True
                         continue
@@ -2869,12 +3272,15 @@ def create_app() -> FastAPI:
                                 current_request_kwargs["json"] = current_payload
                             if "data" in current_request_kwargs:
                                 current_request_kwargs["data"] = current_payload
+                            JOB_REGISTRY.raise_if_canceled(job_id)
                             continue
                     raise HTTPException(status_code=400, detail=f"GPT Image 2 请求失败: {error_message}")
 
                 if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
                     retryable_count += 1
+                    JOB_REGISTRY.raise_if_canceled(job_id)
                     await asyncio.sleep(retry_delay)
+                    JOB_REGISTRY.raise_if_canceled(job_id)
                     retry_delay = min(retry_delay * 1.5, 8.0)
                     continue
 
@@ -2901,8 +3307,9 @@ def create_app() -> FastAPI:
 
         response_data = await post_gpt_payload(payload, request_kwargs)
         response_payloads = [response_data]
-        images = build_gpt_images_from_response(response_data)
+        images = await build_gpt_images_from_response_async(response_data, job_id=job_id)
         while resolved_endpoint != "/v1/responses" and 0 < len(images) < n:
+            JOB_REGISTRY.raise_if_canceled(job_id)
             remaining = n - len(images)
             next_payload = {**payload, "n": remaining}
             if resolved_endpoint == "/v1/images/edits":
@@ -2910,74 +3317,86 @@ def create_app() -> FastAPI:
             else:
                 next_request_kwargs = {"json": next_payload}
             next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
-            next_images = build_gpt_images_from_response(next_response_data)
+            next_images = await build_gpt_images_from_response_async(
+                next_response_data,
+                job_id=job_id,
+            )
             if not next_images:
                 break
             response_payloads.append(next_response_data)
             images.extend(next_images)
 
         elapsed_seconds = round(time.time() - started_at, 2)
-        saved_count = save_generated_images("gpt-image-2", images)
-        total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
-        meta = {
-            "model": model,
-            "api_url": api_url,
-            "api_endpoint": resolved_endpoint,
-            "size": normalized_size,
-            "quality": quality,
-            "n": n,
-            "seed": response_data.get("seed", seed),
-            "edit_mode": edit_mode,
-            "style_preset": style_preset,
-            "response_format": response_format,
-            "reference_count": len(reference_assets),
-            "image_count": len(images),
-            "saved_count": saved_count,
-            "output_dir": "outputs",
-            "elapsed_seconds": elapsed_seconds,
-            "tokens_used": total_tokens,
-            "estimated_cost": estimate_cost(total_tokens),
-        }
-        form_state = {
-            "prompt": prompt,
-            "context_prompt": compact_text(context_prompt.strip(), 1800),
-            "negative_prompt": negative_prompt,
-            "poster_text": poster_text_clean,
-            "size": size,
-            "custom_size": custom_size,
-            "quality": quality,
-            "n": n,
-            "seed": seed,
-            "style_preset": style_preset,
-            "enhance_prompt": enhance_prompt,
-            "safety_check": safety_check,
-            "response_format": response_format,
-            "api_endpoint": api_endpoint,
-            "edit_mode": edit_mode,
-            "reference_strength": reference_strength,
-            "timeout": timeout,
-            "infinite_timeout": infinite_timeout,
-        }
-        history_entry = append_generation_history(
-            engine="gpt-image-2",
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            form_state=form_state,
-            meta=meta,
-            messages=[],
-            images=images,
-        )
-        if history_entry:
-            meta["history_id"] = history_entry["id"]
+        history_entry: Optional[Dict[str, Any]] = None
+        try:
+            saved_count = save_generated_images("gpt-image-2", images, job_id=job_id)
+            total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
+            meta = {
+                "model": model,
+                "api_url": api_url,
+                "api_endpoint": resolved_endpoint,
+                "size": normalized_size,
+                "quality": quality,
+                "n": n,
+                "seed": response_data.get("seed", seed),
+                "edit_mode": edit_mode,
+                "style_preset": style_preset,
+                "response_format": response_format,
+                "reference_count": len(reference_assets),
+                "image_count": len(images),
+                "saved_count": saved_count,
+                "output_dir": "outputs",
+                "elapsed_seconds": elapsed_seconds,
+                "tokens_used": total_tokens,
+                "estimated_cost": estimate_cost(total_tokens),
+            }
+            form_state = {
+                "prompt": prompt,
+                "context_prompt": compact_text(context_prompt.strip(), 1800),
+                "negative_prompt": negative_prompt,
+                "poster_text": poster_text_clean,
+                "size": size,
+                "custom_size": custom_size,
+                "quality": quality,
+                "n": n,
+                "seed": seed,
+                "style_preset": style_preset,
+                "enhance_prompt": enhance_prompt,
+                "safety_check": safety_check,
+                "response_format": response_format,
+                "api_endpoint": api_endpoint,
+                "edit_mode": edit_mode,
+                "reference_strength": reference_strength,
+                "timeout": timeout,
+                "infinite_timeout": infinite_timeout,
+            }
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            history_entry = append_generation_history(
+                engine="gpt-image-2",
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                form_state=form_state,
+                meta=meta,
+                messages=[],
+                images=images,
+            )
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            if history_entry:
+                meta["history_id"] = history_entry["id"]
 
-        return {
-            "ok": bool(images),
-            "engine": "gpt-image-2",
-            "images": images,
-            "messages": [],
-            "meta": meta,
-            "history_entry": history_entry,
-        }
+            return {
+                "ok": bool(images),
+                "engine": "gpt-image-2",
+                "images": images,
+                "messages": [],
+                "meta": meta,
+                "history_entry": history_entry,
+            }
+        except JobCancelled:
+            if history_entry:
+                delete_history_entry(str(history_entry.get("id") or ""))
+            cleanup_generated_image_files(images)
+            raise
 
     return app
 

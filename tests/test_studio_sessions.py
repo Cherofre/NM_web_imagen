@@ -1,7 +1,9 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +11,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app as webapp
+import storage as storage_module
 
 
 PNG_1X1 = base64.b64encode(
@@ -20,6 +23,47 @@ PNG_1X1 = base64.b64encode(
     b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfeA\x89\x81\xb5"
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 ).decode("ascii")
+PNG_1X1_RAW = base64.b64decode(PNG_1X1)
+_MISSING = object()
+
+
+def studio_session_payload(
+    title: str,
+    *,
+    expected_revision=_MISSING,
+    references=None,
+) -> dict:
+    now = "2026-07-10T10:00:00Z"
+    turn = {
+        "id": "turn-1",
+        "engine": "gpt-image-2",
+        "mode": "generate",
+        "prompt": title,
+        "createdAt": now,
+        "status": "success",
+        "images": [],
+    }
+    if references is not None:
+        turn["referenceSnapshots"] = references
+    payload = {
+        "active_session_id": "session-1",
+        "sessions": [
+            {
+                "id": "session-1",
+                "title": title,
+                "createdAt": now,
+                "updatedAt": now,
+                "turns": [turn],
+            }
+        ],
+    }
+    if expected_revision is not _MISSING:
+        payload["expected_revision"] = expected_revision
+    return payload
+
+
+def raster_data_url(raw: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
 
 
 class StudioSessionTests(unittest.TestCase):
@@ -57,6 +101,312 @@ class StudioSessionTests(unittest.TestCase):
         for item in reversed(self.patchers):
             item.stop()
         self.temp_dir.cleanup()
+
+    def seed_session_reference(self, raw: bytes = PNG_1X1_RAW):
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "初始会话",
+                expected_revision=1,
+                references=[
+                    {
+                        "id": "ref-1",
+                        "name": "same-name.png",
+                        "mime_type": "image/png",
+                        "src": raster_data_url(raw),
+                    }
+                ],
+            ),
+        )
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        src = body["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        path = webapp.path_from_output_url(src)
+        self.assertIsNotNone(path)
+        assert path is not None
+        self.assertTrue(path.exists())
+        return body, path
+
+    def test_studio_session_get_defaults_and_legacy_state_use_revision_one(self) -> None:
+        empty_response = self.client.get("/api/studio/sessions")
+
+        self.assertEqual(200, empty_response.status_code)
+        self.assertEqual(1, empty_response.json()["revision"])
+
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "studio_sessions.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "active_session_id": "legacy-session",
+                    "sessions": [{"id": "legacy-session", "title": "旧会话", "turns": []}],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        legacy_response = self.client.get("/api/studio/sessions")
+
+        self.assertEqual(200, legacy_response.status_code)
+        self.assertEqual(1, legacy_response.json()["revision"])
+        self.assertEqual("legacy-session", legacy_response.json()["active_session_id"])
+
+    def test_studio_session_revision_conflict_returns_current_without_overwrite(self) -> None:
+        first = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload("第一版", expected_revision=1),
+        )
+        self.assertEqual(200, first.status_code)
+        self.assertEqual(2, first.json()["revision"])
+        committed = (self.outputs / "studio_sessions.json").read_bytes()
+
+        stale = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload("过期覆盖", expected_revision=1),
+        )
+
+        self.assertEqual(409, stale.status_code)
+        body = stale.json()
+        self.assertIsInstance(body["detail"], str)
+        self.assertEqual(2, body["current"]["revision"])
+        self.assertEqual("第一版", body["current"]["sessions"][0]["title"])
+        self.assertEqual(committed, (self.outputs / "studio_sessions.json").read_bytes())
+
+    def test_legacy_writes_increment_revision_and_invalid_expected_values_are_400(self) -> None:
+        first = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端一"))
+        second = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端二"))
+
+        self.assertEqual(2, first.json()["revision"])
+        self.assertEqual(3, second.json()["revision"])
+        committed = (self.outputs / "studio_sessions.json").read_bytes()
+
+        for invalid in ("1", "not-a-number", 0, -1, 1.5, True):
+            with self.subTest(expected_revision=invalid):
+                response = self.client.put(
+                    "/api/studio/sessions",
+                    json=studio_session_payload("非法 revision", expected_revision=invalid),
+                )
+                self.assertEqual(400, response.status_code)
+                self.assertIn("expected_revision", str(response.json().get("detail", "")))
+                self.assertEqual(committed, (self.outputs / "studio_sessions.json").read_bytes())
+
+    def test_two_threads_with_same_expected_revision_have_one_winner(self) -> None:
+        start = threading.Barrier(2)
+
+        def write(title: str):
+            start.wait(timeout=3)
+            try:
+                return "ok", webapp.write_studio_session_state(
+                    studio_session_payload(title, expected_revision=1),
+                )
+            except Exception as exc:
+                return "error", exc
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(write, "并发甲"), pool.submit(write, "并发乙")]
+            outcomes = [future.result(timeout=10) for future in futures]
+
+        successes = [value for status, value in outcomes if status == "ok"]
+        failures = [value for status, value in outcomes if status == "error"]
+        self.assertEqual(1, len(successes))
+        self.assertEqual(1, len(failures))
+        self.assertEqual("SessionRevisionConflict", type(failures[0]).__name__)
+        self.assertEqual(2, failures[0].current["revision"])
+        saved = json.loads((self.outputs / "studio_sessions.json").read_text(encoding="utf-8"))
+        self.assertEqual(2, saved["revision"])
+        self.assertEqual(successes[0]["sessions"], saved["sessions"])
+
+    def test_revision_conflict_happens_before_data_url_creates_reference_file(self) -> None:
+        committed = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload("当前版本", expected_revision=1),
+        )
+        self.assertEqual(2, committed.json()["revision"])
+
+        conflict = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "过期带图版本",
+                expected_revision=1,
+                references=[
+                    {
+                        "id": "ref-stale",
+                        "name": "stale.png",
+                        "src": raster_data_url(PNG_1X1_RAW),
+                    }
+                ],
+            ),
+        )
+
+        self.assertEqual(409, conflict.status_code)
+        self.assertFalse((self.outputs / "session_refs").exists())
+
+    def test_session_reference_count_capacity_failure_keeps_current_state_and_files(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        old_bytes = old_path.read_bytes()
+        old_snapshot = current["sessions"][0]["turns"][0]["referenceSnapshots"][0]
+        payload = studio_session_payload(
+            "超出文件数量",
+            expected_revision=current["revision"],
+            references=[
+                old_snapshot,
+                {
+                    "id": "ref-2",
+                    "name": "second.png",
+                    "src": raster_data_url(PNG_1X1_RAW + b"second"),
+                },
+            ],
+        )
+
+        with (
+            patch.object(webapp, "STUDIO_MAX_REF_FILES", 1),
+            patch.object(webapp, "STUDIO_MAX_REF_BYTES", 10_000),
+            patch.object(webapp, "REFERENCE_REQUEST_MAX_BYTES", 10_000),
+        ):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
+        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(
+            {old_path.resolve()},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
+
+    def test_session_reference_byte_capacity_failure_keeps_current_state_and_files(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        old_bytes = old_path.read_bytes()
+        new_raw = PNG_1X1_RAW + b"larger-reference"
+        old_snapshot = current["sessions"][0]["turns"][0]["referenceSnapshots"][0]
+        payload = studio_session_payload(
+            "超出字节容量",
+            expected_revision=current["revision"],
+            references=[
+                old_snapshot,
+                {
+                    "id": "ref-2",
+                    "name": "second.png",
+                    "src": raster_data_url(new_raw),
+                },
+            ],
+        )
+
+        with (
+            patch.object(webapp, "STUDIO_MAX_REF_FILES", 10),
+            patch.object(webapp, "STUDIO_MAX_REF_BYTES", len(old_bytes) + len(new_raw) - 1),
+            patch.object(webapp, "REFERENCE_REQUEST_MAX_BYTES", 10_000),
+        ):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
+        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(
+            {old_path.resolve()},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
+
+    def test_atomic_session_json_failure_rolls_back_new_reference_without_overwriting_old(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        old_bytes = old_path.read_bytes()
+        replacement_raw = PNG_1X1_RAW + b"different-content"
+        payload = studio_session_payload(
+            "替换同逻辑文件名",
+            expected_revision=current["revision"],
+            references=[
+                {
+                    "id": "ref-1",
+                    "name": "same-name.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(replacement_raw),
+                }
+            ],
+        )
+        original_replace = storage_module.os.replace
+
+        def fail_session_json_replace(source, destination):
+            if Path(destination).resolve() == (self.outputs / "studio_sessions.json").resolve():
+                raise OSError("session json replace failed")
+            return original_replace(source, destination)
+
+        with (
+            patch.object(storage_module.os, "replace", side_effect=fail_session_json_replace),
+            patch.object(
+                webapp,
+                "prune_session_reference_files",
+                wraps=webapp.prune_session_reference_files,
+            ) as prune,
+        ):
+            with self.assertRaisesRegex(OSError, "session json replace failed"):
+                webapp.write_studio_session_state(payload)
+
+        prune.assert_not_called()
+        self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
+        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(
+            {old_path.resolve()},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
+        self.assertEqual([], list(self.outputs.rglob("*.tmp")))
+
+    def test_successful_session_json_commit_happens_before_prune(self) -> None:
+        current, old_path = self.seed_session_reference()
+        events = []
+        original_replace = storage_module.os.replace
+        original_prune = webapp.prune_session_reference_files
+
+        def record_replace(source, destination):
+            if Path(destination).resolve() == (self.outputs / "studio_sessions.json").resolve():
+                events.append("replace")
+            return original_replace(source, destination)
+
+        def record_prune(sessions):
+            events.append("prune")
+            return original_prune(sessions)
+
+        with (
+            patch.object(storage_module.os, "replace", side_effect=record_replace),
+            patch.object(webapp, "prune_session_reference_files", side_effect=record_prune),
+        ):
+            response = self.client.put(
+                "/api/studio/sessions",
+                json={
+                    "expected_revision": current["revision"],
+                    "active_session_id": "",
+                    "sessions": [],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["replace", "prune"], events)
+        self.assertFalse(old_path.exists())
+
+    def test_prune_failure_after_commit_does_not_report_session_write_failure(self) -> None:
+        first = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload("提交前", expected_revision=1),
+        )
+        self.assertEqual(2, first.json()["revision"])
+
+        with patch.object(
+            webapp,
+            "prune_session_reference_files",
+            side_effect=OSError("prune failed after commit"),
+        ):
+            response = self.client.put(
+                "/api/studio/sessions",
+                json=studio_session_payload("已提交", expected_revision=2),
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(3, response.json()["revision"])
+        saved = json.loads((self.outputs / "studio_sessions.json").read_text(encoding="utf-8"))
+        self.assertEqual(3, saved["revision"])
+        self.assertEqual("已提交", saved["sessions"][0]["title"])
 
     def test_index_disables_cache(self) -> None:
         response = self.client.get("/")

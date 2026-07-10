@@ -88,6 +88,8 @@ import {
 } from "./i18n";
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
+import { appendJobId, cancellationNotice, cancelJobUrl, withJobId } from "./jobProtocol";
+import { buildSessionSavePayload, mergeSessionsByUpdatedAt, nextSessionSaveAttempt, normalizeSessionRevision } from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -811,9 +813,9 @@ function loadWorkbenchSessionState(queueJobs: QueueJob[] = []) {
 
 function normalizeSessionStatePayload(payload: unknown, queueJobs: QueueJob[] = []) {
   if (!payload || typeof payload !== "object") return null;
-  const source = payload as { sessions?: unknown; active_session_id?: unknown; activeSessionId?: unknown };
+  const source = payload as { revision?: unknown; sessions?: unknown; active_session_id?: unknown; activeSessionId?: unknown };
+  if (!Array.isArray(source.sessions)) return null;
   const sessions = normalizeSessions(source.sessions, queueJobs);
-  if (!sessions.length) return null;
   const activeCandidate = typeof source.active_session_id === "string"
     ? source.active_session_id
     : typeof source.activeSessionId === "string"
@@ -821,7 +823,8 @@ function normalizeSessionStatePayload(payload: unknown, queueJobs: QueueJob[] = 
     : "";
   return {
     sessions,
-    activeSessionId: sessions.some((session) => session.id === activeCandidate) ? activeCandidate : sessions[0].id,
+    activeSessionId: sessions.some((session) => session.id === activeCandidate) ? activeCandidate : sessions[0]?.id || "",
+    revision: normalizeSessionRevision(source.revision),
   };
 }
 
@@ -866,7 +869,8 @@ function createFormData(
   gpt: GptForm,
   banana: BananaForm,
   references: File[],
-  gptTextDraft?: { context_prompt?: string; negative_prompt?: string; poster_text?: string },
+  gptTextDraft: { context_prompt?: string; negative_prompt?: string; poster_text?: string } | undefined,
+  jobId: string,
 ) {
   const data = new FormData();
   const source = engine === "banana" ? banana : { ...gpt, custom_size: normalizeCustomImageSize(gpt.custom_size).value };
@@ -874,12 +878,19 @@ function createFormData(
     data.append(key, String(value));
   });
   references.forEach((file) => data.append("reference_files", file));
-  return data;
+  return appendJobId(data, jobId);
 }
 
-function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana: BananaForm, messages: ChatMessage[] = []) {
+function createChatPayload(
+  engine: Engine,
+  prompt: string,
+  gpt: GptForm,
+  banana: BananaForm,
+  messages: ChatMessage[],
+  jobId: string,
+) {
   if (engine === "banana") {
-    return {
+    return withJobId({
       prompt,
       messages,
       api_key: banana.api_key,
@@ -889,9 +900,9 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
       timeout_seconds: banana.timeout_seconds,
       bypass_proxy: banana.bypass_proxy,
       disable_ssl: banana.disable_ssl,
-    };
+    }, jobId);
   }
-  return {
+  return withJobId({
     prompt,
     messages,
     api_key: gpt.api_key,
@@ -900,7 +911,15 @@ function createChatPayload(engine: Engine, prompt: string, gpt: GptForm, banana:
     chat_model: gpt.chat_model,
     reasoning_effort: gpt.reasoning_effort,
     timeout: gpt.timeout,
-  };
+  }, jobId);
+}
+
+function cancellationNoticeFromPayload(payload: unknown, language: AppLanguage) {
+  if (payload && typeof payload === "object" && "warning" in payload) {
+    const warning = String((payload as { warning?: unknown }).warning || "").trim();
+    if (warning && warning.length <= 400) return warning;
+  }
+  return cancellationNotice(language);
 }
 
 function createDiagnosticPayload(engine: Engine, gpt: GptForm, banana: BananaForm) {
@@ -1065,6 +1084,7 @@ function App() {
   const previewMouseCleanupRef = useRef<(() => void) | null>(null);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
+  const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
   const queueProcessingRef = useRef<string | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
@@ -1074,9 +1094,15 @@ function App() {
   const tooltipTimerRef = useRef<number | null>(null);
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
+  const sessionsRef = useRef<WorkbenchSession[]>(sessions);
+  const activeSessionIdRef = useRef(activeSessionId);
+  const sessionRevisionRef = useRef(1);
+  const skipNextSessionSaveRef = useRef<{ sessions: WorkbenchSession[]; activeSessionId: string } | null>(null);
   const initialScrollKeyRef = useRef("");
   const submitModeRef = useRef(submitMode);
   submitModeRef.current = submitMode;
+  sessionsRef.current = sessions;
+  activeSessionIdRef.current = activeSessionId;
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession(t("session.new"));
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
@@ -1113,6 +1139,95 @@ function App() {
     autoSummary: t("composer.autoSizeSummary"),
     customPrefix: t("config.custom"),
   });
+
+  async function saveStudioSessionsOnce(localSessions: WorkbenchSession[], activeId: string) {
+    try {
+      await saveStudioSessionsWithRetry(localSessions, activeId);
+    } catch (error) {
+      setNotice(error instanceof Error && error.message ? error.message : t("status.sessionSaveFailed"));
+    }
+  }
+
+  async function saveStudioSessionsWithRetry(localSessions: WorkbenchSession[], activeId: string) {
+    let attemptSessions = localSessions;
+    let attemptActiveSessionId = activeId;
+    let retryCount = 0;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await fetch("/api/studio/sessions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildSessionSavePayload(sessionRevisionRef.current, attemptActiveSessionId, attemptSessions)),
+      });
+      const responsePayload = await response.json().catch(() => ({})) as Record<string, unknown>;
+
+      if (response.ok) {
+        const normalized = normalizeSessionStatePayload(responsePayload, queueJobs);
+        if (!normalized) {
+          setNotice(t("status.sessionSaveFailed"));
+          return;
+        }
+        sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
+        try {
+          localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessionsRef.current)));
+        } catch {
+          // The debounced local fallback already stores a text-only copy when the full payload is too large.
+        }
+        return;
+      }
+
+      const decision = nextSessionSaveAttempt(retryCount, response.status);
+      if (response.status !== 409 || !decision.retry) {
+        if (response.status === 409) {
+          setNotice(t("status.sessionConflictRefresh"));
+        } else {
+          const detail = typeof responsePayload.detail === "string"
+            ? responsePayload.detail
+            : typeof responsePayload.error === "string"
+            ? responsePayload.error
+            : `HTTP ${response.status}`;
+          setNotice(detail || t("status.sessionSaveFailed"));
+        }
+        return;
+      }
+
+      const currentPayload = responsePayload.current;
+      const currentRevision = currentPayload && typeof currentPayload === "object"
+        ? (currentPayload as { revision?: unknown }).revision
+        : undefined;
+      const normalizedCurrent = normalizeSessionStatePayload(currentPayload, queueJobs);
+      if (!normalizedCurrent || normalizeSessionRevision(currentRevision) !== currentRevision) {
+        setNotice(t("status.sessionSaveFailed"));
+        return;
+      }
+
+      const latestLocalSessions = compactSessionsForStorage(sessionsRef.current);
+      const mergedSessions = mergeSessionsByUpdatedAt(latestLocalSessions, normalizedCurrent.sessions);
+      const latestActiveSessionId = activeSessionIdRef.current;
+      const mergedActiveSessionId = mergedSessions.some((session) => session.id === latestActiveSessionId)
+        ? latestActiveSessionId
+        : mergedSessions.some((session) => session.id === normalizedCurrent.activeSessionId)
+        ? normalizedCurrent.activeSessionId
+        : mergedSessions[0]?.id || "";
+
+      sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalizedCurrent.revision);
+      sessionsRef.current = mergedSessions;
+      activeSessionIdRef.current = mergedActiveSessionId;
+      skipNextSessionSaveRef.current = { sessions: mergedSessions, activeSessionId: mergedActiveSessionId };
+      setSessions(mergedSessions);
+      setActiveSessionId(mergedActiveSessionId);
+      try {
+        localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(mergedSessions)));
+        localStorage.setItem(activeSessionStorageKey, mergedActiveSessionId);
+      } catch {
+        setNotice(t("status.sessionTooLarge"));
+      }
+
+      attemptSessions = compactSessionsForStorage(mergedSessions);
+      attemptActiveSessionId = mergedActiveSessionId;
+      retryCount = decision.nextRetryCount;
+    }
+  }
 
   useEffect(() => {
     localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
@@ -1195,10 +1310,15 @@ function App() {
         const payload = await response.json();
         const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
         if (!cancelled && normalized) {
-          setSessions(normalized.sessions);
-          setActiveSessionId(normalized.activeSessionId);
-          localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
-          localStorage.setItem(activeSessionStorageKey, normalized.activeSessionId);
+          sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
+          if (normalized.sessions.length > 0) {
+            sessionsRef.current = normalized.sessions;
+            activeSessionIdRef.current = normalized.activeSessionId;
+            setSessions(normalized.sessions);
+            setActiveSessionId(normalized.activeSessionId);
+            localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
+            localStorage.setItem(activeSessionStorageKey, normalized.activeSessionId);
+          }
         }
       } catch {
         // localStorage is still the startup fallback when the backend file is absent or unreadable.
@@ -1215,6 +1335,11 @@ function App() {
   useEffect(() => {
     if (!sessionsHydratedRef.current) return undefined;
     if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+    const skipSave = skipNextSessionSaveRef.current;
+    skipNextSessionSaveRef.current = null;
+    if (skipSave && skipSave.sessions === sessions && skipSave.activeSessionId === activeSessionId) {
+      return undefined;
+    }
     sessionSaveTimerRef.current = window.setTimeout(() => {
       try {
         localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions)));
@@ -1222,25 +1347,7 @@ function App() {
         localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessions, false).map((session) => ({ ...session, turns: session.turns.map((turn) => ({ ...turn, images: [] })) }))));
         setNotice(t("status.sessionTooLarge"));
       }
-      void fetch("/api/studio/sessions", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          active_session_id: activeSessionId,
-          sessions: compactSessionsForStorage(sessions),
-        }),
-      })
-        .then(async (response) => {
-          if (!response.ok) throw new Error(await readError(response));
-          return response.json();
-        })
-        .then((payload) => {
-          const normalized = normalizeSessionStatePayload(payload, queueJobs);
-          if (normalized) {
-            localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
-          }
-        })
-        .catch((error) => setNotice(error instanceof Error ? error.message : t("status.sessionSaveFailed")));
+      void saveStudioSessionsOnce(compactSessionsForStorage(sessions), activeSessionId);
     }, 650);
     return () => {
       if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
@@ -1525,38 +1632,58 @@ function App() {
     }, 80);
   }
 
-  function cancelQueueJob(job: QueueJob) {
+  async function cancelQueueJob(job: QueueJob) {
     if (job.status !== "running" && job.status !== "queued") return;
-    queueAbortControllersRef.current[job.id]?.abort();
-    delete queueAbortControllersRef.current[job.id];
+    const abortController = queueAbortControllersRef.current[job.id];
+    const fallbackNotice = cancellationNotice(language);
+    cancelingQueueJobsRef.current.add(job.id);
     delete queuePayloadsRef.current[job.id];
     const finishedAt = new Date().toISOString();
-    updateQueueJob(job.id, {
-      status: "canceled",
-      finishedAt,
-      error: t("status.generationCanceled"),
-    });
-    setSessions((current) =>
-      current.map((session) =>
-        session.id === job.sessionId
-          ? {
-              ...session,
-              updatedAt: finishedAt,
-              turns: session.turns.map((turn) =>
-                turn.id === job.turnId
-                  ? {
-                      ...turn,
-                      status: "error",
-                      finishedAt,
-                      error: t("status.generationCanceled"),
-                    }
-                  : turn,
-              ),
-            }
-          : session,
-      ),
-    );
-    setNotice(t("status.queueCanceled"));
+    const markCanceled = () => {
+      updateQueueJob(job.id, {
+        status: "canceled",
+        finishedAt,
+        error: t("status.generationCanceled"),
+      });
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === job.sessionId
+            ? {
+                ...session,
+                updatedAt: finishedAt,
+                turns: session.turns.map((turn) =>
+                  turn.id === job.turnId
+                    ? {
+                        ...turn,
+                        status: "error",
+                        finishedAt,
+                        error: t("status.generationCanceled"),
+                      }
+                    : turn,
+                ),
+              }
+            : session,
+        ),
+      );
+      setStatus(t("status.generationCanceled"));
+    };
+
+    markCanceled();
+    setNotice(fallbackNotice);
+    try {
+      const response = await fetch(cancelJobUrl(job.id), { method: "POST" });
+      if (!response.ok) throw new Error("cancel request failed");
+      const payload = await response.json().catch(() => ({}));
+      setNotice(cancellationNoticeFromPayload(payload, language));
+    } catch {
+      setNotice(fallbackNotice);
+    } finally {
+      abortController?.abort();
+      delete queueAbortControllersRef.current[job.id];
+      delete queuePayloadsRef.current[job.id];
+      if (!abortController) cancelingQueueJobsRef.current.delete(job.id);
+      markCanceled();
+    }
   }
 
   function retryQueueJob(job: QueueJob) {
@@ -1605,7 +1732,7 @@ function App() {
 
   function removeQueueJob(job: QueueJob) {
     if (job.status === "queued" || job.status === "running") {
-      cancelQueueJob(job);
+      void cancelQueueJob(job);
       return;
     }
     const jobId = job.id;
@@ -2378,12 +2505,13 @@ function App() {
 
   async function runQueuedGenerationJob(jobId: string) {
     const payload = queuePayloadsRef.current[jobId];
-    if (!payload) {
+    const canceling = cancelingQueueJobsRef.current.has(jobId);
+    if (canceling || !payload) {
       const finishedAt = new Date().toISOString();
       updateQueueJob(jobId, {
         status: "canceled",
         finishedAt,
-        error: t("status.queueInterrupted"),
+        error: canceling ? t("status.generationCanceled") : t("status.queueInterrupted"),
       });
       queueProcessingRef.current = null;
       return;
@@ -2430,9 +2558,51 @@ function App() {
             negative_prompt: payload.negativePrompt,
             poster_text: payload.posterText,
           },
+          payload.jobId,
         ),
       });
       const responsePayload = await response.json().catch(() => ({}));
+      if (responsePayload.canceled === true) {
+        const elapsed = Number(responsePayload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
+        const finishedAt = new Date().toISOString();
+        const canceledMessage = t("status.generationCanceled");
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === payload.sessionId
+              ? {
+                  ...session,
+                  updatedAt: finishedAt,
+                  turns: session.turns.map((item) =>
+                    item.id === payload.turnId
+                      ? {
+                          ...item,
+                          status: "error",
+                          finishedAt,
+                          elapsedSeconds: elapsed,
+                          error: canceledMessage,
+                          meta: {
+                            ...(item.meta || {}),
+                            ...(responsePayload.meta || {}),
+                            context_prompt: payload.contextPrompt,
+                          },
+                        }
+                      : item,
+                  ),
+                }
+              : session,
+          ),
+        );
+        stickToConversationEndIfNearBottom();
+        setStatus(canceledMessage);
+        setNotice(cancellationNoticeFromPayload(responsePayload, language));
+        updateQueueJob(jobId, {
+          status: "canceled",
+          finishedAt,
+          elapsedSeconds: elapsed,
+          error: canceledMessage,
+        });
+        return;
+      }
       if (!response.ok) throw new Error(responsePayload.detail || responsePayload.error || `HTTP ${response.status}`);
       const elapsed = Number(responsePayload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
       const images = Array.isArray(responsePayload.images) ? responsePayload.images : [];
@@ -2478,7 +2648,9 @@ function App() {
         void loadHistory();
       }
     } catch (error) {
-      const message = error instanceof DOMException && error.name === "AbortError"
+      const wasCanceled = (error instanceof DOMException && error.name === "AbortError")
+        || cancelingQueueJobsRef.current.has(jobId);
+      const message = wasCanceled
         ? t("status.generationCanceled")
         : error instanceof Error ? error.message : t("status.generationFailed");
       const finishedAt = new Date().toISOString();
@@ -2505,7 +2677,7 @@ function App() {
       );
       stickToConversationEndIfNearBottom();
       setStatus(message === t("status.generationCanceled") ? t("status.generationCanceled") : t("status.generationFailed"));
-      setNotice(message);
+      setNotice(wasCanceled ? cancellationNotice(language) : message);
       updateQueueJob(jobId, {
         status: message === t("status.generationCanceled") ? "canceled" : "error",
         finishedAt,
@@ -2515,6 +2687,7 @@ function App() {
     } finally {
       delete queueAbortControllersRef.current[jobId];
       delete queuePayloadsRef.current[jobId];
+      cancelingQueueJobsRef.current.delete(jobId);
       queueProcessingRef.current = null;
     }
   }
@@ -2606,9 +2779,46 @@ function App() {
         const response = await fetch(`/api/chat/${currentEngine}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(createChatPayload(currentEngine, prompt, currentGptForm, currentBananaForm, chatContextMessages)),
+          body: JSON.stringify(createChatPayload(
+            currentEngine,
+            prompt,
+            currentGptForm,
+            currentBananaForm,
+            chatContextMessages,
+            queueJobId,
+          )),
         });
         const payload = await response.json().catch(() => ({}));
+        if (payload.canceled === true) {
+          const elapsed = Number(payload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
+          const finishedAt = new Date().toISOString();
+          setSessions((current) =>
+            current.map((session) =>
+              session.id === targetSessionId
+                ? {
+                    ...session,
+                    updatedAt: finishedAt,
+                    turns: session.turns.map((item) =>
+                      item.id === turnId
+                        ? {
+                            ...item,
+                            status: "error",
+                            finishedAt,
+                            elapsedSeconds: elapsed,
+                            error: t("status.chatCanceled"),
+                            meta: payload.meta || item.meta,
+                          }
+                        : item,
+                    ),
+                  }
+                : session,
+            ),
+          );
+          stickToConversationEndIfNearBottom();
+          setStatus(t("status.chatCanceled"));
+          setNotice(cancellationNoticeFromPayload(payload, language));
+          return;
+        }
         if (!response.ok) throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
         const reply = typeof payload.reply === "string" && payload.reply.trim() ? payload.reply.trim() : t("status.noChatReply");
         const elapsed = Number(payload.meta?.elapsed_seconds) || (performance.now() - startedAt) / 1000;
@@ -3295,7 +3505,7 @@ function App() {
                           </div>
                           <div className="queue-job-actions" aria-label={t("queue.actions")}>
                             {(job.status === "running" || job.status === "queued") && (
-                              <button type="button" onClick={() => cancelQueueJob(job)} aria-label={`${t("queue.cancel")} ${job.prompt || t("submit.generate")}`} title={t("queue.cancel")}>
+                              <button type="button" onClick={() => void cancelQueueJob(job)} aria-label={`${t("queue.cancel")} ${job.prompt || t("submit.generate")}`} title={t("queue.cancel")}>
                                 <X size={13} />
                               </button>
                             )}
