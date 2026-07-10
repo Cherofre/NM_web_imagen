@@ -17,6 +17,11 @@ ALLOWED_RASTER_MIMES = {
     "image/webp": ".webp",
     "image/bmp": ".bmp",
 }
+_RASTER_MIME_BY_EXTENSION = {
+    extension: mime_type
+    for mime_type, extension in ALLOWED_RASTER_MIMES.items()
+}
+_RASTER_MIME_BY_EXTENSION[".jpeg"] = "image/jpeg"
 
 
 class ImageSafetyError(ValueError):
@@ -93,11 +98,15 @@ def resolve_output_image(outputs_dir: Path, relative_path: str) -> Path:
         raise ImageSafetyError("图片不存在", 404) from exc
     if candidate == root or not candidate.is_file():
         raise ImageSafetyError("图片不存在", 404)
+    expected_mime = _RASTER_MIME_BY_EXTENSION.get(candidate.suffix.lower())
+    if not expected_mime:
+        raise ImageSafetyError("输出文件扩展名不受支持")
     if candidate.stat().st_size > REMOTE_RESULT_MAX_BYTES:
         raise ImageSafetyError("输出图片超过容量限制", 413)
     with candidate.open("rb") as handle:
         header = handle.read(16)
-    if not detect_raster_mime(header):
+    detected_mime = detect_raster_mime(header)
+    if not detected_mime or detected_mime != expected_mime:
         raise ImageSafetyError("输出文件不是受支持的栅格图片")
     return candidate
 

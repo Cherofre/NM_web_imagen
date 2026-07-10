@@ -858,6 +858,73 @@ def read_studio_session_state() -> Dict[str, Any]:
     }
 
 
+def inspect_studio_reference_source(
+    src: str,
+) -> Tuple[Optional[bytes], str, int, Optional[Path]]:
+    source = str(src or "").strip()
+    if source.startswith(f"{OUTPUTS_URL_PREFIX}/"):
+        existing_path = path_from_output_url(source)
+        if existing_path is None:
+            raise ImageSafetyError("参考图输出路径无效")
+        relative_path = existing_path.relative_to(OUTPUTS_DIR.resolve())
+        validated_path = resolve_output_image(OUTPUTS_DIR, str(relative_path))
+        with validated_path.open("rb") as handle:
+            detected_mime_type = detect_raster_mime(handle.read(16))
+        return (
+            None,
+            detected_mime_type,
+            validated_path.stat().st_size,
+            validated_path,
+        )
+
+    if source.startswith(("http://", "https://")):
+        raise ImageSafetyError("参考图不允许使用远程 URL")
+    if not source.startswith("data:"):
+        raise ImageSafetyError("参考图只支持本工具输出图片或 data URL")
+
+    raw_bytes, detected_mime_type = decode_raster_data_url(
+        source,
+        max_bytes=REFERENCE_IMAGE_MAX_BYTES,
+    )
+    return raw_bytes, detected_mime_type, len(raw_bytes), None
+
+
+def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
+    total_bytes = 0
+    sessions_value = payload.get("sessions") if isinstance(payload, dict) else []
+    sessions = sessions_value if isinstance(sessions_value, list) else []
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        turns_value = session.get("turns")
+        turns = turns_value if isinstance(turns_value, list) else []
+        for turn in turns[-STUDIO_MAX_TURNS:]:
+            if not isinstance(turn, dict):
+                continue
+            snapshots = turn.get("referenceSnapshots")
+            if not isinstance(snapshots, list):
+                continue
+            for snapshot in snapshots[:STUDIO_MAX_REFS_PER_TURN]:
+                if not isinstance(snapshot, dict):
+                    continue
+                src = str(snapshot.get("src") or "").strip()
+                if not src:
+                    continue
+                try:
+                    size = inspect_studio_reference_source(src)[2]
+                except ImageSafetyError as exc:
+                    raise HTTPException(
+                        status_code=exc.status_code,
+                        detail=str(exc),
+                    ) from exc
+                total_bytes += size
+                if total_bytes > REFERENCE_REQUEST_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="参考图总大小超过请求限制",
+                    )
+
+
 def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, index: int) -> Optional[Dict[str, Any]]:
     if not isinstance(snapshot, dict):
         return None
@@ -879,34 +946,22 @@ def normalize_studio_reference(snapshot: Any, session_id: str, turn_id: str, ind
 
     if src:
         try:
-            if src.startswith(f"{OUTPUTS_URL_PREFIX}/"):
-                existing_path = path_from_output_url(src)
-                if existing_path is None:
-                    raise ImageSafetyError("参考图输出路径无效")
-                relative_path = existing_path.relative_to(OUTPUTS_DIR.resolve())
-                validated_path = resolve_output_image(OUTPUTS_DIR, str(relative_path))
-                with validated_path.open("rb") as handle:
-                    detected_mime_type = detect_raster_mime(handle.read(16))
+            raw_bytes, detected_mime_type, actual_size, validated_path = (
+                inspect_studio_reference_source(src)
+            )
+            if validated_path is not None:
                 normalized["src"] = src
                 normalized["mime_type"] = detected_mime_type
-                normalized["size"] = validated_path.stat().st_size
+                normalized["size"] = actual_size
                 return normalized
-
-            if src.startswith(("http://", "https://")):
-                raise ImageSafetyError("参考图不允许使用远程 URL")
-            if not src.startswith("data:"):
-                raise ImageSafetyError("参考图只支持本工具输出图片或 data URL")
-
-            raw_bytes, detected_mime_type = decode_raster_data_url(
-                src,
-                max_bytes=REFERENCE_IMAGE_MAX_BYTES,
-            )
         except ImageSafetyError as exc:
             raise HTTPException(
                 status_code=exc.status_code,
                 detail=str(exc),
             ) from exc
 
+        if raw_bytes is None:
+            raise HTTPException(status_code=400, detail="参考图内容无效")
         extension = guess_extension(detected_mime_type)
         filename = (
             f"{safe_filename_part(session_id, 'session')}-"
@@ -1083,6 +1138,7 @@ def normalize_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def write_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    preflight_studio_reference_request(payload)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     normalized = normalize_studio_session_state(payload)
     prune_session_reference_files(normalized["sessions"])

@@ -333,6 +333,22 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                     self.client.get(f"/outputs/{relative_path}").status_code,
                 )
 
+    def test_outputs_rejects_valid_raster_with_unknown_extension(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "valid.bin").write_bytes(PNG_RAW)
+
+        response = self.client.get("/outputs/valid.bin")
+
+        self.assertEqual(404, response.status_code)
+
+    def test_outputs_rejects_extension_and_magic_mismatch(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "mismatch.jpg").write_bytes(PNG_RAW)
+
+        response = self.client.get("/outputs/mismatch.jpg")
+
+        self.assertEqual(404, response.status_code)
+
     def test_session_reference_accepts_encoded_local_output_raster(self) -> None:
         self.outputs.mkdir(parents=True, exist_ok=True)
         filename = "中文 空格.png"
@@ -380,6 +396,52 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         )
 
         self.assertEqual(413, response.status_code)
+
+    def test_session_put_rejects_cumulative_data_url_references_without_orphans(self) -> None:
+        first_raw = PNG_RAW + b"a" * 8
+        second_raw = PNG_RAW + b"b" * 8
+        first_src = "data:image/png;base64," + base64.b64encode(first_raw).decode("ascii")
+        second_src = "data:image/png;base64," + base64.b64encode(second_raw).decode("ascii")
+        payload = session_payload(first_src)
+        payload["sessions"][0]["turns"][0]["referenceSnapshots"].append(
+            {
+                "id": "ref-2",
+                "name": "b.png",
+                "src": second_src,
+            }
+        )
+
+        with (
+            patch.object(webapp, "REFERENCE_IMAGE_MAX_BYTES", 64),
+            patch.object(webapp, "REFERENCE_REQUEST_MAX_BYTES", 80),
+        ):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertFalse((self.outputs / "studio_sessions.json").exists())
+        session_refs = self.outputs / "session_refs"
+        self.assertFalse(session_refs.exists() and any(session_refs.iterdir()))
+
+    def test_session_put_counts_reused_output_reference_bytes(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        first_raw = PNG_RAW + b"a" * 8
+        second_raw = PNG_RAW + b"b" * 8
+        (self.outputs / "one.png").write_bytes(first_raw)
+        (self.outputs / "two.png").write_bytes(second_raw)
+        payload = session_payload("/outputs/one.png")
+        payload["sessions"][0]["turns"][0]["referenceSnapshots"].append(
+            {
+                "id": "ref-2",
+                "name": "two.png",
+                "src": "/outputs/two.png",
+            }
+        )
+
+        with patch.object(webapp, "REFERENCE_REQUEST_MAX_BYTES", 80):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertFalse((self.outputs / "studio_sessions.json").exists())
 
     def test_gpt_upload_rejects_fake_png_before_upstream(self) -> None:
         common = {
