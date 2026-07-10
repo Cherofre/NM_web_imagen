@@ -2,14 +2,14 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-11 +08:00
-- Phase: v1.0.6 P1 hardening Tasks 1-5 complete; release candidate verified and synced
-- Superpowers Phase: final whole-branch review, then finishing-a-development-branch integration decision
+- Phase: v1.0.6 P1 hardening final review found five Important gaps; remediation required
+- Superpowers Phase: TDD fix loop for final whole-branch review findings, then full release re-verification
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: All approved P1 slices are implemented and independently reviewed. v1.0.6 is built as an exact-manifest offline package, verified through source tests, extracted-package startup, API boundaries, real browser DOM checks, local preflight, G: clean sync, and destination preflight. The remaining work is a final whole-branch review and the user's integration choice; no push, tag, GitHub Release, or merge has been performed.
-- Latest Verification: Fresh controller matrix at `120c3d4` passed Python 176/176, Node 97/97, four-module `py_compile`, `npm run test:size`, and TypeScript/Vite build (1658 modules; `index-DATFWeo_.js` / `index-Gv_GDUKl.css`) with no generated diff. The normalized package manifest contains exactly 52 files and zero forbidden matches; package smoke and `release_preflight.ps1 -ExpectedVersion 1.0.6 -LocalOnly` passed. The final local and G: ZIP SHA256 is `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`. Destination preflight passed with G: folder version 1.0.6, 52 files, zero forbidden matches, and the older v1.0.5 ZIP preserved. Task 5 spec and code-quality reviews report no Critical/Important. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: The complete branch review rejected the previously synced candidate with five Important gaps: cross-site unsafe requests plus multipart parsing before byte limits; unbounded upstream result count/aggregate bytes; captured upstream errors leaking secrets/URLs/paths; direct cancel followed by remove bypassing shared server settlement; and one-click release omitting the new P1 test modules. These findings are technically reproduced and must be fixed before release evidence or branch finishing is restored.
+- Latest Verification: Pre-finding evidence at `120c3d4` passed Python 176/176, Node 97/97, compile/size/build, exact package, package smoke, API/browser smoke, LocalOnly, G: sync, and destination preflight. That evidence no longer authorizes release because the final review exposed uncovered behaviors. The local/G candidate SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d` is a rejected pre-fix candidate and must be rebuilt and resynced after remediation. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
 
 ## Task 4 Verification
 - RED evidence reproduced that the previous package accepted nested credentials/certificates/databases/internal scripts, accepted missing release-tree contents, and could continue release gates after `py_compile` exited 7.
@@ -25,13 +25,13 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: final whole-branch review of `codex/p1-hardening-v1.0.6` at verified HEAD `120c3d4`, then use `finishing-a-development-branch` to present integration options.
-- Superpowers phase: do not redo Tasks 1-5. Review the complete P1 branch against the approved spec/plan and fresh evidence; fix any Critical/Important finding before presenting merge/PR/keep choices.
+- Start with: fix the five final-review Important findings from HEAD `dbe050a` on `codex/p1-hardening-v1.0.6` using TDD and the same implementer→spec→quality loop.
+- Superpowers phase: add RED tests for Origin/body limits, aggregate result budgets, error redaction, direct-cancel→remove settlement, and complete one-click test gates; implement one item at a time and rerun affected suites after each.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Current release candidate package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `958334899120e934b82ce786c803616562ad87e45b37b8f4b6d5d966ce6e019d`.
 - Verified sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; share ZIP is its sibling `NM_web_imagen-v1.0.6.zip` with the same hash. The older v1.0.5 ZIP remains.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
-- Current-project release rule: if final review changes any packaged file, rerun the complete affected test/build/package/smoke/local-preflight/browser matrix and resync/reverify G:. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, or GitHub Release without an explicit successful action.
+- Current-project release rule: the current v1.0.6 local/G package is rejected. After fixes, rerun the complete Python/Node/PowerShell/build/package/smoke/API/browser/LocalOnly matrix, overwrite and reverify G:, then repeat final review. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, or GitHub Release without an explicit successful action.
 
 ## v1.0.3 Planning Draft
 - Confirmed scope:
