@@ -381,6 +381,18 @@ def build_banana_api_url(base_url: str, model_type: str) -> str:
     return f"{base}/v1beta/models/{model}:generateContent"
 
 
+def banana_headers(api_key: str) -> Dict[str, str]:
+    key = (api_key or "").strip()
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}",
+        "X-API-Key": key,
+        "x-goog-api-key": key,
+        "X-Banana-Client": "image-generate-web-tool",
+    }
+
+
 def build_banana_request(
     prompt: str,
     seed: int,
@@ -2039,8 +2051,15 @@ def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: List[str]
         session = create_requests_session(bool(payload.get("bypass_proxy")))
         response = session.post(
             endpoint,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "X-Banana-Client": "image-generate-web-tool"},
-            json=build_banana_request("diagnostic connectivity test, simple neutral square", 1, "Auto", "1K", -1, 0.95, []),
+            headers=banana_headers(api_key),
+            json=build_banana_request(
+                prompt="diagnostic connectivity test, simple neutral square",
+                seed=-1,
+                aspect_ratio="Auto",
+                top_p=0.95,
+                image_size="1K",
+                reference_assets=[],
+            ),
             timeout=timeout,
             verify=not bool(payload.get("disable_ssl")),
         )
@@ -2072,7 +2091,7 @@ def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -> D
         session = create_requests_session(bool(payload.get("bypass_proxy")))
         response = session.post(
             endpoint,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "X-Banana-Client": "image-generate-web-tool"},
+            headers=banana_headers(api_key),
             json={
                 "contents": build_banana_chat_contents("请只回复 OK，用于连接诊断。", []),
                 "generationConfig": {"responseModalities": ["TEXT"]},
@@ -2503,13 +2522,7 @@ def create_app() -> FastAPI:
                         "responseModalities": ["TEXT"],
                     },
                 },
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                    "X-API-Key": api_key,
-                    "X-Banana-Client": "image-generate-web-tool",
-                },
+                headers=banana_headers(api_key),
                 timeout=(15, read_timeout),
                 verify=not disable_ssl,
             )
@@ -2590,13 +2603,7 @@ def create_app() -> FastAPI:
                 response = session.post(
                     api_url,
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {api_key.strip()}",
-                        "X-API-Key": api_key.strip(),
-                        "X-Banana-Client": "image-generate-web-tool",
-                    },
+                    headers=banana_headers(api_key),
                     timeout=timeout,
                     verify=not disable_ssl,
                 )

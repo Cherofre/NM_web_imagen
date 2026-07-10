@@ -396,6 +396,22 @@ function collectFormState(form) {
   return payload;
 }
 
+function sanitizeBrowserConfig(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeBrowserConfig(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key.toLowerCase() !== "api_key")
+        .map(([key, item]) => [key, sanitizeBrowserConfig(item)])
+    );
+  }
+
+  return value;
+}
+
 function getReusableFormState(payload = {}) {
   return Object.fromEntries(
     Object.entries(payload || {}).filter(([key]) => !connectionFieldNames.has(String(key).toLowerCase()))
@@ -418,7 +434,7 @@ function applyFormState(form, payload = {}) {
 }
 
 function saveFormState(form) {
-  localStorage.setItem(storageKey(form.id), JSON.stringify(collectFormState(form)));
+  localStorage.setItem(storageKey(form.id), JSON.stringify(sanitizeBrowserConfig(collectFormState(form))));
   syncConfigStatus();
 }
 
@@ -430,7 +446,9 @@ function restoreFormState(form) {
   }
 
   try {
-    applyFormState(form, JSON.parse(raw));
+    const sanitized = sanitizeBrowserConfig(JSON.parse(raw));
+    localStorage.setItem(storageKey(form.id), JSON.stringify(sanitized));
+    applyFormState(form, sanitized);
   } catch (error) {
     console.warn("表单状态恢复失败:", error);
   }
@@ -3189,15 +3207,17 @@ function hasSavedBrowserConfig() {
 
 function readConfigProfiles() {
   try {
-    const payload = JSON.parse(localStorage.getItem(configProfilesStorageKey) || "[]");
-    return Array.isArray(payload) ? payload.filter((item) => item && typeof item === "object") : [];
+    const payload = sanitizeBrowserConfig(JSON.parse(localStorage.getItem(configProfilesStorageKey) || "[]"));
+    const profiles = Array.isArray(payload) ? payload.filter((item) => item && typeof item === "object") : [];
+    localStorage.setItem(configProfilesStorageKey, JSON.stringify(profiles));
+    return profiles;
   } catch (error) {
     return [];
   }
 }
 
 function writeConfigProfiles(profiles) {
-  localStorage.setItem(configProfilesStorageKey, JSON.stringify(profiles));
+  localStorage.setItem(configProfilesStorageKey, JSON.stringify(sanitizeBrowserConfig(profiles)));
   renderConfigProfiles();
 }
 

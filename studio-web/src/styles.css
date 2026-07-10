@@ -2178,6 +2178,24 @@ button.primary-action:focus-visible,
   padding-bottom: 2px;
 }
 
+.reference-chat-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning-line);
+  border-radius: 12px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.reference-chat-notice svg {
+  flex: 0 0 auto;
+}
+
 .reference-chip {
   display: grid;
   grid-template-columns: 18px 38px minmax(80px, 170px) 26px;
@@ -2752,6 +2770,15 @@ button.primary-action:focus-visible,
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.diagnostic-billing-note {
+  flex: 1 1 260px;
+  align-self: center;
+  margin-right: auto;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .prompt-editor-drawer > .drawer-actions {

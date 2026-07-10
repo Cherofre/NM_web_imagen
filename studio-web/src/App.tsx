@@ -31,7 +31,7 @@ import {
   ZoomOut,
   X,
 } from "lucide-react";
-import { ChangeEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
   GPT_CUSTOM_SIZE_MAX_PIXELS,
@@ -86,6 +86,8 @@ import {
   resolveInitialLanguage,
   type AppLanguage,
 } from "./i18n";
+import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
+import { referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -293,7 +295,6 @@ const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
 const gptQualityOptions = ["auto", "low", "medium", "high"];
-const gptEditModeOptions = ["generate", "reference", "outpaint"];
 const gptChatModelOptions = ["gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh"];
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
@@ -623,6 +624,16 @@ function loadJson<T>(key: string, fallback: T): T {
       return { ...fallback, ...parsed };
     }
     return parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadSanitizedBrowserForm<T>(key: string, fallback: T): T {
+  try {
+    const sanitized = sanitizeStoredJson(localStorage.getItem(key), fallback);
+    localStorage.setItem(key, JSON.stringify(sanitizeForBrowserStorage(sanitized)));
+    return sanitized;
   } catch {
     return fallback;
   }
@@ -981,8 +992,8 @@ function App() {
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
-  const [gptForm, setGptForm] = useState<GptForm>(() => loadJson(gptStorageKey, defaultGptForm));
-  const [bananaForm, setBananaForm] = useState<BananaForm>(() => loadJson(bananaStorageKey, defaultBananaForm));
+  const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
+  const [bananaForm, setBananaForm] = useState<BananaForm>(() => normalizeBananaForm(loadSanitizedBrowserForm(bananaStorageKey, defaultBananaForm)));
   const [references, setReferences] = useState<File[]>([]);
   const [sessions, setSessions] = useState<WorkbenchSession[]>(() => initialSessionState.current.sessions);
   const [activeSessionId, setActiveSessionId] = useState(() => initialSessionState.current.activeSessionId);
@@ -1017,7 +1028,7 @@ function App() {
   const [composerPromptHeight, setComposerPromptHeight] = useState(COMPOSER_PROMPT_DEFAULT_HEIGHT);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-  const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "edit" | "strength" | "count" | null>(null);
+  const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "count" | null>(null);
   const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -1034,7 +1045,7 @@ function App() {
   const [skipMultiImageConfirmForSession, setSkipMultiImageConfirmForSession] = useState(false);
   const [skipMultiImageConfirmChecked, setSkipMultiImageConfirmChecked] = useState(false);
   const [customSizeDraft, setCustomSizeDraft] = useState<{ width: string; height: string }>(() => {
-    const parsed = parseCustomImageSize(loadJson<GptForm>(gptStorageKey, defaultGptForm).custom_size);
+    const parsed = parseCustomImageSize(gptForm.custom_size);
     return { width: String(parsed.width), height: String(parsed.height) };
   });
   const [hasPromptedForConfig, setHasPromptedForConfig] = useState(false);
@@ -1075,6 +1086,7 @@ function App() {
     activeModel || t("config.label"),
   );
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
+  const referenceState = referenceUiState(submitMode, references.length);
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
@@ -1128,11 +1140,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(gptStorageKey, JSON.stringify(gptForm));
+    localStorage.setItem(gptStorageKey, JSON.stringify(sanitizeForBrowserStorage(gptForm)));
   }, [gptForm]);
 
   useEffect(() => {
-    localStorage.setItem(bananaStorageKey, JSON.stringify(bananaForm));
+    localStorage.setItem(bananaStorageKey, JSON.stringify(sanitizeForBrowserStorage(bananaForm)));
   }, [bananaForm]);
 
   useEffect(() => {
@@ -1890,6 +1902,10 @@ function App() {
   }
 
   function appendReferenceFiles(files: File[], sourceLabel = t("reference.button")) {
+    if (!referenceUiState(submitMode, references.length).canAdd) {
+      setNotice(t("reference.chatNotSent"));
+      return;
+    }
     const incoming = files.filter((file) => file.type.startsWith("image/"));
     if (incoming.length === 0) {
       setNotice(t("status.noImageFiles"));
@@ -1914,6 +1930,17 @@ function App() {
   function onReferenceChange(event: ChangeEvent<HTMLInputElement>) {
     appendReferenceFiles(Array.from(event.target.files || []), t("reference.button"));
     event.target.value = "";
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLElement>) {
+    const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    if (!referenceState.canAdd) {
+      setNotice(t("reference.chatNotSent"));
+      return;
+    }
+    appendReferenceFiles(files, t("reference.button"));
   }
 
   function previewReference(file: File) {
@@ -2127,6 +2154,10 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     if (Array.from(event.dataTransfer.types).includes("Files")) {
+      if (!referenceState.canAdd) {
+        setDragActive(false);
+        return;
+      }
       dragDepthRef.current += 1;
       setDragActive(true);
     }
@@ -2136,6 +2167,10 @@ function App() {
     if (hasDraggedReference(event)) return;
     event.preventDefault();
     event.stopPropagation();
+    if (!referenceState.canAdd) {
+      setDragActive(false);
+      return;
+    }
     event.dataTransfer.dropEffect = "copy";
     if (Array.from(event.dataTransfer.types).includes("Files")) {
       setDragActive(true);
@@ -2158,6 +2193,10 @@ function App() {
     event.stopPropagation();
     dragDepthRef.current = 0;
     setDragActive(false);
+    if (!referenceState.canAdd) {
+      setNotice(t("reference.chatNotSent"));
+      return;
+    }
     appendReferenceFiles(Array.from(event.dataTransfer.files || []), t("reference.droppedSource"));
   }
 
@@ -2470,7 +2509,7 @@ function App() {
     const currentDrafts = requestedSession?.drafts || activeSession.drafts;
     const currentGptForm = gptForm;
     const currentBananaForm = bananaForm;
-    const currentReferences = overrides.references || references;
+    const currentReferences = referencesForSubmitMode(currentMode, overrides.references || references);
     const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm, t);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
     const generationCount = generationCountFor(currentEngine, currentGptForm, currentBananaForm);
@@ -2500,7 +2539,6 @@ function App() {
       }
     }
 
-    const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
     const turnId = makeId("turn");
     const queueJobId = makeId("job");
     const createdAt = new Date().toISOString();
@@ -2519,10 +2557,9 @@ function App() {
         createdAt,
         status: "running",
         images: [],
-        referenceSnapshots,
         meta: {
           model: currentModel,
-          reference_count: currentReferences.length,
+          reference_count: 0,
           mode: "chat",
         },
       };
@@ -2580,7 +2617,7 @@ function App() {
         );
         stickToConversationEndIfNearBottom();
         setStatus(t("status.chatReplied"));
-        setNotice(referenceSnapshots.length ? t("status.chatRepliedWithRefs", { count: referenceSnapshots.length }) : t("status.chatReplied"));
+        setNotice(t("status.chatReplied"));
       } catch (error) {
         const message = error instanceof Error ? error.message : t("status.chatFailed");
         setSessions((current) =>
@@ -2622,6 +2659,7 @@ function App() {
       }
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
     }
+    const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
     const submitContextPrompt = submissionDrafts.context_prompt;
@@ -2854,14 +2892,6 @@ function App() {
     setSkipMultiImageConfirmChecked(false);
   }
 
-  function currentEditModeLabel() {
-    return optionLabel(gptForm.edit_mode);
-  }
-
-  function currentStrengthLabel() {
-    return `${Math.round(gptForm.reference_strength * 100)}%`;
-  }
-
   function imageExpandLabel(count: number) {
     return count === 1 ? t("image.expandOne", { count }) : t("image.expand", { count });
   }
@@ -3001,6 +3031,7 @@ function App() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onPaste={onPaste}
     >
       {tooltip && (
         <div
@@ -3481,6 +3512,12 @@ function App() {
                 })}
               </div>
             )}
+            {referenceState.noticeKey && (
+              <div className="reference-chat-notice" role="status">
+                <AlertCircle size={15} />
+                <span>{t(referenceState.noticeKey)}</span>
+              </div>
+            )}
             <div className="composer-toolbar" ref={composerToolsRef}>
             <div className="submit-mode-switch" role="tablist" aria-label={t("submit.mode")}>
               <button
@@ -3502,7 +3539,13 @@ function App() {
                 {t("submit.chat")}
               </button>
             </div>
-            <button type="button" onClick={() => fileInputRef.current?.click()} {...tooltipProps(t("reference.addTooltip"))}>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!referenceState.canAdd}
+              title={referenceState.canAdd ? t("reference.addTooltip") : t("reference.chatNotSent")}
+              aria-label={referenceState.canAdd ? t("reference.addTooltip") : t("reference.chatNotSent")}
+            >
               <ImagePlus size={16} /> {references.length > 0 ? t("reference.count", { count: references.length }) : t("reference.button")}
             </button>
             <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={onReferenceChange} />
@@ -3644,73 +3687,6 @@ function App() {
                 )}
               </div>
             )}
-            {activeEngine !== "banana" && (
-              <>
-                <div className="composer-popover-wrap">
-                  <button
-                    type="button"
-                    className={composerPopover === "edit" ? "active" : ""}
-                    onClick={() => openComposerPopover("edit")}
-                    aria-expanded={composerPopover === "edit"}
-                    {...tooltipProps(t("composer.editTooltip"))}
-                  >
-                    {t("composer.editMode")} {currentEditModeLabel()}
-                  </button>
-                  {composerPopover === "edit" && (
-                    <div className="composer-popover compact" role="dialog" aria-label={t("composer.editDialog")}>
-                      <div className="choice-grid quality">
-                        {gptEditModeOptions.map((item) => (
-                          <button
-                            type="button"
-                            key={item}
-                            className={gptForm.edit_mode === item ? "selected" : ""}
-                            onClick={() => setGptForm({ ...gptForm, edit_mode: item })}
-                          >
-                            {optionLabel(item)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="composer-popover-wrap">
-                  <button
-                    type="button"
-                    className={composerPopover === "strength" ? "active" : ""}
-                    onClick={() => openComposerPopover("strength")}
-                    aria-expanded={composerPopover === "strength"}
-                    {...tooltipProps(t("composer.strengthTooltip"))}
-                  >
-                    {t("composer.referenceStrength")} {currentStrengthLabel()}
-                  </button>
-                  {composerPopover === "strength" && (
-                    <div className="composer-popover compact" role="dialog" aria-label={t("composer.strengthDialog")}>
-                      <Field label={t("composer.referenceStrength")}>
-                        <input
-                          type="range"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={gptForm.reference_strength}
-                          onChange={(event) => setGptForm({ ...gptForm, reference_strength: Number(event.target.value) })}
-                        />
-                      </Field>
-                      <div className="inline-number-row">
-                        <span>{currentStrengthLabel()}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={gptForm.reference_strength}
-                          onChange={(event) => setGptForm({ ...gptForm, reference_strength: Math.min(1, Math.max(0, Number(event.target.value))) })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
             <div className="composer-popover-wrap">
               <button
                 type="button"
@@ -3817,8 +3793,8 @@ function App() {
               className="submit-button"
               disabled={busy}
               type="submit"
-              title={submitMode === "chat" ? t("submit.sendChat") : t("submit.startGenerate")}
-              aria-label={submitMode === "chat" ? t("submit.sendChat") : t("submit.startGenerate")}
+              title={submitMode === "chat" ? t("submit.chatTooltip") : t("submit.startGenerate")}
+              aria-label={submitMode === "chat" ? t("submit.chatTooltip") : t("submit.startGenerate")}
             >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
@@ -4109,6 +4085,7 @@ function App() {
             </div>
             <div className="drawer-actions">
               <button type="button" onClick={() => void loadDefaults()}>{t("config.loadDefaults")}</button>
+              <span className="diagnostic-billing-note" role="note">{t("config.generationDiagnosticBilling")}</span>
               <button type="button" onClick={() => void runDiagnostics()} disabled={diagnosticsRunning || !hasCompleteConfig}>
                 {diagnosticsRunning ? t("config.testing") : t("config.testConnection")}
               </button>

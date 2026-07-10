@@ -69,3 +69,33 @@ test("i18n runtime handles fallback, interpolation, and browser language", () =>
     }
   }
 });
+
+test("chat references and real generation diagnostics use exact bilingual disclosures", () => {
+  assert.equal(
+    i18n.messages["zh-CN"]["reference.chatNotSent"],
+    "聊天暂不发送参考图；这些图片会保留，切回生图后仍可使用。",
+  );
+  assert.equal(
+    i18n.messages.en["reference.chatNotSent"],
+    "Chat does not currently send reference images. These images will be kept and remain available after you switch back to image generation.",
+  );
+  assert.equal(
+    i18n.messages["zh-CN"]["submit.chatTooltip"],
+    "调用聊天接口，仅发送文字上下文；当前不发送参考图。",
+  );
+  assert.equal(
+    i18n.messages.en["submit.chatTooltip"],
+    "Call the chat API and send text context only; reference images are not currently sent.",
+  );
+  assert.equal(
+    i18n.messages["zh-CN"]["config.generationDiagnosticBilling"],
+    "生图诊断会发起一次最小真实请求，上游可能计费。",
+  );
+  assert.equal(
+    i18n.messages.en["config.generationDiagnosticBilling"],
+    "The image-generation diagnostic sends one minimal real request and may be billed by the upstream provider.",
+  );
+  assert.match(appSource, /title=\{submitMode === "chat" \? t\("submit\.chatTooltip"\)/);
+  assert.match(appSource, /aria-label=\{submitMode === "chat" \? t\("submit\.chatTooltip"\)/);
+  assert.match(appSource, /t\("config\.generationDiagnosticBilling"\)/);
+});

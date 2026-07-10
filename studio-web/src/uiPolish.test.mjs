@@ -481,3 +481,28 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlockIn(phone, ".composer-input"), /grid-template-columns:\s*minmax\(0, 1fr\) 52px;/);
   assert.match(cssBlockIn(phone, ".submit-button"), /grid-column:\s*2;[\s\S]*width:\s*52px;/);
 });
+
+test("composer hides unsupported controls and keeps chat reference behavior truthful", () => {
+  assert.match(appSource, /import \{ referenceUiState, referencesForSubmitMode \} from "\.\/chatCapabilities";/);
+  assert.match(appSource, /const referenceState = referenceUiState\(submitMode, references\.length\);/);
+  assert.match(appSource, /disabled=\{!referenceState\.canAdd\}/);
+  assert.match(appSource, /referenceState\.noticeKey &&[\s\S]*t\(referenceState\.noticeKey\)/);
+  assert.match(appSource, /function onPaste\(event: ClipboardEvent<HTMLElement>\)/);
+  assert.match(appSource, /onPaste=\{onPaste\}/);
+  assert.match(appSource, /if \(!referenceUiState\(submitMode, references\.length\)\.canAdd\)/);
+  assert.match(appSource, /const currentReferences = referencesForSubmitMode\(currentMode, overrides\.references \|\| references\);/);
+
+  const chatBranchStart = appSource.indexOf('if (currentMode === "chat")');
+  const generateBranchStart = appSource.indexOf("let submitGptForm = currentGptForm", chatBranchStart);
+  const chatBranch = appSource.slice(chatBranchStart, generateBranchStart);
+  assert.doesNotMatch(chatBranch, /createReferenceSnapshots/);
+  assert.doesNotMatch(chatBranch, /referenceSnapshots/);
+  assert.match(chatBranch, /reference_count:\s*0/);
+  assert.match(chatBranch, /setNotice\(t\("status\.chatReplied"\)\)/);
+
+  assert.match(appSource, /useState<"size" \| "quality" \| "count" \| null>/);
+  assert.doesNotMatch(appSource, /openComposerPopover\("edit"\)/);
+  assert.doesNotMatch(appSource, /openComposerPopover\("strength"\)/);
+  assert.doesNotMatch(appSource, /t\("composer\.editMode"\)/);
+  assert.doesNotMatch(appSource, /t\("composer\.referenceStrength"\)/);
+});
