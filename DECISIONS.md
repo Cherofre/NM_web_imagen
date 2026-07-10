@@ -1,6 +1,7 @@
 # Decisions
 
 ## Active Decisions
+- 2026-07-10: Execute the approved v1.0.6 implementation plan with fresh task implementers plus spec and code-quality review in the same isolated worktree. The execution skill requires this workflow when subagent support is available; tasks remain sequential on one branch to avoid shared-file conflicts.
 - 2026-07-10: Implement all confirmed P1 fixes on one isolated branch, `codex/p1-hardening-v1.0.6`, using four staged implementation slices and TDD. Preserve the FastAPI + React/Vite architecture, old config/history/session schemas, `/classic`, and offline Windows packaging.
 - 2026-07-10: v1.0.6 will disable unsupported or misleading behavior instead of inventing provider contracts: chat reference images are disabled until true multimodal payloads exist; GPT edit mode and reference strength are hidden until an upstream adapter uses them.
 - 2026-07-10: v1.0.6 uses strict raster validation, controlled outputs routing, production same-origin access, bounded threaded `requests`, in-memory job cancellation state, file locks/atomic JSON/revision conflict handling, and a release whitelist. SQLite, remote/LAN mode, and full multimodal chat remain separate future projects.

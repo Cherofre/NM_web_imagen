@@ -4,14 +4,14 @@
 - [x] User selected one `codex/p1-hardening-v1.0.6` branch with four staged implementation slices.
 - [x] Created an isolated worktree and verified the v1.0.5 baseline: backend 44/44, frontend 61/61, TypeScript, and size rules pass.
 - [x] Wrote the approved architecture and acceptance design in `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`.
-- [ ] User reviews and approves the written design spec.
-- [ ] Invoke `writing-plans` and create the task-by-task TDD implementation plan.
-- [ ] Implement only after the plan is approved, explaining intent and possible impact for every stage.
+- [x] User reviewed and approved the written design spec.
+- [x] Created and self-reviewed `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`.
+- [ ] Execute Task 1 with TDD: local API, outputs, strict raster validation, capacity limits, SSRF closure, and loopback-only host.
 
 ## Handoff Notes
 - Start here: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`, branch `codex/p1-hardening-v1.0.6`, design spec `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`.
 - Do not redo: P1 audit, approach selection, isolated worktree setup, and baseline test verification are complete.
-- Verify next: user approval of the written design, then create the task-by-task implementation plan.
+- Verify next: run Task 1 RED tests before changing application code.
 - Do not claim: no P1 implementation or release candidate exists yet.
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
 - Synced copy on this machine: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
