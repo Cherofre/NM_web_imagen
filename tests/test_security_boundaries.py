@@ -309,6 +309,136 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 webapp.dev_cors_origins(),
             )
 
+    def test_foreign_host_and_origin_reject_config_before_defaults_read(self) -> None:
+        with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
+            response = self.client.get(
+                "/api/config/defaults",
+                headers={"Host": "evil.test", "Origin": "http://evil.test"},
+            )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求主机", response.json()["detail"])
+        defaults.assert_not_called()
+
+    def test_foreign_host_without_origin_rejects_config_before_defaults_read(self) -> None:
+        with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
+            response = self.client.get(
+                "/api/config/defaults",
+                headers={"Host": "evil.test"},
+            )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求主机", response.json()["detail"])
+        defaults.assert_not_called()
+
+    def test_foreign_host_generation_is_rejected_before_form_or_executor(self) -> None:
+        original_form = StarletteRequest.form
+        form_calls = []
+
+        def tracking_form(request, *args, **kwargs):
+            form_calls.append(dict(kwargs))
+            return original_form(request, *args, **kwargs)
+
+        with (
+            patch.object(StarletteRequest, "form", tracking_form),
+            patch.object(
+                webapp.UPSTREAM_EXECUTOR,
+                "run",
+                new_callable=AsyncMock,
+                return_value=FakeGenerationResponse(),
+            ) as executor_run,
+        ):
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                headers={"Host": "evil.test"},
+                data={"api_key": "secret", "prompt": "host boundary"},
+            )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求主机", response.json()["detail"])
+        self.assertEqual([], form_calls)
+        executor_run.assert_not_awaited()
+
+    def test_exact_loopback_hosts_are_allowed(self) -> None:
+        with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
+            for host in (
+                "127.0.0.1:7861",
+                "localhost",
+                "localhost.",
+                "[::1]:7861",
+            ):
+                with self.subTest(host=host):
+                    response = self.client.get(
+                        "/api/config/defaults",
+                        headers={"Host": host},
+                    )
+                    self.assertEqual(200, response.status_code)
+
+        self.assertEqual(4, defaults.call_count)
+
+    def test_testserver_host_requires_matching_asgi_server(self) -> None:
+        with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
+            matching = self.client.get(
+                "/api/config/defaults",
+                headers={"Host": "testserver"},
+            )
+            with TestClient(
+                webapp.create_app(),
+                base_url="http://127.0.0.1:7861",
+            ) as uvicorn_like_client:
+                mismatched = uvicorn_like_client.get(
+                    "/api/config/defaults",
+                    headers={"Host": "testserver"},
+                )
+
+        self.assertEqual(200, matching.status_code)
+        self.assertEqual(403, mismatched.status_code)
+        self.assertEqual("不允许的请求主机", mismatched.json()["detail"])
+        self.assertEqual(1, defaults.call_count)
+
+    def test_dev_cors_wraps_boundary_early_responses(self) -> None:
+        allowed_origin = "http://localhost:5173"
+        with (
+            patch.dict(
+                os.environ,
+                {"IMAGE_TOOL_DEV_CORS_ORIGINS": allowed_origin},
+            ),
+            patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 64, create=True),
+            patch.object(
+                StarletteRequest,
+                "form",
+                side_effect=AssertionError("early response reached multipart parsing"),
+            ) as request_form,
+        ):
+            with TestClient(webapp.create_app()) as client:
+                allowed = client.post(
+                    "/api/generate/gpt-image-2",
+                    content=b"x",
+                    headers={
+                        "Origin": allowed_origin,
+                        "Content-Type": "multipart/form-data; boundary=limit-test",
+                        "Content-Length": "65",
+                    },
+                )
+                foreign = client.post(
+                    "/api/generate/gpt-image-2",
+                    content=b"x",
+                    headers={
+                        "Origin": "https://attacker.example",
+                        "Content-Type": "multipart/form-data; boundary=limit-test",
+                        "Content-Length": "65",
+                    },
+                )
+
+        self.assertEqual(413, allowed.status_code)
+        self.assertEqual(
+            allowed_origin,
+            allowed.headers.get("access-control-allow-origin"),
+        )
+        self.assertEqual(403, foreign.status_code)
+        self.assertNotIn("access-control-allow-origin", foreign.headers)
+        request_form.assert_not_called()
+
     def test_foreign_origin_multipart_is_rejected_before_form_parse_or_executor(self) -> None:
         with (
             patch.object(

@@ -237,6 +237,37 @@ def normalize_http_origin(value: str) -> Optional[str]:
     return f"{scheme}://{normalized_host}{suffix}"
 
 
+def request_host_is_allowed(value: str, server: Any) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(f"//{raw}")
+        if (
+            not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            return False
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if not hostname or (port is not None and not 1 <= port <= 65535):
+        return False
+    normalized_host = hostname.lower()
+    if normalized_host in {"127.0.0.1", "localhost", "localhost.", "::1"}:
+        return True
+    server_host = ""
+    if isinstance(server, (list, tuple)) and server:
+        server_host = str(server[0] or "").lower()
+    return normalized_host == "testserver" and server_host == "testserver"
+
+
 class RequestBoundaryMiddleware:
     def __init__(self, app: Any, *, allowed_origins: List[str]) -> None:
         self.app = app
@@ -251,16 +282,27 @@ class RequestBoundaryMiddleware:
             await self.app(scope, receive, send)
             return
 
+        headers = Headers(scope=scope)
+        host_values = headers.getlist("host")
+        host = host_values[0] if len(host_values) == 1 else ""
+        if not request_host_is_allowed(host, scope.get("server")):
+            await JSONResponse(
+                status_code=403,
+                content={"detail": "不允许的请求主机"},
+            )(scope, receive, send)
+            return
+
         method = str(scope.get("method") or "GET").upper()
         path = str(scope.get("path") or "")
-        headers = Headers(scope=scope)
         if path.startswith("/api/") and method not in {"GET", "HEAD", "OPTIONS"}:
             raw_origin = headers.get("origin")
             if raw_origin:
                 request_origin = normalize_http_origin(raw_origin)
-                host = headers.get("host") or ""
                 current_origin = normalize_http_origin(f"{scope.get('scheme') or 'http'}://{host}")
-                if request_origin is None or request_origin not in self.allowed_origins | {current_origin}:
+                allowed_origins = set(self.allowed_origins)
+                if current_origin is not None:
+                    allowed_origins.add(current_origin)
+                if request_origin is None or request_origin not in allowed_origins:
                     await JSONResponse(
                         status_code=403,
                         content={"detail": "不允许的请求来源"},
@@ -3298,6 +3340,7 @@ async def build_gpt_images_from_response_async(
 def create_app() -> FastAPI:
     app = FastAPI(title="Image Generate Web Tool", version="1.0.0")
     origins = dev_cors_origins()
+    app.add_middleware(RequestBoundaryMiddleware, allowed_origins=origins)
     if origins:
         app.add_middleware(
             CORSMiddleware,
@@ -3306,7 +3349,6 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
             allow_credentials=False,
         )
-    app.add_middleware(RequestBoundaryMiddleware, allowed_origins=origins)
     app.router.route_class = LimitedGenerationMultipartRoute
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
