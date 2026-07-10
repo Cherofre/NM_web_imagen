@@ -174,6 +174,99 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual("第一版", body["current"]["sessions"][0]["title"])
         self.assertEqual(committed, (self.outputs / "studio_sessions.json").read_bytes())
 
+    def test_legacy_session_meta_is_sanitized_for_get_and_conflict_without_rewrite(self) -> None:
+        sensitive_url = "https://url-user:url-pass@example.com/v1?token=query-secret#fragment"
+        windows_path = r"C:\Users\Alice\private\token.txt"
+        posix_path = "/home/alice/private/token.txt"
+        legacy_payload = {
+            "version": 1,
+            "revision": 7,
+            "updated_at": "2026-07-11T10:00:00",
+            "active_session_id": "session-legacy-meta",
+            "sessions": [
+                {
+                    "id": "session-legacy-meta",
+                    "title": "旧元数据会话",
+                    "createdAt": "2026-07-11T09:00:00",
+                    "updatedAt": "2026-07-11T10:00:00",
+                    "unknown_session_field": {"keep": [1, 2, 3]},
+                    "turns": [
+                        {
+                            "id": "turn-legacy-meta",
+                            "engine": "gpt-image-2",
+                            "mode": "generate",
+                            "prompt": "legacy",
+                            "createdAt": "2026-07-11T09:00:00",
+                            "status": "success",
+                            "images": [],
+                            "unknown_turn_field": {"keep": "turn"},
+                            "referenceSnapshots": [
+                                {
+                                    "id": "ref-legacy",
+                                    "name": "legacy.png",
+                                    "src": "/outputs/session_refs/legacy.png",
+                                    "unknown_reference_field": "keep-reference",
+                                }
+                            ],
+                            "meta": {
+                                "api_url": sensitive_url,
+                                "api_url_host": windows_path,
+                                "api_base_url": posix_path,
+                                "api_base_url_host": sensitive_url.removeprefix("https://"),
+                                "custom_meta": {"keep": "session"},
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        session_file = self.outputs / "studio_sessions.json"
+        session_file.write_text(json.dumps(legacy_payload, ensure_ascii=False), encoding="utf-8")
+        original_bytes = session_file.read_bytes()
+
+        response = self.client.get("/api/studio/sessions")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(original_bytes, session_file.read_bytes())
+        body = response.json()
+        self.assertEqual(7, body["revision"])
+        self.assertEqual("session-legacy-meta", body["active_session_id"])
+        session = body["sessions"][0]
+        turn = session["turns"][0]
+        self.assertEqual({"keep": [1, 2, 3]}, session["unknown_session_field"])
+        self.assertEqual({"keep": "turn"}, turn["unknown_turn_field"])
+        self.assertEqual(legacy_payload["sessions"][0]["turns"][0]["referenceSnapshots"], turn["referenceSnapshots"])
+        self.assertEqual(
+            {
+                "custom_meta": {"keep": "session"},
+                "api_base_url_host": "[invalid endpoint]",
+                "api_url_host": "example.com/v1",
+            },
+            turn["meta"],
+        )
+        response_text = json.dumps(body, ensure_ascii=False)
+        for marker in ("url-user", "url-pass", "query-secret", windows_path, posix_path):
+            self.assertNotIn(marker, response_text)
+
+        conflict = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload("过期覆盖", expected_revision=6),
+        )
+
+        self.assertEqual(409, conflict.status_code)
+        self.assertEqual(original_bytes, session_file.read_bytes())
+        current = conflict.json()["current"]
+        self.assertEqual(7, current["revision"])
+        current_session = current["sessions"][0]
+        current_turn = current_session["turns"][0]
+        self.assertEqual({"keep": [1, 2, 3]}, current_session["unknown_session_field"])
+        self.assertEqual({"keep": "turn"}, current_turn["unknown_turn_field"])
+        self.assertEqual(legacy_payload["sessions"][0]["turns"][0]["referenceSnapshots"], current_turn["referenceSnapshots"])
+        conflict_text = json.dumps(conflict.json(), ensure_ascii=False)
+        for marker in ("url-user", "url-pass", "query-secret", windows_path, posix_path):
+            self.assertNotIn(marker, conflict_text)
+
     def test_legacy_writes_increment_revision_and_invalid_expected_values_are_400(self) -> None:
         first = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端一"))
         second = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端二"))
@@ -1305,7 +1398,7 @@ class StudioSessionTests(unittest.TestCase):
             ],
             urls,
         )
-        self.assertEqual("https://yuzapi.fun/v1/images/generations", response.json()["meta"]["api_url"])
+        self.assertEqual("yuzapi.fun/v1/images/generations", response.json()["meta"]["api_url"])
 
     def test_gpt_generation_reports_upstream_524_timeout_clearly(self) -> None:
         class FakeResponse:
@@ -1329,11 +1422,14 @@ class StudioSessionTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(502, response.status_code)
-        detail = response.json()["detail"]
-        self.assertIn("524", detail)
-        self.assertIn("上游网关超时", detail)
-        self.assertIn("稍后重试", detail)
+        self.assertEqual(504, response.status_code)
+        self.assertEqual(
+            {
+                "detail": webapp.CLIENT_ERROR_DETAILS["E_UPSTREAM_TIMEOUT"],
+                "error_code": "E_UPSTREAM_TIMEOUT",
+            },
+            response.json(),
+        )
 
     def test_gpt_generation_uses_ascii_multipart_filename_for_reference_upload(self) -> None:
         captured = {}

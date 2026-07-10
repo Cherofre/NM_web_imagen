@@ -113,6 +113,40 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(value=value):
                 self.assertEqual(expected, webapp.public_url_hint(value))
 
+    def test_sanitize_history_meta_is_idempotent_and_raw_urls_win(self) -> None:
+        raw_priority = {
+            "api_url": f"{SENSITIVE_URL}#private-fragment",
+            "api_url_host": WINDOWS_SECRET_PATH,
+            "api_base_url": POSIX_SECRET_PATH,
+            "api_base_url_host": SENSITIVE_URL.removeprefix("https://"),
+            "custom_meta": {"keep": True},
+        }
+        expected_priority = {
+            "custom_meta": {"keep": True},
+            "api_base_url_host": SAFE_URL_PLACEHOLDER,
+            "api_url_host": "example.com/v1",
+        }
+        old_host_only = {
+            "api_url_host": "url-user:url-pass@example.com/v2?token=query-secret#fragment",
+            "api_base_url_host": WINDOWS_SECRET_PATH,
+            "custom_meta": "keep",
+        }
+        expected_old_host = {
+            "custom_meta": "keep",
+            "api_base_url_host": SAFE_URL_PLACEHOLDER,
+            "api_url_host": "example.com/v2",
+        }
+
+        for value, expected in (
+            (raw_priority, expected_priority),
+            (old_host_only, expected_old_host),
+        ):
+            with self.subTest(value=value):
+                sanitized = webapp.sanitize_history_meta(value)
+                self.assertEqual(expected, sanitized)
+                self.assertEqual(sanitized, webapp.sanitize_history_meta(sanitized))
+                assert_client_payload_is_sanitized(self, sanitized)
+
     def test_client_error_sanitizer_redacts_keys_urls_assignments_and_paths(self) -> None:
         sanitized = webapp.sanitize_client_error(
             SENSITIVE_ERROR,
@@ -1326,6 +1360,97 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             payload = response.json()
             assert_client_payload_is_sanitized(self, payload)
             self.assertEqual("example.com/v1", payload["meta"]["api_base_url_host"])
+
+    async def test_legacy_history_meta_is_sanitized_on_read_and_patch_writeback(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        target_id = "history-raw-priority"
+        history_payload = {
+            "version": 1,
+            "updated_at": "2026-07-11T10:00:00",
+            "entries": [
+                {
+                    "id": target_id,
+                    "created_at": "2026-07-11T10:00:00",
+                    "favorite": False,
+                    "prompt": "legacy raw priority",
+                    "images": [],
+                    "unknown_entry_field": {"keep": True},
+                    "meta": {
+                        "api_url": f"{SENSITIVE_URL}#private-fragment",
+                        "api_url_host": WINDOWS_SECRET_PATH,
+                        "api_base_url": POSIX_SECRET_PATH,
+                        "api_base_url_host": SENSITIVE_URL.removeprefix("https://"),
+                        "custom_meta": {"keep": "raw-priority"},
+                    },
+                },
+                {
+                    "id": "history-old-host-only",
+                    "created_at": "2026-07-11T09:00:00",
+                    "favorite": False,
+                    "prompt": "legacy host only",
+                    "images": [],
+                    "meta": {
+                        "api_url_host": "url-user:url-pass@example.com/v2?token=query-secret#fragment",
+                        "api_base_url_host": WINDOWS_SECRET_PATH,
+                        "custom_meta": "keep-old-host",
+                    },
+                },
+            ],
+        }
+        self.outputs.joinpath("history.json").write_text(
+            json.dumps(history_payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        original_bytes = self.outputs.joinpath("history.json").read_bytes()
+
+        first_read = await self.client.get("/api/history")
+
+        self.assertEqual(200, first_read.status_code)
+        self.assertEqual(original_bytes, self.outputs.joinpath("history.json").read_bytes())
+        first_entries = {entry["id"]: entry for entry in first_read.json()["entries"]}
+        self.assertEqual(
+            {
+                "custom_meta": {"keep": "raw-priority"},
+                "api_base_url_host": SAFE_URL_PLACEHOLDER,
+                "api_url_host": "example.com/v1",
+            },
+            first_entries[target_id]["meta"],
+        )
+        self.assertEqual(
+            {
+                "custom_meta": "keep-old-host",
+                "api_base_url_host": SAFE_URL_PLACEHOLDER,
+                "api_url_host": "example.com/v2",
+            },
+            first_entries["history-old-host-only"]["meta"],
+        )
+        self.assertEqual({"keep": True}, first_entries[target_id]["unknown_entry_field"])
+        assert_client_payload_is_sanitized(self, first_read.json())
+
+        updated = await self.client.patch(
+            f"/api/history/{target_id}",
+            json={"favorite": True},
+        )
+
+        self.assertEqual(200, updated.status_code)
+        self.assertTrue(updated.json()["entry"]["favorite"])
+        self.assertEqual("example.com/v1", updated.json()["entry"]["meta"]["api_url_host"])
+        self.assertEqual(SAFE_URL_PLACEHOLDER, updated.json()["entry"]["meta"]["api_base_url_host"])
+        assert_client_payload_is_sanitized(self, updated.json())
+
+        persisted = json.loads(self.outputs.joinpath("history.json").read_text(encoding="utf-8"))
+        persisted_entries = {entry["id"]: entry for entry in persisted["entries"]}
+        for entry in persisted_entries.values():
+            self.assertNotIn("api_url", entry.get("meta", {}))
+            self.assertNotIn("api_base_url", entry.get("meta", {}))
+        self.assertEqual("example.com/v1", persisted_entries[target_id]["meta"]["api_url_host"])
+        self.assertEqual(SAFE_URL_PLACEHOLDER, persisted_entries[target_id]["meta"]["api_base_url_host"])
+        self.assertEqual("example.com/v2", persisted_entries["history-old-host-only"]["meta"]["api_url_host"])
+        assert_client_payload_is_sanitized(self, persisted)
+
+        second_read = await self.client.get("/api/history")
+        self.assertEqual(200, second_read.status_code)
+        assert_client_payload_is_sanitized(self, second_read.json())
 
     async def test_chat_captured_errors_use_stable_codes_for_both_engines(self) -> None:
         class BananaSession:

@@ -1344,6 +1344,40 @@ def public_url_hint(value: str) -> str:
     return f"{normalized_host}{port_suffix}{path}"
 
 
+def sanitize_history_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
+    raw_meta = meta or {}
+    sanitized = {
+        key: value
+        for key, value in raw_meta.items()
+        if key not in {
+            "api_base_url",
+            "api_base_url_host",
+            "api_url",
+            "api_url_host",
+        }
+    }
+    for raw_key in ("api_base_url", "api_url"):
+        host_key = f"{raw_key}_host"
+        if raw_key in raw_meta:
+            sanitized[host_key] = public_url_hint(str(raw_meta.get(raw_key) or ""))
+        elif host_key in raw_meta:
+            sanitized[host_key] = public_url_hint(str(raw_meta.get(host_key) or ""))
+    return sanitized
+
+
+def sanitize_history_entry_metadata(entry: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(entry)
+    if isinstance(normalized.get("meta"), dict):
+        normalized["meta"] = sanitize_history_meta(normalized["meta"])
+    return normalized
+
+
+def normalize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = sanitize_history_entry_metadata(entry)
+    normalized["favorite"] = bool(normalized.get("favorite", False))
+    return normalized
+
+
 def history_entries_from_payload(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         entries = payload.get("entries", [])
@@ -1351,14 +1385,14 @@ def history_entries_from_payload(payload: Any) -> List[Dict[str, Any]]:
         entries = payload
     else:
         entries = []
-    return [entry for entry in entries if isinstance(entry, dict)]
+    return [sanitize_history_entry_metadata(entry) for entry in entries if isinstance(entry, dict)]
 
 
 def history_payload(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "version": 1,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
-        "entries": entries[:HISTORY_MAX_ENTRIES],
+        "entries": [sanitize_history_entry_metadata(entry) for entry in entries[:HISTORY_MAX_ENTRIES]],
     }
 
 
@@ -1387,16 +1421,40 @@ def normalize_studio_revision(value: Any) -> int:
     return max(1, revision)
 
 
+def sanitize_studio_session_metadata(sessions: Any) -> List[Any]:
+    if not isinstance(sessions, list):
+        return []
+    sanitized_sessions: List[Any] = []
+    for session in sessions:
+        if not isinstance(session, dict):
+            sanitized_sessions.append(session)
+            continue
+        sanitized_session = dict(session)
+        turns = session.get("turns")
+        if isinstance(turns, list):
+            sanitized_turns: List[Any] = []
+            for turn in turns:
+                if not isinstance(turn, dict):
+                    sanitized_turns.append(turn)
+                    continue
+                sanitized_turn = dict(turn)
+                if isinstance(turn.get("meta"), dict):
+                    sanitized_turn["meta"] = sanitize_history_meta(turn["meta"])
+                sanitized_turns.append(sanitized_turn)
+            sanitized_session["turns"] = sanitized_turns
+        sanitized_sessions.append(sanitized_session)
+    return sanitized_sessions
+
+
 def studio_session_state_from_payload(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return empty_studio_session_state()
-    sessions = payload.get("sessions")
     return {
         "version": normalize_studio_revision(payload.get("version")),
         "revision": normalize_studio_revision(payload.get("revision")),
         "updated_at": payload.get("updated_at"),
         "active_session_id": str(payload.get("active_session_id") or ""),
-        "sessions": sessions if isinstance(sessions, list) else [],
+        "sessions": sanitize_studio_session_metadata(payload.get("sessions")),
     }
 
 
@@ -1836,12 +1894,6 @@ def write_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def normalize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(entry)
-    normalized["favorite"] = bool(normalized.get("favorite", False))
-    return normalized
-
-
 class _HistoryEntryNotFound(Exception):
     pass
 
@@ -2023,16 +2075,6 @@ def history_image_record(image: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if image.get("dimensions"):
         record["dimensions"] = image["dimensions"]
     return record
-
-
-def sanitize_history_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
-    sanitized: Dict[str, Any] = {}
-    for key, value in (meta or {}).items():
-        if key in {"api_base_url", "api_url"}:
-            sanitized[f"{key}_host"] = public_url_hint(str(value))
-            continue
-        sanitized[key] = value
-    return sanitized
 
 
 def append_generation_history(
