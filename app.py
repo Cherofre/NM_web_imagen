@@ -94,6 +94,7 @@ GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
 UPSTREAM_RESULT_MAX_IMAGES = 10
 UPSTREAM_RESULT_MAX_BYTES = 150 * 1024 * 1024
 UPSTREAM_RESULT_LIMIT_MESSAGE = "上游图片结果超过请求级安全预算"
+PUBLIC_URL_PLACEHOLDER = "[invalid endpoint]"
 CLIENT_ERROR_DETAILS = {
     "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
     "E_UPSTREAM_RATE_LIMIT": "上游服务请求过于频繁，请稍后重试。",
@@ -1236,13 +1237,35 @@ def public_url_hint(value: str) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
+    if (
+        text.startswith(("/", "\\"))
+        or re.match(r"^[A-Za-z]:[\\/]", text)
+        or "\\" in text
+        or any(character.isspace() for character in text)
+    ):
+        return PUBLIC_URL_PLACEHOLDER
     try:
-        parsed = urlparse(text)
-        host = parsed.netloc or text
-        path = parsed.path if parsed.path and parsed.path != "/" else ""
-        return f"{host}{path}"
+        if "://" in text:
+            parsed = urlparse(text)
+            scheme = parsed.scheme.lower()
+            if scheme not in {"http", "https"}:
+                return PUBLIC_URL_PLACEHOLDER
+        else:
+            parsed = urlparse(f"//{text}")
+            scheme = ""
+        hostname = parsed.hostname
+        port = parsed.port
     except Exception:
-        return re.sub(r"^https?://", "", text, flags=re.IGNORECASE)
+        return PUBLIC_URL_PLACEHOLDER
+    if not hostname:
+        return PUBLIC_URL_PLACEHOLDER
+    normalized_host = hostname.lower()
+    if ":" in normalized_host:
+        normalized_host = f"[{normalized_host}]"
+    default_port = 80 if scheme == "http" else 443 if scheme == "https" else None
+    port_suffix = f":{port}" if port is not None and port != default_port else ""
+    path = parsed.path if parsed.path and parsed.path != "/" else ""
+    return f"{normalized_host}{port_suffix}{path}"
 
 
 def history_entries_from_payload(payload: Any) -> List[Dict[str, Any]]:
@@ -2641,7 +2664,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             timeout=timeout,
         )
         if not response.ok:
-            _public_status, error_code = upstream_error_classification(response.status_code)
+            public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "generation",
                 "生图",
@@ -2649,7 +2672,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                public_status,
                 error_code,
                 secrets,
             )
@@ -2665,7 +2688,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                502,
                 "E_UPSTREAM_RESPONSE",
                 secrets,
             )
@@ -2687,6 +2710,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             endpoint,
             model,
             started_at,
+            status_code=504,
             error_code="E_UPSTREAM_TIMEOUT",
             secrets=secrets,
         )
@@ -2698,6 +2722,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_NETWORK",
             secrets=secrets,
         )
@@ -2709,6 +2734,7 @@ async def run_gpt_generation_diagnostic(payload: Dict[str, Any], secrets: List[s
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_RESPONSE",
             secrets=secrets,
         )
@@ -2752,7 +2778,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             timeout=timeout,
         )
         if not response.ok:
-            _public_status, error_code = upstream_error_classification(response.status_code)
+            public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "chat",
                 "聊天",
@@ -2760,7 +2786,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                public_status,
                 error_code,
                 secrets,
             )
@@ -2773,7 +2799,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                502,
                 "E_UPSTREAM_RESPONSE",
                 secrets,
             )
@@ -2795,6 +2821,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             endpoint,
             model,
             started_at,
+            status_code=504,
             error_code="E_UPSTREAM_TIMEOUT",
             secrets=secrets,
         )
@@ -2806,6 +2833,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_NETWORK",
             secrets=secrets,
         )
@@ -2817,6 +2845,7 @@ async def run_gpt_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]) -
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_RESPONSE",
             secrets=secrets,
         )
@@ -2863,7 +2892,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            _public_status, error_code = upstream_error_classification(response.status_code)
+            public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "generation",
                 "生图",
@@ -2871,7 +2900,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                public_status,
                 error_code,
                 secrets,
             )
@@ -2889,7 +2918,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                502,
                 "E_UPSTREAM_RESPONSE",
                 secrets,
             )
@@ -2911,6 +2940,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             endpoint,
             model,
             started_at,
+            status_code=504,
             error_code="E_UPSTREAM_TIMEOUT",
             secrets=secrets,
         )
@@ -2922,6 +2952,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_NETWORK",
             secrets=secrets,
         )
@@ -2933,6 +2964,7 @@ async def run_banana_generation_diagnostic(payload: Dict[str, Any], secrets: Lis
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_RESPONSE",
             secrets=secrets,
         )
@@ -2975,7 +3007,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             verify=not bool(payload.get("disable_ssl")),
         )
         if not response.ok:
-            _public_status, error_code = upstream_error_classification(response.status_code)
+            public_status, error_code = upstream_error_classification(response.status_code)
             return diagnostic_result(
                 "chat",
                 "聊天",
@@ -2983,7 +3015,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                public_status,
                 error_code,
                 secrets,
             )
@@ -2996,7 +3028,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
                 endpoint,
                 model,
                 started_at,
-                response.status_code,
+                502,
                 "E_UPSTREAM_RESPONSE",
                 secrets,
             )
@@ -3018,6 +3050,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             endpoint,
             model,
             started_at,
+            status_code=504,
             error_code="E_UPSTREAM_TIMEOUT",
             secrets=secrets,
         )
@@ -3029,6 +3062,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_NETWORK",
             secrets=secrets,
         )
@@ -3040,6 +3074,7 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
             endpoint,
             model,
             started_at,
+            status_code=502,
             error_code="E_UPSTREAM_RESPONSE",
             secrets=secrets,
         )
@@ -3835,7 +3870,7 @@ def create_app() -> FastAPI:
             JOB_REGISTRY.raise_if_canceled(job_id)
             meta = {
                 "model_type": model_type,
-                "api_base_url": api_base_url,
+                "api_base_url": public_url_hint(api_base_url),
                 "batch_size": batch_size,
                 "aspect_ratio": aspect_ratio,
                 "effective_aspect_ratio": effective_aspect_ratio or "Auto",
@@ -4179,7 +4214,7 @@ def create_app() -> FastAPI:
             total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
             meta = {
                 "model": model,
-                "api_url": api_url,
+                "api_url": public_url_hint(api_url),
                 "api_endpoint": resolved_endpoint,
                 "size": normalized_size,
                 "quality": quality,
