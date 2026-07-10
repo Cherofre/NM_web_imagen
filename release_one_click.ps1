@@ -35,6 +35,20 @@ function Invoke-Step {
   }
 }
 
+function Invoke-NativeCommand {
+  param(
+    [string]$Command,
+    [string[]]$Arguments
+  )
+
+  $global:LASTEXITCODE = 0
+  & $Command @Arguments
+  $ExitCode = $LASTEXITCODE
+  if ($ExitCode -ne 0) {
+    throw "Native command failed with exit code ${ExitCode}: $Command"
+  }
+}
+
 if (-not (Test-Path -LiteralPath $PreflightScript)) {
   throw "release_preflight.ps1 was not found."
 }
@@ -57,7 +71,19 @@ $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 Invoke-Step "Frontend tests" {
   Push-Location $StudioDir
   try {
-    node --test .\src\configProfiles.test.mjs .\src\configProfileSelection.test.mjs .\src\generationQueue.test.mjs .\src\queuePersistence.test.mjs .\src\queueSessionBoundaries.test.mjs .\src\sessionDrafts.test.mjs .\src\submissionPayload.test.mjs .\src\uiPolish.test.mjs .\src\gptSizeSelection.test.mjs .\src\i18n.test.mjs
+    Invoke-NativeCommand -Command "node" -Arguments @(
+      "--test",
+      ".\src\configProfiles.test.mjs",
+      ".\src\configProfileSelection.test.mjs",
+      ".\src\generationQueue.test.mjs",
+      ".\src\queuePersistence.test.mjs",
+      ".\src\queueSessionBoundaries.test.mjs",
+      ".\src\sessionDrafts.test.mjs",
+      ".\src\submissionPayload.test.mjs",
+      ".\src\uiPolish.test.mjs",
+      ".\src\gptSizeSelection.test.mjs",
+      ".\src\i18n.test.mjs"
+    )
   } finally {
     Pop-Location
   }
@@ -66,7 +92,7 @@ Invoke-Step "Frontend tests" {
 Invoke-Step "Frontend build" {
   Push-Location $StudioDir
   try {
-    npm run build
+    Invoke-NativeCommand -Command "npm" -Arguments @("run", "build")
   } finally {
     Pop-Location
   }
@@ -74,20 +100,20 @@ Invoke-Step "Frontend build" {
 
 Invoke-Step "Backend checks" {
   $env:PYTHONUTF8 = "1"
-  python -m py_compile .\app.py
-  python -m unittest tests.test_studio_sessions tests.test_release_cache_busting
+  Invoke-NativeCommand -Command "python" -Arguments @("-m", "py_compile", ".\app.py")
+  Invoke-NativeCommand -Command "python" -Arguments @("-m", "unittest", "tests.test_studio_sessions", "tests.test_release_cache_busting")
 }
 
 Invoke-Step "Package clean zip" {
-  powershell -NoProfile -ExecutionPolicy Bypass -File $PackageScript -OutputPath $VersionedZip
+  Invoke-NativeCommand -Command "powershell" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PackageScript, "-OutputPath", $VersionedZip)
 }
 
 Invoke-Step "Package smoke" {
-  powershell -NoProfile -ExecutionPolicy Bypass -File $SmokeScript -ZipPath $VersionedZip
+  Invoke-NativeCommand -Command "powershell" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SmokeScript, "-ZipPath", $VersionedZip)
 }
 
 Invoke-Step "Local release preflight" {
-  powershell -NoProfile -ExecutionPolicy Bypass -File $PreflightScript -ExpectedVersion $Version -LocalOnly
+  Invoke-NativeCommand -Command "powershell" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PreflightScript, "-ExpectedVersion", $Version, "-LocalOnly")
 }
 
 Invoke-Step "Sync clean package" {
@@ -96,7 +122,7 @@ Invoke-Step "Sync clean package" {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
   $Args += "-SkipPackage"
-  powershell @Args
+  Invoke-NativeCommand -Command "powershell" -Arguments $Args
 }
 
 Invoke-Step "Destination verification" {
@@ -105,7 +131,7 @@ Invoke-Step "Destination verification" {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
   $Args += @("-ExpectedVersion", $Version)
-  powershell @Args
+  Invoke-NativeCommand -Command "powershell" -Arguments $Args
 }
 
 Write-Host ""

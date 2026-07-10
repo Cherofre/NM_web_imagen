@@ -97,6 +97,145 @@ function Get-DefaultDestinationRoot {
   return Resolve-CompanyShareRoot -RequestedRoot ""
 }
 
+function Get-RequiredReleaseManifestFiles {
+  return @(
+    "README.md",
+    "app.py",
+    "image_safety.py",
+    "storage.py",
+    "upstream.py",
+    "requirements.txt",
+    "VERSION",
+    "config.example.json",
+    "start_web.ps1",
+    "stop_web.ps1",
+    "start_web.bat",
+    "stop_web.bat",
+    "一键启动.bat",
+    "一键停止.bat",
+    "static/index.html",
+    "static/styles.css",
+    "static/app.js",
+    "static/studio/index.html",
+    "vendor/python/python-3.12.10-embed-amd64.zip"
+  )
+}
+
+function Assert-ReleaseRelativeManifest {
+  param([string[]]$Paths)
+
+  $Required = @(Get-RequiredReleaseManifestFiles)
+  $Exact = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $CaseInsensitive = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $AssetJsCount = 0
+  $AssetCssCount = 0
+  $WheelCount = 0
+
+  foreach ($RawPath in @($Paths)) {
+    if ([string]::IsNullOrWhiteSpace($RawPath)) {
+      throw "Release manifest contains an empty path."
+    }
+    $Path = $RawPath -replace "\\", "/"
+    if ($Path.StartsWith("/") -or $Path -match "^[A-Za-z]:") {
+      throw "Release manifest contains an absolute or drive path: $RawPath"
+    }
+    $Segments = @($Path -split "/")
+    if ($Segments -contains "" -or $Segments -contains "." -or $Segments -contains "..") {
+      throw "Release manifest contains an ambiguous path: $RawPath"
+    }
+    if (-not $Exact.Add($Path)) {
+      throw "Release manifest contains a duplicate path: $Path"
+    }
+    if (-not $CaseInsensitive.Add($Path)) {
+      throw "Release manifest contains a case-insensitive path collision: $Path"
+    }
+    if ($Required -ccontains $Path) {
+      continue
+    }
+    if ($Path -cmatch "^static/studio/assets/index-[A-Za-z0-9_-]+\.js$") {
+      $AssetJsCount += 1
+      continue
+    }
+    if ($Path -cmatch "^static/studio/assets/index-[A-Za-z0-9_-]+\.css$") {
+      $AssetCssCount += 1
+      continue
+    }
+    if ($Path -cmatch "^vendor/wheels/[^/]+\.whl$") {
+      $WheelCount += 1
+      continue
+    }
+    throw "Release manifest contains an unknown file: $Path"
+  }
+  foreach ($RequiredPath in $Required) {
+    if (-not $Exact.Contains($RequiredPath)) {
+      throw "Release manifest is missing required file: $RequiredPath"
+    }
+  }
+  if ($AssetJsCount -lt 1) {
+    throw "Release manifest must contain at least one Studio index-*.js asset."
+  }
+  if ($AssetCssCount -lt 1) {
+    throw "Release manifest must contain at least one Studio index-*.css asset."
+  }
+  if ($WheelCount -lt 1) {
+    throw "Release manifest must contain at least one vendor wheel."
+  }
+}
+
+function Get-ZipRelativeManifest {
+  param([System.IO.Compression.ZipArchive]$Zip)
+
+  $ExactEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $CaseInsensitiveEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $AllowedDirectories = @(
+    "$AppName/",
+    "$AppName/static/",
+    "$AppName/static/studio/",
+    "$AppName/static/studio/assets/",
+    "$AppName/vendor/",
+    "$AppName/vendor/python/",
+    "$AppName/vendor/wheels/"
+  )
+  $Paths = @()
+  foreach ($Entry in $Zip.Entries) {
+    $RawName = [string]$Entry.FullName
+    if ([string]::IsNullOrWhiteSpace($RawName)) {
+      throw "Package contains an empty ZIP entry name."
+    }
+    $Name = $RawName -replace "\\", "/"
+    if ($Name.StartsWith("/") -or $Name -match "^[A-Za-z]:") {
+      throw "Package contains an absolute or drive ZIP path: $RawName"
+    }
+    $SegmentPath = $Name.TrimEnd([char]"/")
+    $Segments = @($SegmentPath -split "/")
+    if ($Segments -contains "" -or $Segments -contains "." -or $Segments -contains "..") {
+      throw "Package contains an ambiguous ZIP path: $RawName"
+    }
+    if (-not $ExactEntries.Add($Name)) {
+      throw "Package contains a duplicate ZIP path: $Name"
+    }
+    if (-not $CaseInsensitiveEntries.Add($Name)) {
+      throw "Package contains a case-insensitive ZIP path collision: $Name"
+    }
+    if (-not $Name.StartsWith("$AppName/", [StringComparison]::Ordinal)) {
+      throw "Package entry is outside $AppName root: $Name"
+    }
+    if ($Name.EndsWith("/")) {
+      if ($AllowedDirectories -cnotcontains $Name) {
+        throw "Package contains an unknown directory entry: $Name"
+      }
+      continue
+    }
+    $RelativePath = $Name.Substring($AppName.Length + 1)
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+      throw "Package contains an empty relative file path."
+    }
+    $Paths += $RelativePath
+  }
+  Assert-ReleaseRelativeManifest -Paths $Paths
+  return @($Paths | Sort-Object)
+}
+
 function Assert-CleanPackageZip {
   param([string]$ZipPath)
 
@@ -136,12 +275,8 @@ function Assert-CleanPackageZip {
 
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
   try {
+    [void](Get-ZipRelativeManifest -Zip $Zip)
     $Names = @($Zip.Entries.FullName | ForEach-Object { $_ -replace "\\", "/" })
-    foreach ($Name in $Names) {
-      if (-not ($Name.StartsWith("$AppName/"))) {
-        throw "Package entry is outside $AppName root: $Name"
-      }
-    }
     foreach ($Pattern in $ForbiddenPatterns) {
       if (($Names -match $Pattern).Count -gt 0) {
         throw "Package contains excluded content matching: $Pattern"

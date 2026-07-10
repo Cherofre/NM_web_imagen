@@ -36,10 +36,189 @@ $ReleaseFiles = @(
   "一键停止.bat"
 )
 
-$ReleaseTrees = @(
+$ReleaseTreeRoots = @(
   "static",
   "vendor"
 )
+
+function Get-RequiredReleaseManifestFiles {
+  $Paths = @("README.md")
+  $Paths += $ReleaseFiles
+  $Paths += @(
+    "static/index.html",
+    "static/styles.css",
+    "static/app.js",
+    "static/studio/index.html",
+    "vendor/python/python-3.12.10-embed-amd64.zip"
+  )
+  return @($Paths)
+}
+
+function Assert-ReleaseRelativeManifest {
+  param([string[]]$Paths)
+
+  $Required = @(Get-RequiredReleaseManifestFiles)
+  $Exact = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $CaseInsensitive = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $AssetJsCount = 0
+  $AssetCssCount = 0
+  $WheelCount = 0
+
+  foreach ($RawPath in @($Paths)) {
+    if ([string]::IsNullOrWhiteSpace($RawPath)) {
+      throw "Release manifest contains an empty path."
+    }
+    $Path = $RawPath -replace "\\", "/"
+    if ($Path.StartsWith("/") -or $Path -match "^[A-Za-z]:") {
+      throw "Release manifest contains an absolute or drive path: $RawPath"
+    }
+    $Segments = @($Path -split "/")
+    if ($Segments -contains "" -or $Segments -contains "." -or $Segments -contains "..") {
+      throw "Release manifest contains an ambiguous path: $RawPath"
+    }
+    if (-not $Exact.Add($Path)) {
+      throw "Release manifest contains a duplicate path: $Path"
+    }
+    if (-not $CaseInsensitive.Add($Path)) {
+      throw "Release manifest contains a case-insensitive path collision: $Path"
+    }
+
+    if ($Required -ccontains $Path) {
+      continue
+    }
+    if ($Path -cmatch "^static/studio/assets/index-[A-Za-z0-9_-]+\.js$") {
+      $AssetJsCount += 1
+      continue
+    }
+    if ($Path -cmatch "^static/studio/assets/index-[A-Za-z0-9_-]+\.css$") {
+      $AssetCssCount += 1
+      continue
+    }
+    if ($Path -cmatch "^vendor/wheels/[^/]+\.whl$") {
+      $WheelCount += 1
+      continue
+    }
+    throw "Release manifest contains an unknown file: $Path"
+  }
+
+  foreach ($RequiredPath in $Required) {
+    if (-not $Exact.Contains($RequiredPath)) {
+      throw "Release manifest is missing required file: $RequiredPath"
+    }
+  }
+  if ($AssetJsCount -lt 1) {
+    throw "Release manifest must contain at least one Studio index-*.js asset."
+  }
+  if ($AssetCssCount -lt 1) {
+    throw "Release manifest must contain at least one Studio index-*.css asset."
+  }
+  if ($WheelCount -lt 1) {
+    throw "Release manifest must contain at least one vendor wheel."
+  }
+}
+
+function Assert-ManifestEquals {
+  param(
+    [string[]]$Expected,
+    [string[]]$Actual,
+    [string]$Name
+  )
+
+  Assert-ReleaseRelativeManifest -Paths $Expected
+  Assert-ReleaseRelativeManifest -Paths $Actual
+  $ActualSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  foreach ($Path in $Actual) {
+    [void]$ActualSet.Add(($Path -replace "\\", "/"))
+  }
+  if ($Expected.Count -ne $Actual.Count) {
+    throw "$Name manifest count differs: expected $($Expected.Count), got $($Actual.Count)."
+  }
+  foreach ($Path in $Expected) {
+    if (-not $ActualSet.Contains(($Path -replace "\\", "/"))) {
+      throw "$Name manifest is missing expected file: $Path"
+    }
+  }
+}
+
+function Get-ReleaseTreeManifest {
+  $ScriptRoot = $ScriptDir.TrimEnd("\", "/")
+  $PrefixLength = $ScriptRoot.Length + 1
+  $Paths = @()
+  foreach ($RootName in $ReleaseTreeRoots) {
+    $RootPath = Join-Path $ScriptDir $RootName
+    if (-not (Test-Path -LiteralPath $RootPath -PathType Container)) {
+      throw "Required release tree is missing: $RootName"
+    }
+    Get-ChildItem -LiteralPath $RootPath -Recurse -Force -File | ForEach-Object {
+      $Paths += $_.FullName.Substring($PrefixLength) -replace "\\", "/"
+    }
+  }
+  return @($Paths | Sort-Object)
+}
+
+function Get-DirectoryRelativeManifest {
+  param([string]$Root)
+
+  $ResolvedRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root).TrimEnd("\", "/")
+  $PrefixLength = $ResolvedRoot.Length + 1
+  return @(Get-ChildItem -LiteralPath $ResolvedRoot -Recurse -Force -File | ForEach-Object {
+    $_.FullName.Substring($PrefixLength) -replace "\\", "/"
+  } | Sort-Object)
+}
+
+function Get-ZipRelativeManifest {
+  param([System.IO.Compression.ZipArchive]$Zip)
+
+  $ExactEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  $CaseInsensitiveEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $AllowedDirectories = @(
+    "$AppName/",
+    "$AppName/static/",
+    "$AppName/static/studio/",
+    "$AppName/static/studio/assets/",
+    "$AppName/vendor/",
+    "$AppName/vendor/python/",
+    "$AppName/vendor/wheels/"
+  )
+  $Paths = @()
+  foreach ($Entry in $Zip.Entries) {
+    $RawName = [string]$Entry.FullName
+    if ([string]::IsNullOrWhiteSpace($RawName)) {
+      throw "Package contains an empty ZIP entry name."
+    }
+    $Name = $RawName -replace "\\", "/"
+    if ($Name.StartsWith("/") -or $Name -match "^[A-Za-z]:") {
+      throw "Package contains an absolute or drive ZIP path: $RawName"
+    }
+    $SegmentPath = $Name.TrimEnd([char]"/")
+    $Segments = @($SegmentPath -split "/")
+    if ($Segments -contains "" -or $Segments -contains "." -or $Segments -contains "..") {
+      throw "Package contains an ambiguous ZIP path: $RawName"
+    }
+    if (-not $ExactEntries.Add($Name)) {
+      throw "Package contains a duplicate ZIP path: $Name"
+    }
+    if (-not $CaseInsensitiveEntries.Add($Name)) {
+      throw "Package contains a case-insensitive ZIP path collision: $Name"
+    }
+    if (-not $Name.StartsWith("$AppName/", [StringComparison]::Ordinal)) {
+      throw "Package entry is outside $AppName root: $Name"
+    }
+    if ($Name.EndsWith("/")) {
+      if ($AllowedDirectories -cnotcontains $Name) {
+        throw "Package contains an unknown directory entry: $Name"
+      }
+      continue
+    }
+    $RelativePath = $Name.Substring($AppName.Length + 1)
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+      throw "Package contains an empty relative file path."
+    }
+    $Paths += $RelativePath
+  }
+  Assert-ReleaseRelativeManifest -Paths $Paths
+  return @($Paths | Sort-Object)
+}
 
 function Write-PackageReadme {
   $ReadmePath = Join-Path $TempAppDir "README.md"
@@ -145,17 +324,19 @@ function Test-TextClean {
 }
 
 function Test-PackageZipClean {
-  param([string]$ZipPath)
+  param(
+    [string]$ZipPath,
+    [string[]]$ExpectedManifest = @()
+  )
 
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
   try {
-    $Names = @($Zip.Entries.FullName | ForEach-Object { $_ -replace "\\", "/" })
-    foreach ($Name in $Names) {
-      if (-not ($Name.StartsWith("$AppName/"))) {
-        throw "Package entry is outside $AppName root: $Name"
-      }
+    $RelativeManifest = @(Get-ZipRelativeManifest -Zip $Zip)
+    if ($ExpectedManifest.Count -gt 0) {
+      Assert-ManifestEquals -Expected $ExpectedManifest -Actual $RelativeManifest -Name "ZIP"
     }
+    $Names = @($Zip.Entries.FullName | ForEach-Object { $_ -replace "\\", "/" })
 
     foreach ($Pattern in (Get-ForbiddenPackagePatterns)) {
       if (($Names -match $Pattern).Count -gt 0) {
@@ -199,38 +380,50 @@ if (Test-Path -LiteralPath $TempRoot) {
 New-Item -ItemType Directory -Path $TempAppDir -Force | Out-Null
 
 try {
+  if (Test-Path -LiteralPath $OutputPath) {
+    Remove-Item -LiteralPath $OutputPath -Force
+  }
+
   foreach ($RelativePath in $ReleaseFiles) {
     $SourcePath = Join-Path $ScriptDir $RelativePath
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
       throw "Required release file is missing: $RelativePath"
     }
-    Copy-Item -LiteralPath $SourcePath -Destination (Join-Path $TempAppDir $RelativePath) -Force
   }
 
-  foreach ($RelativePath in $ReleaseTrees) {
-    $SourcePath = Join-Path $ScriptDir $RelativePath
-    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
-      throw "Required release tree is missing: $RelativePath"
+  $TreeManifest = @(Get-ReleaseTreeManifest)
+  $ExpectedManifest = @("README.md") + $ReleaseFiles + $TreeManifest
+  Assert-ReleaseRelativeManifest -Paths $ExpectedManifest
+
+  foreach ($RelativePath in @($ReleaseFiles + $TreeManifest)) {
+    $SourcePath = Join-Path $ScriptDir ($RelativePath -replace "/", "\")
+    $TargetPath = Join-Path $TempAppDir ($RelativePath -replace "/", "\")
+    $TargetDir = Split-Path -Parent $TargetPath
+    if (-not [string]::IsNullOrWhiteSpace($TargetDir)) {
+      New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
     }
-    Copy-Item -LiteralPath $SourcePath -Destination $TempAppDir -Recurse -Force
+    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
   }
 
   Write-PackageReadme
+  $StagedManifest = @(Get-DirectoryRelativeManifest -Root $TempAppDir)
+  Assert-ManifestEquals -Expected $ExpectedManifest -Actual $StagedManifest -Name "Staged directory"
 
   $OutputDir = Split-Path -Parent $OutputPath
   if (-not [string]::IsNullOrWhiteSpace($OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
   }
 
-  if (Test-Path -LiteralPath $OutputPath) {
-    Remove-Item -LiteralPath $OutputPath -Force
-  }
-
   Compress-Archive -Path $TempAppDir -DestinationPath $OutputPath -Force
-  Test-PackageZipClean -ZipPath $OutputPath
+  Test-PackageZipClean -ZipPath $OutputPath -ExpectedManifest $ExpectedManifest
   Write-Host "Package created: $OutputPath"
-  Write-Host "Win64 offline package: copied only the explicit release files and trees."
+  Write-Host "Win64 offline package: copied only the exact release manifest."
   Write-Host "Release scripts, tests, ledgers, local config, outputs, logs, saved images, local .venv/.runtime and browser caches remain outside the package."
+} catch {
+  if (Test-Path -LiteralPath $OutputPath) {
+    Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
+  }
+  throw
 } finally {
   if (Test-Path -LiteralPath $TempRoot) {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force

@@ -24,6 +24,39 @@ WINDOWS_RELEASE_SCRIPTS = (
     "release_package_smoke.ps1",
     "sync_release_to_g.ps1",
 )
+RELEASE_ROOT_FILES = (
+    "app.py",
+    "image_safety.py",
+    "storage.py",
+    "upstream.py",
+    "requirements.txt",
+    "VERSION",
+    "config.example.json",
+    "start_web.ps1",
+    "stop_web.ps1",
+    "start_web.bat",
+    "stop_web.bat",
+    "一键启动.bat",
+    "一键停止.bat",
+)
+RELEASE_STATIC_FILES = (
+    "static/index.html",
+    "static/styles.css",
+    "static/app.js",
+    "static/studio/index.html",
+    "static/studio/assets/index-test.js",
+    "static/studio/assets/index-test.css",
+)
+RELEASE_VENDOR_FILES = (
+    "vendor/python/python-3.12.10-embed-amd64.zip",
+    "vendor/wheels/demo-py3-none-any.whl",
+)
+VALID_RELEASE_FILES = (
+    "README.md",
+    *RELEASE_ROOT_FILES,
+    *RELEASE_STATIC_FILES,
+    *RELEASE_VENDOR_FILES,
+)
 
 
 def run_powershell(
@@ -58,6 +91,7 @@ def invoke_script_function(
     *,
     env: dict[str, str] | None = None,
     support_functions: tuple[str, ...] = (),
+    load_all_functions: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = r"""
 $ErrorActionPreference = 'Stop'
@@ -71,17 +105,27 @@ $Ast = [System.Management.Automation.Language.Parser]::ParseFile(
 if ($Errors.Count -gt 0) {
   throw ($Errors | ForEach-Object { $_.Message } | Out-String)
 }
-$FunctionNames = $env:CODEX_FUNCTION_NAMES.Split("|")
-foreach ($FunctionName in $FunctionNames) {
-  $Function = $Ast.Find({
+if ($env:CODEX_LOAD_ALL_FUNCTIONS -eq "1") {
+  $Functions = $Ast.FindAll({
     param($Node)
-    $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-      $Node.Name -eq $FunctionName
+    $Node -is [System.Management.Automation.Language.FunctionDefinitionAst]
   }, $true)
-  if ($null -eq $Function) {
-    throw "Function was not found: $FunctionName"
+  foreach ($Function in $Functions) {
+    Invoke-Expression $Function.Extent.Text
   }
-  Invoke-Expression $Function.Extent.Text
+} else {
+  $FunctionNames = $env:CODEX_FUNCTION_NAMES.Split("|")
+  foreach ($FunctionName in $FunctionNames) {
+    $Function = $Ast.Find({
+      param($Node)
+      $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $Node.Name -eq $FunctionName
+    }, $true)
+    if ($null -eq $Function) {
+      throw "Function was not found: $FunctionName"
+    }
+    Invoke-Expression $Function.Extent.Text
+  }
 }
 Invoke-Expression $env:CODEX_FUNCTION_INVOCATION
 """
@@ -89,10 +133,66 @@ Invoke-Expression $env:CODEX_FUNCTION_INVOCATION
         "CODEX_SCRIPT_PATH": str(script_path),
         "CODEX_FUNCTION_NAMES": "|".join((*support_functions, function_name)),
         "CODEX_FUNCTION_INVOCATION": invocation,
+        "CODEX_LOAD_ALL_FUNCTIONS": "1" if load_all_functions else "0",
     }
     if env:
         process_env.update(env)
     return run_powershell(["-Command", command], env=process_env)
+
+
+def create_release_source(root: Path) -> Path:
+    source = root / "source"
+    source.mkdir()
+    shutil.copy2(ROOT / "package_web_tool.ps1", source / "package_web_tool.ps1")
+    for name in RELEASE_ROOT_FILES:
+        content = "1.0.5\n" if name == "VERSION" else f"fixture: {name}\n"
+        (source / name).write_text(content, encoding="utf-8")
+
+    studio_assets = source / "static" / "studio" / "assets"
+    studio_assets.mkdir(parents=True)
+    (source / "static" / "index.html").write_text("classic", encoding="utf-8")
+    (source / "static" / "styles.css").write_text("body{}", encoding="utf-8")
+    (source / "static" / "app.js").write_text("void 0;", encoding="utf-8")
+    (source / "static" / "studio" / "index.html").write_text(
+        '<link href="./assets/index-test.css" rel="stylesheet">\n'
+        '<script defer src="./assets/index-test.js"></script>\n',
+        encoding="utf-8",
+    )
+    (studio_assets / "index-test.css").write_text("body{}", encoding="utf-8")
+    (studio_assets / "index-test.js").write_text("void 0;", encoding="utf-8")
+
+    python_dir = source / "vendor" / "python"
+    wheels_dir = source / "vendor" / "wheels"
+    python_dir.mkdir(parents=True)
+    wheels_dir.mkdir()
+    (python_dir / "python-3.12.10-embed-amd64.zip").write_bytes(b"portable-python")
+    (wheels_dir / "demo-py3-none-any.whl").write_bytes(b"wheel")
+    return source
+
+
+def write_release_zip(
+    path: Path,
+    *,
+    omit: tuple[str, ...] = (),
+    extras: tuple[tuple[str, bytes], ...] = (),
+    duplicates: tuple[str, ...] = (),
+) -> None:
+    omitted = set(omit)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for relative_path in VALID_RELEASE_FILES:
+            if relative_path in omitted:
+                continue
+            content = b"portable"
+            if relative_path == "static/studio/index.html":
+                content = (
+                    b'<link href="./assets/index-test.css" rel="stylesheet">\n'
+                    b'<script defer src="./assets/index-test.js"></script>\n'
+                )
+            archive.writestr(f"NM_web_imagen/{relative_path}", content)
+        for relative_path in duplicates:
+            archive.writestr(f"NM_web_imagen/{relative_path}", b"duplicate")
+        for entry_name, content in extras:
+            archive.writestr(entry_name, content)
 
 
 class ReleaseCacheBustingTests(unittest.TestCase):
@@ -415,11 +515,13 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_one_click_release_runs_checks_before_sync(self) -> None:
         script = (ROOT / "release_one_click.ps1").read_text(encoding="utf-8")
 
-        self.assertIn("node --test", script)
+        self.assertIn("function Invoke-NativeCommand", script)
+        self.assertIn('-Command "node"', script)
+        self.assertIn('"--test"', script)
         self.assertIn("generationQueue.test.mjs", script)
-        self.assertIn("npm run build", script)
-        self.assertIn("python -m py_compile .\\app.py", script)
-        self.assertIn("python -m unittest tests.test_studio_sessions tests.test_release_cache_busting", script)
+        self.assertIn('-Command "npm" -Arguments @("run", "build")', script)
+        self.assertIn('-Command "python" -Arguments @("-m", "py_compile", ".\\app.py")', script)
+        self.assertIn('"tests.test_studio_sessions", "tests.test_release_cache_busting"', script)
         self.assertIn("failed with exit code", script)
         self.assertIn("Package clean zip", script)
         self.assertIn("Package smoke", script)
@@ -437,6 +539,51 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn("release_package_smoke.ps1", script)
         self.assertIn("sync_release_to_g.ps1", script)
         self.assertIn("release_preflight.ps1", script)
+
+    def test_one_click_release_stops_on_first_native_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="release native failure ") as folder:
+            root = Path(folder)
+            source = root / "NM_web_imagen"
+            fake_bin = root / "fake-bin"
+            source.mkdir()
+            fake_bin.mkdir()
+            (source / "studio-web").mkdir()
+            shutil.copy2(ROOT / "release_one_click.ps1", source / "release_one_click.ps1")
+            for name in (
+                "package_web_tool.ps1",
+                "release_package_smoke.ps1",
+                "release_preflight.ps1",
+                "sync_release_to_g.ps1",
+            ):
+                (source / name).write_text("fixture", encoding="utf-8")
+            (source / "VERSION").write_text("1.0.5\n", encoding="utf-8")
+
+            (fake_bin / "node.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
+            (fake_bin / "npm.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
+            (fake_bin / "python.cmd").write_text(
+                '@echo off\nif /I "%1"=="-m" if /I "%2"=="py_compile" exit /b 7\n'
+                "exit /b 0\n",
+                encoding="ascii",
+            )
+            (fake_bin / "powershell.cmd").write_text(
+                '@echo off\necho %*>>"%CODEX_GATE_LOG%"\nexit /b 0\n',
+                encoding="ascii",
+            )
+            gate_log = root / "release-gates.log"
+
+            result = run_powershell(
+                ["-File", str(source / "release_one_click.ps1")],
+                cwd=source,
+                env={
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "CODEX_GATE_LOG": str(gate_log),
+                },
+            )
+            gate_calls = gate_log.read_text(encoding="utf-8") if gate_log.exists() else ""
+
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("exit code 7", result.stdout + result.stderr)
+        self.assertFalse(gate_calls.strip(), gate_calls)
 
     def test_package_smoke_uses_only_extracted_package_and_started_pid(self) -> None:
         path = ROOT / "release_package_smoke.ps1"
@@ -490,17 +637,14 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             shutil.copy2(ROOT / "release_preflight.ps1", app_dir / "release_preflight.ps1")
             (app_dir / "VERSION").write_text("1.0.5\n", encoding="utf-8")
             (studio_dir / "index.html").write_text(
-                '<link href="./assets/app.css" rel="stylesheet">\n'
-                '<script defer src="./assets/app.js"></script>\n',
+                '<link href="./assets/index-test.css" rel="stylesheet">\n'
+                '<script defer src="./assets/index-test.js"></script>\n',
                 encoding="utf-8",
             )
-            (assets_dir / "app.css").write_text("body{}", encoding="utf-8")
-            (assets_dir / "app.js").write_text("void 0;", encoding="utf-8")
+            (assets_dir / "index-test.css").write_text("body{}", encoding="utf-8")
+            (assets_dir / "index-test.js").write_text("void 0;", encoding="utf-8")
             package_path = root / "NM_web_imagen-v1.0.5.zip"
-            with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr("NM_web_imagen/README.md", "portable")
-                archive.writestr("NM_web_imagen/static/studio/assets/app.css", "body{}")
-                archive.writestr("NM_web_imagen/static/studio/assets/app.js", "void 0;")
+            write_release_zip(package_path)
 
             result = run_powershell(
                 [
@@ -538,7 +682,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             "一键停止.bat",
         ):
             self.assertIn(f'"{name}"', script)
-        self.assertIn("$ReleaseTrees = @(", script)
+        self.assertIn("$ReleaseTreeRoots = @(", script)
         self.assertIn('"static"', script)
         self.assertIn('"vendor"', script)
         self.assertNotIn("$ExcludedDirs", script)
@@ -549,6 +693,11 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             re.compile(r"Get-ChildItem\s+-LiteralPath\s+\$ScriptDir\s+-Recurse", re.IGNORECASE),
         )
         self.assertIn("Test-PackageZipClean", script)
+        self.assertIn("Assert-ReleaseRelativeManifest", script)
+        self.assertIn("Assert-ManifestEquals", script)
+        self.assertIn("Get-ZipRelativeManifest", script)
+        self.assertIn("index-[A-Za-z0-9_-]+", script)
+        self.assertIn("vendor/wheels/[^/]+", script)
         self.assertIn("$AppName-v$Version.zip", script)
         self.assertIn("Write-PackageReadme", script)
 
@@ -563,39 +712,9 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             self.assertIn(forbidden_pattern, script, name)
 
     def test_package_manifest_is_allowlisted_and_ignores_nested_chinese_privacy_file(self) -> None:
-        release_files = (
-            "app.py",
-            "image_safety.py",
-            "storage.py",
-            "upstream.py",
-            "requirements.txt",
-            "VERSION",
-            "config.example.json",
-            "start_web.ps1",
-            "stop_web.ps1",
-            "start_web.bat",
-            "stop_web.bat",
-            "一键启动.bat",
-            "一键停止.bat",
-        )
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            source = root / "source"
-            source.mkdir()
-            shutil.copy2(ROOT / "package_web_tool.ps1", source / "package_web_tool.ps1")
-            for name in release_files:
-                content = "1.0.5\n" if name == "VERSION" else f"fixture: {name}\n"
-                (source / name).write_text(content, encoding="utf-8")
-            (source / "static").mkdir()
-            (source / "static" / "asset.txt").write_text("asset", encoding="utf-8")
-            (source / "vendor" / "python").mkdir(parents=True)
-            (source / "vendor" / "wheels").mkdir()
-            (source / "vendor" / "python" / "python-3.12.10-embed-amd64.zip").write_bytes(
-                b"portable-python"
-            )
-            (source / "vendor" / "wheels" / "demo-py3-none-any.whl").write_bytes(
-                b"wheel"
-            )
+            source = create_release_source(root)
             privacy_dir = source / "临时资料" / "客户 A"
             privacy_dir.mkdir(parents=True)
             (privacy_dir / "企业微信截图-隐私.txt").write_text(
@@ -621,16 +740,148 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
                     if not name.endswith("/")
                 }
 
-        expected = {f"NM_web_imagen/{name}" for name in release_files}
-        expected.update(
-            {
-                "NM_web_imagen/README.md",
-                "NM_web_imagen/static/asset.txt",
-                "NM_web_imagen/vendor/python/python-3.12.10-embed-amd64.zip",
-                "NM_web_imagen/vendor/wheels/demo-py3-none-any.whl",
-            }
-        )
+        expected = {f"NM_web_imagen/{name}" for name in VALID_RELEASE_FILES}
         self.assertEqual(expected, manifest)
+
+    def test_package_rejects_unknown_files_inside_release_trees(self) -> None:
+        unknown_files = (
+            ("vendor/private/credentials.json", b"private"),
+            ("vendor/private/client.pem", b"private"),
+            ("static/studio/assets/debug.sqlite", b"debug"),
+            ("vendor/tools/release_package_smoke.ps1", b"internal"),
+        )
+        cases = tuple(
+            (relative_path, ((relative_path, content),))
+            for relative_path, content in unknown_files
+        ) + (
+            ("combined", unknown_files),
+        )
+        for label, additions in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                source = create_release_source(root)
+                for relative_path, content in additions:
+                    path = source / relative_path
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(content)
+                output_path = root / "package.zip"
+
+                result = run_powershell(
+                    [
+                        "-File",
+                        str(source / "package_web_tool.ps1"),
+                        "-OutputPath",
+                        str(output_path),
+                    ],
+                    cwd=source,
+                )
+
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertFalse(output_path.exists(), label)
+
+    def test_package_rejects_empty_or_incomplete_release_trees(self) -> None:
+        cases = (
+            "empty-static",
+            "missing-static-root-file",
+            "missing-studio-js",
+            "empty-vendor",
+            "missing-portable-python",
+            "missing-wheels",
+        )
+        for label in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                source = create_release_source(root)
+                if label == "empty-static":
+                    shutil.rmtree(source / "static")
+                    (source / "static").mkdir()
+                elif label == "missing-static-root-file":
+                    (source / "static" / "styles.css").unlink()
+                elif label == "missing-studio-js":
+                    (source / "static" / "studio" / "assets" / "index-test.js").unlink()
+                elif label == "empty-vendor":
+                    shutil.rmtree(source / "vendor")
+                    (source / "vendor").mkdir()
+                elif label == "missing-portable-python":
+                    (source / "vendor" / "python" / "python-3.12.10-embed-amd64.zip").unlink()
+                elif label == "missing-wheels":
+                    (source / "vendor" / "wheels" / "demo-py3-none-any.whl").unlink()
+                output_path = root / "package.zip"
+
+                result = run_powershell(
+                    [
+                        "-File",
+                        str(source / "package_web_tool.ps1"),
+                        "-OutputPath",
+                        str(output_path),
+                    ],
+                    cwd=source,
+                )
+
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertFalse(output_path.exists(), label)
+
+    def test_all_release_zip_validators_reject_ambiguous_or_inexact_manifests(self) -> None:
+        variants = (
+            (
+                "nested-unknown",
+                {},
+                (("NM_web_imagen/vendor/private/client.pem", b"private"),),
+            ),
+            (
+                "traversal",
+                {},
+                (("NM_web_imagen/../evil.txt", b"evil"),),
+            ),
+            ("absolute", {}, (("/absolute.txt", b"evil"),)),
+            ("drive", {}, (("C:/evil.txt", b"evil"),)),
+            (
+                "case-collision",
+                {},
+                (("NM_web_imagen/App.py", b"collision"),),
+            ),
+            ("duplicate", {"duplicates": ("app.py",)}, ()),
+            ("missing-required", {"omit": ("static/styles.css",)}, ()),
+        )
+        validators = (
+            (
+                "package",
+                ROOT / "package_web_tool.ps1",
+                "Test-PackageZipClean",
+                "$AppName='NM_web_imagen'; Test-PackageZipClean -ZipPath $env:CODEX_ZIP",
+            ),
+            (
+                "preflight",
+                ROOT / "release_preflight.ps1",
+                "Test-ZipClean",
+                "$AppName='NM_web_imagen'; Test-ZipClean -ZipPath $env:CODEX_ZIP "
+                "-ExpectedJs 'index-test.js' -ExpectedCss 'index-test.css'",
+            ),
+            (
+                "sync",
+                ROOT / "sync_release_to_g.ps1",
+                "Assert-CleanPackageZip",
+                "$AppName='NM_web_imagen'; Assert-CleanPackageZip -ZipPath $env:CODEX_ZIP",
+            ),
+        )
+        for variant, options, extras in variants:
+            with tempfile.TemporaryDirectory() as folder:
+                zip_path = Path(folder) / f"{variant}.zip"
+                write_release_zip(zip_path, extras=extras, **options)
+                for validator, script_path, function_name, invocation in validators:
+                    with self.subTest(variant=variant, validator=validator):
+                        result = invoke_script_function(
+                            script_path,
+                            function_name,
+                            invocation,
+                            env={"CODEX_ZIP": str(zip_path)},
+                            load_all_functions=True,
+                        )
+                        self.assertNotEqual(
+                            0,
+                            result.returncode,
+                            result.stdout + result.stderr,
+                        )
 
     def test_stop_script_only_stops_current_tool_backend(self) -> None:
         script = (ROOT / "stop_web.ps1").read_text(encoding="utf-8")
