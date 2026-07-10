@@ -269,3 +269,106 @@ test("direct cancel rejection is shared and remove still finalizes once", async 
   assert.equal(settlements.has(settlementOptions.jobId), false);
   assert.equal(removals.has(settlementOptions.jobId), false);
 });
+
+test("clear completed jobs shares deferred removal and clears runtime tracking once", async () => {
+  assert.equal(typeof jobProtocol.removeCompletedQueueJobs, "function");
+  const jobs = [
+    { id: "job-success", status: "success" },
+    { id: "job-error", status: "error" },
+    { id: "job-direct-canceled", status: "canceled" },
+    { id: "job-queued", status: "queued" },
+    { id: "job-running", status: "running" },
+  ];
+  const terminalIds = new Set(["job-success", "job-error", "job-direct-canceled"]);
+  const visibleIds = new Set(jobs.map((job) => job.id));
+  const settlements = new Map();
+  const removals = new Map();
+  const canceling = new Set();
+  const abortControllers = new Map(jobs.map((job) => [job.id, { id: job.id }]));
+  const payloads = new Map(jobs.map((job) => [job.id, { prompt: job.id }]));
+  const removeCounts = new Map();
+  let cancelCalls = 0;
+  let resolveCancel = () => {};
+  const deferredCancel = new Promise((resolve) => {
+    resolveCancel = resolve;
+  });
+
+  function settlementOptions(jobId, requestCancellation) {
+    const abortController = abortControllers.get(jobId);
+    return {
+      jobId,
+      pending: settlements,
+      requestCancellation,
+      markCanceling: () => canceling.add(jobId),
+      requestCancel: () => {
+        cancelCalls += 1;
+        return deferredCancel;
+      },
+      abort: () => {},
+      cleanup: () => {
+        abortControllers.delete(jobId);
+        payloads.delete(jobId);
+        if (!abortController) canceling.delete(jobId);
+      },
+    };
+  }
+
+  function clearRuntime(jobId) {
+    settlements.delete(jobId);
+    removals.delete(jobId);
+    canceling.delete(jobId);
+    abortControllers.delete(jobId);
+    payloads.delete(jobId);
+  }
+
+  function removeQueueJob(job) {
+    return jobProtocol.cancelJobThenRemove({
+      jobId: job.id,
+      pending: removals,
+      settle: () => jobProtocol.settleQueueCancellation(
+        settlementOptions(job.id, false),
+      ),
+      remove: () => {
+        removeCounts.set(job.id, (removeCounts.get(job.id) || 0) + 1);
+        clearRuntime(job.id);
+        visibleIds.delete(job.id);
+      },
+    });
+  }
+
+  const directJob = jobs.find((job) => job.id === "job-direct-canceled");
+  const directSettlement = jobProtocol.settleQueueCancellation(
+    settlementOptions(directJob.id, true),
+  );
+  const firstClear = jobProtocol.removeCompletedQueueJobs(jobs, removeQueueJob);
+  const secondClear = jobProtocol.removeCompletedQueueJobs(jobs, removeQueueJob);
+  const rowRemove = removeQueueJob(directJob);
+  await Promise.resolve();
+
+  assert.equal(cancelCalls, 1);
+  assert.equal(visibleIds.has(directJob.id), true);
+  assert.equal(removeCounts.get(directJob.id) || 0, 0);
+  assert.equal(settlements.get(directJob.id), directSettlement);
+  assert.equal(removals.get(directJob.id), rowRemove);
+  assert.equal(canceling.has(directJob.id), true);
+  assert.equal(abortControllers.has(directJob.id), true);
+  assert.equal(payloads.has(directJob.id), true);
+
+  resolveCancel("server-canceled");
+  await Promise.all([directSettlement, firstClear, secondClear, rowRemove]);
+
+  assert.deepEqual([...visibleIds].sort(), ["job-queued", "job-running"]);
+  for (const jobId of terminalIds) {
+    assert.equal(removeCounts.get(jobId), 1);
+    assert.equal(settlements.has(jobId), false);
+    assert.equal(removals.has(jobId), false);
+    assert.equal(canceling.has(jobId), false);
+    assert.equal(abortControllers.has(jobId), false);
+    assert.equal(payloads.has(jobId), false);
+  }
+  assert.equal(abortControllers.has("job-queued"), true);
+  assert.equal(abortControllers.has("job-running"), true);
+  assert.equal(payloads.has("job-queued"), true);
+  assert.equal(payloads.has("job-running"), true);
+  assert.equal(cancelCalls, 1);
+});

@@ -149,7 +149,7 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(appSource, /function removeQueueJob\(job: QueueJob\)/);
   assert.match(appSource, /const queueCancellationSettlementsRef = useRef<Map<string, Promise<unknown>>>\(new Map\(\)\);/);
   assert.match(appSource, /const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>\(new Map\(\)\);/);
-  assert.match(appSource, /void cancelJobThenRemove\(\{[\s\S]*settle:\s*\(\) => settleQueueJobCancellation\(job\),/);
+  assert.match(appSource, /return cancelJobThenRemove\(\{[\s\S]*settle:\s*\(\) => settleQueueJobCancellation\(job\),/);
   assert.match(appSource, /queueAbortControllersRef/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.cancel"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
   assert.match(appSource, /aria-label=\{`\$\{t\("queue\.retry"\)\} \$\{job\.prompt \|\| t\("submit\.generate"\)\}`\}/);
@@ -159,8 +159,17 @@ test("queue rows expose cancel retry apply and remove controls", () => {
   assert.match(cssBlock(".queue-job-actions button"), /width:\s*26px;[\s\S]*height:\s*26px;/);
 });
 
+test("clear completed queue jobs reuses removal settlement and runtime cleanup", () => {
+  assert.match(appSource, /function clearQueueJobRuntime\(jobId: string\)[\s\S]*queueCancellationSettlementsRef\.current\.delete\(jobId\);[\s\S]*pendingQueueRemovalsRef\.current\.delete\(jobId\);[\s\S]*cancelingQueueJobsRef\.current\.delete\(jobId\);[\s\S]*delete queueAbortControllersRef\.current\[jobId\];[\s\S]*delete queuePayloadsRef\.current\[jobId\];/);
+  assert.match(appSource, /function removeQueueJob\(job: QueueJob\)[\s\S]*return cancelJobThenRemove\(\{[\s\S]*remove:\s*\(\) => \{[\s\S]*clearQueueJobRuntime\(jobId\);[\s\S]*setQueueJobs\(\(items\) => items\.filter\(\(item\) => item\.id !== jobId\)\);/);
+  assert.match(appSource, /function clearCompletedQueueJobs\(\)[\s\S]*void removeCompletedQueueJobs\(queueJobs, removeQueueJob\);/);
+  assert.match(appSource, /onClick=\{clearCompletedQueueJobs\}>\{t\("queue\.clearCompleted"\)\}<\/button>/);
+  assert.match(appSource, /onClick=\{\(\) => void removeQueueJob\(job\)\}/);
+  assert.doesNotMatch(appSource, /onClick=\{\(\) => setQueueJobs\(\(items\) => items\.filter\(\(job\) => job\.status === "queued" \|\| job\.status === "running"\)\)\}/);
+});
+
 test("queue and chat requests share backend job cancellation protocol", () => {
-  assert.match(appSource, /import \{ appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, settleQueueCancellation, withJobId \} from "\.\/jobProtocol";/);
+  assert.match(appSource, /import \{ appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId \} from "\.\/jobProtocol";/);
   assert.match(appSource, /function createFormData\([\s\S]*jobId: string,[\s\S]*return appendJobId\(data, jobId\);/);
   assert.match(appSource, /function createChatPayload\([\s\S]*jobId: string,[\s\S]*return withJobId\(/);
   assert.match(appSource, /createFormData\([\s\S]*payload\.posterText,[\s\S]*payload\.jobId,[\s\S]*\)/);

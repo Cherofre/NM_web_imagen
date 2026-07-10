@@ -88,7 +88,7 @@ import {
 } from "./i18n";
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
-import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, settleQueueCancellation, withJobId } from "./jobProtocol";
+import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
 import { advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
@@ -1807,18 +1807,29 @@ function App() {
     window.setTimeout(() => promptRef.current?.focus(), 0);
   }
 
+  function clearQueueJobRuntime(jobId: string) {
+    queueCancellationSettlementsRef.current.delete(jobId);
+    pendingQueueRemovalsRef.current.delete(jobId);
+    cancelingQueueJobsRef.current.delete(jobId);
+    delete queueAbortControllersRef.current[jobId];
+    delete queuePayloadsRef.current[jobId];
+  }
+
   function removeQueueJob(job: QueueJob) {
     const jobId = job.id;
-    const remove = () => {
-      queueCancellationSettlementsRef.current.delete(jobId);
-      setQueueJobs((items) => items.filter((item) => item.id !== jobId));
-    };
-    void cancelJobThenRemove({
+    return cancelJobThenRemove({
       jobId,
       pending: pendingQueueRemovalsRef.current,
       settle: () => settleQueueJobCancellation(job),
-      remove,
+      remove: () => {
+        clearQueueJobRuntime(jobId);
+        setQueueJobs((items) => items.filter((item) => item.id !== jobId));
+      },
     });
+  }
+
+  function clearCompletedQueueJobs() {
+    void removeCompletedQueueJobs(queueJobs, removeQueueJob);
   }
 
   async function saveConfig() {
@@ -3547,7 +3558,7 @@ function App() {
                       <h3>{t("queue.title")}</h3>
                       <span>{activeQueueCount ? t("queue.active", { count: activeQueueCount }) : t("queue.done", { count: queueJobs.length })}</span>
                     </div>
-                    <button type="button" onClick={() => setQueueJobs((items) => items.filter((job) => job.status === "queued" || job.status === "running"))}>{t("queue.clearCompleted")}</button>
+                    <button type="button" onClick={clearCompletedQueueJobs}>{t("queue.clearCompleted")}</button>
                   </div>
                   <div className="queue-list">
                     {queueJobs.slice(0, 6).map((job) => {
@@ -3596,7 +3607,7 @@ function App() {
                             <button type="button" onClick={() => applyQueueJob(job)} aria-label={`${t("queue.applyPrompt")} ${job.prompt || t("submit.generate")}`} title={t("queue.applyPrompt")}>
                               <RotateCcw size={13} />
                             </button>
-                            <button type="button" onClick={() => removeQueueJob(job)} aria-label={`${t("queue.remove")} ${job.prompt || t("submit.generate")}`} title={job.status === "queued" || job.status === "running" ? t("queue.cancelRemove") : t("queue.remove")}>
+                            <button type="button" onClick={() => void removeQueueJob(job)} aria-label={`${t("queue.remove")} ${job.prompt || t("submit.generate")}`} title={job.status === "queued" || job.status === "running" ? t("queue.cancelRemove") : t("queue.remove")}>
                               <Trash2 size={13} />
                             </button>
                           </div>

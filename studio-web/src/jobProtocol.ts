@@ -111,3 +111,16 @@ export function cancelJobThenRemove<Result>({
   pending.set(jobId, operation);
   return operation;
 }
+
+export function removeCompletedQueueJobs<
+  Job extends { status: "queued" | "running" | "success" | "error" | "canceled" },
+>(
+  jobs: readonly Job[],
+  remove: (job: Job) => void | Promise<void>,
+) {
+  return Promise.all(
+    jobs
+      .filter((job) => job.status === "success" || job.status === "error" || job.status === "canceled")
+      .map((job) => remove(job)),
+  );
+}
