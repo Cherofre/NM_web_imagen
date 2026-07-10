@@ -244,15 +244,15 @@ test("session persistence defers heavy storage work while typing", () => {
   assert.match(timerBody, /void saveStudioSessionsOnce\(compactSessionsForStorage\(sessions\), activeSessionId\)/);
 });
 
-test("session persistence merges one revision conflict and retries exactly once", () => {
-  assert.match(appSource, /import \{ buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
+test("session persistence keeps one atomic server baseline and ignores stale responses", () => {
+  assert.match(appSource, /import \{ advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
   assert.match(appSource, /function normalizeSessionStatePayload\([\s\S]*revision:\s*normalizeSessionRevision\(source\.revision\)/);
   assert.match(appSource, /const sessionsRef = useRef<WorkbenchSession\[\]>\(sessions\);/);
-  assert.match(appSource, /const sessionRevisionRef = useRef\(1\);/);
-  assert.match(appSource, /const sessionBaselineRef = useRef<WorkbenchSession\[\]>\(\[\]\);/);
+  assert.match(appSource, /const sessionServerBaselineRef = useRef<\{[\s\S]*revision: number;[\s\S]*sessions: WorkbenchSession\[\];[\s\S]*\}>\(\{[\s\S]*revision: 1,[\s\S]*sessions: \[\],[\s\S]*\}\);/);
+  assert.doesNotMatch(appSource, /sessionRevisionRef/);
+  assert.doesNotMatch(appSource, /sessionBaselineRef/);
   assert.match(appSource, /const skipNextSessionSaveRef = useRef<\{ sessions: WorkbenchSession\[\]; activeSessionId: string \} \| null>\(null\);/);
   assert.match(appSource, /sessionsRef\.current = sessions;/);
-  assert.match(appSource, /sessionRevisionRef\.current = Math\.max\(sessionRevisionRef\.current, normalized\.revision\);/);
 
   const saveStart = appSource.indexOf("async function saveStudioSessionsOnce(");
   const saveEnd = appSource.indexOf("useEffect(() =>", saveStart);
@@ -260,20 +260,45 @@ test("session persistence merges one revision conflict and retries exactly once"
   assert.notEqual(saveStart, -1, "Missing bounded session save helper");
   assert.match(saveSource, /await runSessionSaveWithRetry\(\{/);
   assert.match(saveSource, /initialState:\s*\{ sessions: localSessions, activeSessionId: activeId \}/);
-  assert.match(saveSource, /send:\s*async \(state, _attempt\) => \{[\s\S]*buildSessionSavePayload\(sessionRevisionRef\.current, state\.activeSessionId, state\.sessions\)/);
+  assert.match(saveSource, /send:\s*async \(state, _attempt\) => \{[\s\S]*buildSessionSavePayload\(sessionServerBaselineRef\.current\.revision, state\.activeSessionId, state\.sessions\)/);
   assert.match(saveSource, /resolveConflict:\s*\(response\) => \{/);
   assert.match(saveSource, /const currentPayload = response\.payload\.current;/);
   assert.match(saveSource, /const latestLocalSessions = compactSessionsForStorage\(sessionsRef\.current\);/);
   assert.match(saveSource, /function applySessionConflictCurrent\(/);
-  assert.match(saveSource, /reconcileSessionConflictState\(\{[\s\S]*baselineSessions: sessionBaselineRef\.current,[\s\S]*localSessions: latestLocalSessions,[\s\S]*serverSessions: normalizedCurrent\.sessions,[\s\S]*serverRevision: normalizedCurrent\.revision,/);
-  assert.match(saveSource, /sessionBaselineRef\.current = compactSessionsForStorage\(reconciled\.baselineSessions\);/);
-  assert.match(saveSource, /sessionBaselineRef\.current = compactSessionsForStorage\(normalized\.sessions\);/);
+  assert.match(saveSource, /reconcileSessionConflictState\(\{[\s\S]*baseline: sessionServerBaselineRef\.current,[\s\S]*localSessions: latestLocalSessions,[\s\S]*serverSessions: normalizedCurrent\.sessions,[\s\S]*serverRevision: normalizedCurrent\.revision,/);
+  assert.match(saveSource, /sessionServerBaselineRef\.current = \{[\s\S]*revision: reconciled\.baseline\.revision,[\s\S]*sessions: compactSessionsForStorage\(reconciled\.baseline\.sessions\),[\s\S]*\};/);
+
+  const reconcileStart = saveSource.indexOf("const reconciled = reconcileSessionConflictState");
+  const staleGuardStart = saveSource.indexOf("if (!reconciled.accepted)", reconcileStart);
+  const conflictSetSessionsStart = saveSource.indexOf("setSessions(mergedSessions);", reconcileStart);
+  assert.notEqual(staleGuardStart, -1, "Missing stale conflict guard");
+  assert.ok(staleGuardStart < conflictSetSessionsStart, "Stale conflicts must return before updating session UI");
+  assert.match(saveSource.slice(staleGuardStart, conflictSetSessionsStart), /return \{[\s\S]*sessions: latestLocalSessions,[\s\S]*activeSessionId: latestActiveSessionId,[\s\S]*\};/);
+
+  const successStart = saveSource.indexOf('if (result.kind === "success")');
+  const exhaustedStart = saveSource.indexOf('if (result.kind === "exhausted")', successStart);
+  const successSource = saveSource.slice(successStart, exhaustedStart);
+  assert.match(successSource, /advanceSessionServerBaseline\(\{[\s\S]*baseline: sessionServerBaselineRef\.current,[\s\S]*serverRevision: normalized\.revision,[\s\S]*serverSessions: normalized\.sessions,[\s\S]*\}\)/);
+  assert.match(successSource, /if \(!advancedBaseline\.accepted\) return;/);
+  assert.ok(
+    successSource.indexOf("if (!advancedBaseline.accepted) return;") < successSource.indexOf("sessionServerBaselineRef.current ="),
+    "A stale save success must return before replacing the server baseline",
+  );
   assert.match(saveSource, /if \(result\.kind === "exhausted"\) \{[\s\S]*applySessionConflictCurrent\(current\);[\s\S]*setNotice\(t\("status\.sessionConflictRefresh"\)\);[\s\S]*return;/);
 
   const loadStart = appSource.indexOf("async function loadServerSessions()");
   const loadEnd = appSource.indexOf("void loadServerSessions();", loadStart);
   const loadSource = appSource.slice(loadStart, loadEnd);
-  assert.match(loadSource, /sessionBaselineRef\.current = compactSessionsForStorage\(normalized\.sessions\);/);
+  assert.match(loadSource, /advanceSessionServerBaseline\(\{[\s\S]*baseline: sessionServerBaselineRef\.current,[\s\S]*serverRevision: normalized\.revision,[\s\S]*serverSessions: normalized\.sessions,[\s\S]*\}\)/);
+  assert.match(loadSource, /if \(!advancedBaseline\.accepted\) return;/);
+  assert.ok(
+    loadSource.indexOf("if (!advancedBaseline.accepted) return;") < loadSource.indexOf("sessionServerBaselineRef.current ="),
+    "A stale initial snapshot must return before replacing the server baseline",
+  );
+  assert.ok(
+    loadSource.indexOf("if (!advancedBaseline.accepted) return;") < loadSource.indexOf("setSessions(normalized.sessions);"),
+    "A stale initial snapshot must return before replacing session UI",
+  );
   assert.match(saveSource, /skipNextSessionSaveRef\.current = \{ sessions: mergedSessions, activeSessionId: mergedActiveSessionId \};/);
   assert.match(saveSource, /setSessions\(mergedSessions\);/);
   assert.match(saveSource, /return \{[\s\S]*sessions:\s*compactSessionsForStorage\(mergedSessions\),[\s\S]*activeSessionId:\s*mergedActiveSessionId/);

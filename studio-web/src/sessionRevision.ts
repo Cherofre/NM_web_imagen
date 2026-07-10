@@ -79,6 +79,36 @@ export function buildSessionSavePayload<Session>(
   };
 }
 
+export function advanceSessionServerBaseline<Session extends SessionLike>({
+  baseline,
+  serverRevision,
+  serverSessions,
+}: {
+  baseline: { revision: number; sessions: readonly Session[] };
+  serverRevision: unknown;
+  serverSessions: readonly Session[];
+}) {
+  const baselineRevision = normalizeSessionRevision(baseline.revision);
+  const candidateRevision = normalizeSessionRevision(serverRevision);
+  if (candidateRevision < baselineRevision) {
+    return {
+      accepted: false,
+      baseline: {
+        revision: baselineRevision,
+        sessions: baseline.sessions.map((session) => ({ ...session })),
+      },
+    };
+  }
+
+  return {
+    accepted: true,
+    baseline: {
+      revision: Math.max(baselineRevision, candidateRevision),
+      sessions: serverSessions.map((session) => ({ ...session })),
+    },
+  };
+}
+
 export function mergeSessionsByUpdatedAt<Session extends SessionLike>(
   baselineSessions: readonly Session[],
   localSessions: readonly Session[],
@@ -115,20 +145,33 @@ export function mergeSessionsByUpdatedAt<Session extends SessionLike>(
 }
 
 export function reconcileSessionConflictState<Session extends SessionLike>({
-  baselineSessions,
+  baseline,
   localSessions,
   serverSessions,
   serverRevision,
 }: {
-  baselineSessions: readonly Session[];
+  baseline: { revision: number; sessions: readonly Session[] };
   localSessions: readonly Session[];
   serverSessions: readonly Session[];
   serverRevision: unknown;
 }) {
+  const advanced = advanceSessionServerBaseline({
+    baseline,
+    serverRevision,
+    serverSessions,
+  });
+  if (!advanced.accepted) {
+    return {
+      accepted: false,
+      baseline: advanced.baseline,
+      sessions: localSessions.map((session) => ({ ...session })),
+    };
+  }
+
   return {
-    revision: normalizeSessionRevision(serverRevision),
-    baselineSessions: serverSessions.map((session) => ({ ...session })),
-    sessions: mergeSessionsByUpdatedAt(baselineSessions, localSessions, serverSessions),
+    accepted: true,
+    baseline: advanced.baseline,
+    sessions: mergeSessionsByUpdatedAt(baseline.sessions, localSessions, serverSessions),
   };
 }
 

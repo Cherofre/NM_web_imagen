@@ -89,7 +89,7 @@ import {
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobBeforeAbort, cancelJobThenRemove, cancellationNotice, cancelJobUrl, withJobId } from "./jobProtocol";
-import { buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
+import { advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -1097,8 +1097,13 @@ function App() {
   const sessionSaveTimerRef = useRef<number | null>(null);
   const sessionsRef = useRef<WorkbenchSession[]>(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
-  const sessionRevisionRef = useRef(1);
-  const sessionBaselineRef = useRef<WorkbenchSession[]>([]);
+  const sessionServerBaselineRef = useRef<{
+    revision: number;
+    sessions: WorkbenchSession[];
+  }>({
+    revision: 1,
+    sessions: [],
+  });
   const skipNextSessionSaveRef = useRef<{ sessions: WorkbenchSession[]; activeSessionId: string } | null>(null);
   const initialScrollKeyRef = useRef("");
   const submitModeRef = useRef(submitMode);
@@ -1155,22 +1160,31 @@ function App() {
       normalizedCurrent: NonNullable<ReturnType<typeof normalizeSessionStatePayload>>,
     ) {
       const latestLocalSessions = compactSessionsForStorage(sessionsRef.current);
+      const latestActiveSessionId = activeSessionIdRef.current;
       const reconciled = reconcileSessionConflictState({
-        baselineSessions: sessionBaselineRef.current,
+        baseline: sessionServerBaselineRef.current,
         localSessions: latestLocalSessions,
         serverSessions: normalizedCurrent.sessions,
         serverRevision: normalizedCurrent.revision,
       });
+      if (!reconciled.accepted) {
+        return {
+          sessions: latestLocalSessions,
+          activeSessionId: latestActiveSessionId,
+        };
+      }
+
       const mergedSessions = reconciled.sessions;
-      const latestActiveSessionId = activeSessionIdRef.current;
       const mergedActiveSessionId = mergedSessions.some((session) => session.id === latestActiveSessionId)
         ? latestActiveSessionId
         : mergedSessions.some((session) => session.id === normalizedCurrent.activeSessionId)
         ? normalizedCurrent.activeSessionId
         : mergedSessions[0]?.id || "";
 
-      sessionRevisionRef.current = Math.max(sessionRevisionRef.current, reconciled.revision);
-      sessionBaselineRef.current = compactSessionsForStorage(reconciled.baselineSessions);
+      sessionServerBaselineRef.current = {
+        revision: reconciled.baseline.revision,
+        sessions: compactSessionsForStorage(reconciled.baseline.sessions),
+      };
       sessionsRef.current = mergedSessions;
       activeSessionIdRef.current = mergedActiveSessionId;
       skipNextSessionSaveRef.current = { sessions: mergedSessions, activeSessionId: mergedActiveSessionId };
@@ -1195,7 +1209,7 @@ function App() {
         const response = await fetch("/api/studio/sessions", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildSessionSavePayload(sessionRevisionRef.current, state.activeSessionId, state.sessions)),
+          body: JSON.stringify(buildSessionSavePayload(sessionServerBaselineRef.current.revision, state.activeSessionId, state.sessions)),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
         return { ok: response.ok, status: response.status, payload };
@@ -1220,8 +1234,16 @@ function App() {
         setNotice(t("status.sessionSaveFailed"));
         return;
       }
-      sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
-      sessionBaselineRef.current = compactSessionsForStorage(normalized.sessions);
+      const advancedBaseline = advanceSessionServerBaseline({
+        baseline: sessionServerBaselineRef.current,
+        serverRevision: normalized.revision,
+        serverSessions: normalized.sessions,
+      });
+      if (!advancedBaseline.accepted) return;
+      sessionServerBaselineRef.current = {
+        revision: advancedBaseline.baseline.revision,
+        sessions: compactSessionsForStorage(advancedBaseline.baseline.sessions),
+      };
       try {
         localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessionsRef.current)));
       } catch {
@@ -1337,8 +1359,16 @@ function App() {
         const payload = await response.json();
         const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
         if (!cancelled && normalized) {
-          sessionRevisionRef.current = Math.max(sessionRevisionRef.current, normalized.revision);
-          sessionBaselineRef.current = compactSessionsForStorage(normalized.sessions);
+          const advancedBaseline = advanceSessionServerBaseline({
+            baseline: sessionServerBaselineRef.current,
+            serverRevision: normalized.revision,
+            serverSessions: normalized.sessions,
+          });
+          if (!advancedBaseline.accepted) return;
+          sessionServerBaselineRef.current = {
+            revision: advancedBaseline.baseline.revision,
+            sessions: compactSessionsForStorage(advancedBaseline.baseline.sessions),
+          };
           if (normalized.sessions.length > 0) {
             sessionsRef.current = normalized.sessions;
             activeSessionIdRef.current = normalized.activeSessionId;
