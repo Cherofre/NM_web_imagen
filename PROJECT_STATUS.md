@@ -2,17 +2,17 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-10 +08:00
-- Phase: v1.0.6 P1 hardening Task 1 complete; Task 2 ready
-- Superpowers Phase: subagent-driven development; Task 2 implementation
+- Phase: v1.0.6 P1 hardening Tasks 1-2 complete; Task 3 ready
+- Superpowers Phase: subagent-driven development; Task 3 implementation
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: Task 1 is implemented and approved after TDD, spec review, code-quality review, and fresh controller verification. Production CORS is off by default, bind host is loopback-only, `/outputs` serves only extension/magic-matched raster files, uploads/session references use 25 MiB per-image and 150 MiB request limits, remote results use a 50 MiB streamed limit, and invalid GPT/Banana image payloads are discarded. Task 2 now addresses browser Key persistence, chat reference truthfulness, unsupported controls, and the Banana diagnostic contract.
-- Latest Verification: `python -m unittest tests.test_security_boundaries tests.test_studio_sessions tests.test_release_cache_busting -v` passed 85/85; `python -m py_compile .\app.py .\image_safety.py` passed; cumulative diff check passed; worktree clean at `f9b5dd7`.
+- Current Focus: Task 2 is implemented and approved after TDD, one spec-fix loop, independent spec review, independent code-quality review, and fresh controller verification. Studio/Classic browser storage removes legacy `api_key` values while backend `config.local.json` still stores deliberate secrets; chat is truthfully text-only and blocks all new reference intake without clearing existing composer images; unsupported edit/strength controls are hidden; Banana diagnostic/chat/generation share one authentication contract. Task 3 now addresses bounded threaded upstream execution, job cancellation, atomic JSON persistence, and session revision conflicts.
+- Latest Verification: Fresh controller phase-two matrix passed: frontend 44/44, Vite/TypeScript build with 1656 modules, backend Classic/Banana/session tests 36/36, `py_compile`, and `git diff --check`. Independent full regression passed frontend 73/73 and Python 93/93. Spec review is compliant; code-quality review found no Critical/Important and only two non-blocking test-strengthening suggestions.
 
 ## Resume Here
-- Start with: Task 2 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md` on branch `codex/p1-hardening-v1.0.6`.
+- Start with: Task 3 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md` on branch `codex/p1-hardening-v1.0.6`.
 - Superpowers phase: use `subagent-driven-development` and TDD; write each regression test red before production changes, then run spec and code-quality review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Current release candidate package: `NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.

@@ -3,17 +3,17 @@
 ## Now
 - [x] User selected one `codex/p1-hardening-v1.0.6` branch with four staged implementation slices.
 - [x] Created an isolated worktree and verified the v1.0.5 baseline: backend 44/44, frontend 61/61, TypeScript, and size rules pass.
-- [x] Wrote the approved architecture and acceptance design in `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`.
-- [x] User reviewed and approved the written design spec.
+- [x] Wrote `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md` and received the user's approval.
 - [x] Created and self-reviewed `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`.
 - [x] Execute and independently review Task 1: local API, outputs, strict raster validation, capacity limits, SSRF closure, and loopback-only host.
-- [ ] Execute Task 2 with TDD: remove browser Key persistence, make chat references truthful, hide unsupported controls, and fix Banana diagnostics.
+- [x] Execute and independently review Task 2: remove browser Key persistence, make chat references truthful, hide unsupported controls, and fix Banana diagnostics.
+- [ ] Execute Task 3 with TDD: bounded threaded upstream requests, server-visible cancellation, atomic JSON persistence, and session revision conflict handling.
 
 ## Handoff Notes
-- Start here: Task 2 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`, worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
-- Do not redo: P1 audit, design, plan, worktree setup, baseline, or Task 1 implementation/reviews.
-- Verify next: write Task 2 browser-persistence RED tests before changing frontend production code.
-- Do not claim: Task 2-5 or a v1.0.6 release candidate exists yet.
+- Start here: Task 3 in `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`, worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
+- Do not redo: P1 audit, design, plan, worktree setup, baseline, or Tasks 1-2 implementation/reviews.
+- Verify next: write Task 3 slow-upstream/health, cancellation, atomic-storage, and session-revision RED tests before production changes.
+- Do not claim: Task 3-5 or a v1.0.6 release candidate exists yet.
 - Start here: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
 - Synced copy on this machine: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`.
 - Current v1.0.5 packages: local `I:\AI\Vibe Coding\NM_web_imagen-v1.0.5.zip`, share `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen-v1.0.5.zip`, SHA256 `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`.

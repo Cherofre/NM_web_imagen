@@ -1,6 +1,7 @@
 # Decisions
 
 ## Active Decisions
+- 2026-07-10: Browser persistence strips `api_key` recursively, but backend `config.local.json` remains the deliberate secret store. Chat reference intake is guarded in the UI and again against the latest submit mode before and after asynchronous image loads, so text-only chat cannot accidentally accept a late reference result.
 - 2026-07-10: Public `/outputs` access requires an allowed raster extension that matches the detected magic bytes. Session references apply both the 25 MiB per-image limit and the 150 MiB request budget before any session-reference write; generated WebP uses a deterministic `.webp` suffix.
 - 2026-07-10: Execute the approved v1.0.6 implementation plan with fresh task implementers plus spec and code-quality review in the same isolated worktree. The execution skill requires this workflow when subagent support is available; tasks remain sequential on one branch to avoid shared-file conflicts.
 - 2026-07-10: Implement all confirmed P1 fixes on one isolated branch, `codex/p1-hardening-v1.0.6`, using four staged implementation slices and TDD. Preserve the FastAPI + React/Vite architecture, old config/history/session schemas, `/classic`, and offline Windows packaging.
