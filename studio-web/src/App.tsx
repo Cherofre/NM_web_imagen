@@ -87,7 +87,7 @@ import {
   type AppLanguage,
 } from "./i18n";
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
-import { referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
+import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -1075,6 +1075,8 @@ function App() {
   const sessionsHydratedRef = useRef(false);
   const sessionSaveTimerRef = useRef<number | null>(null);
   const initialScrollKeyRef = useRef("");
+  const submitModeRef = useRef(submitMode);
+  submitModeRef.current = submitMode;
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession(t("session.new"));
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
@@ -1087,6 +1089,7 @@ function App() {
   );
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
   const referenceState = referenceUiState(submitMode, references.length);
+  const referenceActionsDisabled = !referenceState.canAdd;
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
@@ -1902,21 +1905,21 @@ function App() {
   }
 
   function appendReferenceFiles(files: File[], sourceLabel = t("reference.button")) {
-    if (!referenceUiState(submitMode, references.length).canAdd) {
+    if (!referenceUiState(submitModeRef.current, references.length).canAdd) {
       setNotice(t("reference.chatNotSent"));
-      return;
+      return false;
     }
     const incoming = files.filter((file) => file.type.startsWith("image/"));
     if (incoming.length === 0) {
       setNotice(t("status.noImageFiles"));
-      return;
+      return false;
     }
     const limit = activeEngine === "banana" ? 14 : 16;
     const available = Math.max(0, limit - references.length);
     const added = Math.min(incoming.length, available);
     if (added === 0) {
       setNotice(t("status.referenceLimit", { limit }));
-      return;
+      return false;
     }
     setReferences((current) => {
       const next = [...current, ...incoming].slice(0, limit);
@@ -1925,6 +1928,7 @@ function App() {
     setNotice(added < incoming.length
       ? t("status.referencesAddedLimited", { source: sourceLabel, count: added, limit })
       : t("status.referencesAdded", { source: sourceLabel, count: incoming.length }));
+    return true;
   }
 
   function onReferenceChange(event: ChangeEvent<HTMLInputElement>) {
@@ -2227,21 +2231,29 @@ function App() {
   }
 
   async function addOutputAsReference(src: string, name: string) {
-    if (!isSameOriginOutput(src)) {
-      setNotice(t("status.outputOnly"));
-      return;
-    }
     try {
-      const response = await fetch(src, { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
-      const file = new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
-        type: blob.type || "image/png",
-        lastModified: Date.now(),
+      const outcome = await loadReferenceForCurrentMode(() => submitModeRef.current, async () => {
+        if (!isSameOriginOutput(src)) throw new Error(t("status.outputOnly"));
+        const response = await fetch(src, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        return new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
+          type: blob.type || "image/png",
+          lastModified: Date.now(),
+        });
       });
-      appendReferenceFiles([file], "outputs");
+      if (outcome.blocked) {
+        setNotice(t("reference.chatNotSent"));
+        return false;
+      }
+      return appendReferenceFiles([outcome.result], "outputs");
     } catch (error) {
+      if (!referenceUiState(submitModeRef.current, references.length).canAdd) {
+        setNotice(t("reference.chatNotSent"));
+        return false;
+      }
       setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed"));
+      return false;
     }
   }
 
@@ -2290,17 +2302,24 @@ function App() {
   }
 
   async function copyReferencesFromTurn(turn: ConversationTurn) {
-    const snapshots = turn.referenceSnapshots || [];
-    if (!snapshots.length) {
+    const outcome = await loadReferenceForCurrentMode(() => submitModeRef.current, async () => {
+      const snapshots = turn.referenceSnapshots || [];
+      const files = (await Promise.all(snapshots.map(referenceSnapshotToFile))).filter((file): file is File => Boolean(file));
+      return { snapshotCount: snapshots.length, files };
+    });
+    if (outcome.blocked) {
+      setNotice(t("reference.chatNotSent"));
+      return false;
+    }
+    if (!outcome.result.snapshotCount) {
       setNotice(t("status.noReferencesToCopy"));
-      return;
+      return false;
     }
-    const files = (await Promise.all(snapshots.map(referenceSnapshotToFile))).filter((file): file is File => Boolean(file));
-    if (!files.length) {
+    if (!outcome.result.files.length) {
       setNotice(t("status.referenceOnlyNames"));
-      return;
+      return false;
     }
-    appendReferenceFiles(files, t("reference.turnSource"));
+    return appendReferenceFiles(outcome.result.files, t("reference.turnSource"));
   }
 
   async function regenerateFromTurn(turn: ConversationTurn) {
@@ -3014,14 +3033,22 @@ function App() {
     }
   }
 
-  function continueFromTurn(turn: ConversationTurn, image?: GeneratedImage, index = 0) {
+  async function continueFromTurn(turn: ConversationTurn, image?: GeneratedImage, index = 0) {
+    if (!referenceUiState(submitModeRef.current, references.length).canAdd) {
+      setNotice(t("reference.chatNotSent"));
+      return;
+    }
     const src = imageSrc(image);
     const name = imageName(image, index);
     applyPrompt(turn.prompt);
-    if (src) {
-      void addOutputAsReference(src, name);
+    if (!src) {
+      setNotice(t("reference.appliedPrompt"));
+      return;
     }
-    setNotice(src ? t("reference.releaseAsContext") : t("reference.appliedPrompt"));
+    const accepted = await addOutputAsReference(src, name);
+    if (accepted) {
+      setNotice(t("reference.releaseAsContext"));
+    }
   }
 
   return (
@@ -3154,7 +3181,7 @@ function App() {
                           <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}>
                             {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
                           </button>
-                          <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src}>
+                          <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
                             <ImagePlus size={14} />
                           </button>
                           <button className="history-tool-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}>
@@ -3375,7 +3402,7 @@ function App() {
                       onClick={() => void copyReferencesFromTurn(turn)}
                       title={t("reference.copy")}
                       aria-label={t("reference.copy")}
-                      disabled={!turn.referenceSnapshots?.some((reference) => reference.src)}
+                      disabled={referenceActionsDisabled || !turn.referenceSnapshots?.some((reference) => reference.src)}
                     >
                       <ImagePlus size={14} />
                     </button>
@@ -3441,8 +3468,8 @@ function App() {
                                 <div className="image-actions">
                                   <button type="button" aria-label={t("image.copyPrompt")} onClick={() => copyPrompt(turn.prompt)} {...tooltipProps(t("image.copyPrompt"))}><Copy size={14} /></button>
                                   <button type="button" aria-label={t("image.applyPrompt")} onClick={() => applyPrompt(turn.prompt)} {...tooltipProps(t("image.applyPrompt"))}><RotateCcw size={14} /></button>
-                                  <button type="button" aria-label={t("image.continueEdit")} onClick={() => continueFromTurn(turn, image, index)} {...tooltipProps(t("image.continueEdit"))}><MessageSquarePlus size={14} /></button>
-                                  <button type="button" aria-label={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)} {...tooltipProps(t("reference.addAsReference"))}><ImagePlus size={14} /></button>
+                                  <button type="button" aria-label={t("image.continueEdit")} onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled} {...tooltipProps(t("image.continueEdit"))}><MessageSquarePlus size={14} /></button>
+                                  <button type="button" aria-label={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled} {...tooltipProps(t("reference.addAsReference"))}><ImagePlus size={14} /></button>
                                   <a href={src} download={name} aria-label={t("image.download")} {...tooltipProps(t("image.download"))}><Download size={14} /></a>
                                   <a href={src} target="_blank" rel="noreferrer" aria-label={t("image.open")} {...tooltipProps(t("image.open"))}><ExternalLink size={14} /></a>
                                 </div>
@@ -4192,7 +4219,7 @@ function App() {
                   const src = imageSrc(firstImage);
                   if (src) void addOutputAsReference(src, imageName(firstImage));
                 }}
-                disabled={!imageSrc(historyDetail.images?.[0])}
+                disabled={referenceActionsDisabled || !imageSrc(historyDetail.images?.[0])}
               >
                 <ImagePlus size={15} /> {t("history.useReference")}
               </button>
@@ -4266,7 +4293,7 @@ function App() {
                       <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")} disabled={entry.legacy}>
                         {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
                       </button>
-                      <button type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src}><ImagePlus size={14} /></button>
+                      <button type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}><ImagePlus size={14} /></button>
                       <button className="history-browser-action-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}><X size={14} /></button>
                       <button className="history-browser-action-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}><Trash2 size={14} /></button>
                     </div>
@@ -4303,7 +4330,7 @@ function App() {
               </strong>
               <span>
                 <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
-                <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")}><ImagePlus size={18} /></button>
+                <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>

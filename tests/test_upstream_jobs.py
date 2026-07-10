@@ -1,4 +1,5 @@
 import base64
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -19,41 +20,94 @@ PNG_1X1 = base64.b64encode(
 ).decode("ascii")
 
 
+class FakeBananaImageResponse:
+    ok = True
+    status_code = 200
+    text = ""
+
+    def json(self):
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": PNG_1X1,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+
+class FakeBananaTextResponse:
+    ok = True
+    status_code = 200
+    text = ""
+
+    def json(self):
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "OK"}],
+                    }
+                }
+            ]
+        }
+
+
 class BananaUpstreamContractTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.outputs = self.root / "outputs"
+        (self.root / "static" / "studio" / "assets").mkdir(parents=True, exist_ok=True)
+        (self.root / "static" / "index.html").write_text("<div>classic</div>", encoding="utf-8")
+        (self.root / "static" / "studio" / "index.html").write_text("<div>studio</div>", encoding="utf-8")
+        (self.root / "VERSION").write_text("9.8.7\n", encoding="utf-8")
+        patches = {
+            "ROOT_DIR": self.root,
+            "STATIC_DIR": self.root / "static",
+            "STUDIO_STATIC_DIR": self.root / "static" / "studio",
+            "OUTPUTS_DIR": self.outputs,
+            "VERSION_FILE": self.root / "VERSION",
+            "HISTORY_FILE": self.outputs / "history.json",
+            "STUDIO_SESSIONS_FILE": self.outputs / "studio_sessions.json",
+            "SESSION_REFS_DIR": self.outputs / "session_refs",
+            "PRIMARY_CONFIG_FILE": self.root / "config.local.json",
+            "CONFIG_FILE_CANDIDATES": [self.root / "config.local.json", self.root / "config.defaults.json"],
+        }
+        self.patchers = [patch.object(webapp, key, value) for key, value in patches.items()]
+        for item in self.patchers:
+            item.start()
         self.client = TestClient(webapp.create_app())
+
+    def tearDown(self) -> None:
+        for item in reversed(self.patchers):
+            item.stop()
+        self.temp_dir.cleanup()
+
+    def assert_complete_banana_headers(self, headers) -> None:
+        self.assertEqual("application/json", headers["Accept"])
+        self.assertEqual("application/json", headers["Content-Type"])
+        self.assertEqual("Bearer banana-test-key", headers["Authorization"])
+        self.assertEqual("banana-test-key", headers["X-API-Key"])
+        self.assertEqual("banana-test-key", headers["x-goog-api-key"])
+        self.assertEqual("image-generate-web-tool", headers["X-Banana-Client"])
 
     def test_generation_diagnostic_uses_complete_banana_contract(self) -> None:
         captured = {}
-
-        class FakeResponse:
-            ok = True
-            status_code = 200
-            text = ""
-
-            def json(self):
-                return {
-                    "candidates": [
-                        {
-                            "content": {
-                                "parts": [
-                                    {
-                                        "inlineData": {
-                                            "mimeType": "image/png",
-                                            "data": PNG_1X1,
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    ]
-                }
 
         class FakeSession:
             def post(self, url, **kwargs):
                 captured["url"] = url
                 captured.update(kwargs)
-                return FakeResponse()
+                return FakeBananaImageResponse()
 
         with patch.object(webapp, "create_requests_session", return_value=FakeSession()) as session_factory:
             response = self.client.post(
@@ -70,9 +124,7 @@ class BananaUpstreamContractTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.json()["results"][0]["ok"])
         session_factory.assert_called_once()
-        self.assertEqual("banana-test-key", captured["headers"]["x-goog-api-key"])
-        self.assertEqual("Bearer banana-test-key", captured["headers"]["Authorization"])
-        self.assertEqual("banana-test-key", captured["headers"]["X-API-Key"])
+        self.assert_complete_banana_headers(captured["headers"])
         self.assertEqual("IMAGE", captured["json"]["generationConfig"]["responseModalities"][0])
         self.assertIn("IMAGE", captured["json"]["generationConfig"]["responseModalities"])
 
@@ -89,10 +141,80 @@ class BananaUpstreamContractTests(unittest.TestCase):
             webapp.banana_headers("banana-test-key"),
         )
 
-    def test_all_banana_request_paths_reuse_the_shared_headers(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+    def test_chat_diagnostic_uses_complete_banana_headers(self) -> None:
+        captured = {}
 
-        self.assertGreaterEqual(source.count("headers=banana_headers(api_key)"), 4)
+        class FakeSession:
+            def post(self, url, **kwargs):
+                captured["url"] = url
+                captured.update(kwargs)
+                return FakeBananaTextResponse()
+
+        with patch.object(webapp, "create_requests_session", return_value=FakeSession()):
+            response = self.client.post(
+                "/api/diagnostics",
+                json={
+                    "engine": "banana",
+                    "checks": ["chat"],
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(response.json()["results"][0]["ok"])
+        self.assert_complete_banana_headers(captured["headers"])
+
+    def test_chat_endpoint_uses_complete_banana_headers(self) -> None:
+        captured = {}
+
+        class FakeSession:
+            def post(self, url, **kwargs):
+                captured["url"] = url
+                captured.update(kwargs)
+                return FakeBananaTextResponse()
+
+        with patch.object(webapp, "create_requests_session", return_value=FakeSession()):
+            response = self.client.post(
+                "/api/chat/banana",
+                json={
+                    "prompt": "hello",
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("OK", response.json()["reply"])
+        self.assert_complete_banana_headers(captured["headers"])
+
+    def test_generation_endpoint_uses_complete_banana_headers(self) -> None:
+        captured = {}
+
+        class FakeSession:
+            def post(self, url, **kwargs):
+                captured["url"] = url
+                captured.update(kwargs)
+                return FakeBananaImageResponse()
+
+        with patch.object(webapp, "create_requests_session", return_value=FakeSession()):
+            response = self.client.post(
+                "/api/generate/banana",
+                data={
+                    "prompt": "simple square",
+                    "api_key": "banana-test-key",
+                    "api_base_url": "https://example.com",
+                    "model_type": "gemini-test",
+                    "batch_size": "1",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(response.json()["images"]))
+        self.assert_complete_banana_headers(captured["headers"])
+        self.assertTrue((self.outputs / "history.json").exists())
 
 
 if __name__ == "__main__":

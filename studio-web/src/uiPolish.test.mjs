@@ -483,13 +483,13 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
 });
 
 test("composer hides unsupported controls and keeps chat reference behavior truthful", () => {
-  assert.match(appSource, /import \{ referenceUiState, referencesForSubmitMode \} from "\.\/chatCapabilities";/);
+  assert.match(appSource, /import \{ loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode \} from "\.\/chatCapabilities";/);
   assert.match(appSource, /const referenceState = referenceUiState\(submitMode, references\.length\);/);
   assert.match(appSource, /disabled=\{!referenceState\.canAdd\}/);
   assert.match(appSource, /referenceState\.noticeKey &&[\s\S]*t\(referenceState\.noticeKey\)/);
   assert.match(appSource, /function onPaste\(event: ClipboardEvent<HTMLElement>\)/);
   assert.match(appSource, /onPaste=\{onPaste\}/);
-  assert.match(appSource, /if \(!referenceUiState\(submitMode, references\.length\)\.canAdd\)/);
+  assert.match(appSource, /if \(!referenceUiState\(submitModeRef\.current, references\.length\)\.canAdd\)/);
   assert.match(appSource, /const currentReferences = referencesForSubmitMode\(currentMode, overrides\.references \|\| references\);/);
 
   const chatBranchStart = appSource.indexOf('if (currentMode === "chat")');
@@ -505,4 +505,40 @@ test("composer hides unsupported controls and keeps chat reference behavior trut
   assert.doesNotMatch(appSource, /openComposerPopover\("strength"\)/);
   assert.doesNotMatch(appSource, /t\("composer\.editMode"\)/);
   assert.doesNotMatch(appSource, /t\("composer\.referenceStrength"\)/);
+});
+
+test("async reference reuse checks the latest mode and disables every reference action in chat", () => {
+  assert.match(appSource, /import \{ loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode \} from "\.\/chatCapabilities";/);
+  assert.match(appSource, /const submitModeRef = useRef\(submitMode\);/);
+  assert.match(appSource, /submitModeRef\.current = submitMode;/);
+  assert.match(appSource, /referenceUiState\(submitModeRef\.current, references\.length\)\.canAdd/);
+  assert.match(appSource, /loadReferenceForCurrentMode\(\(\) => submitModeRef\.current, async \(\) =>/);
+
+  const outputStart = appSource.indexOf("async function addOutputAsReference");
+  const outputEnd = appSource.indexOf("function selectEngine", outputStart);
+  const outputSource = appSource.slice(outputStart, outputEnd);
+  assert.match(outputSource, /loadReferenceForCurrentMode/);
+  assert.match(outputSource, /if \(outcome\.blocked\)[\s\S]*t\("reference\.chatNotSent"\)/);
+  assert.match(outputSource, /return appendReferenceFiles\(\[outcome\.result\], "outputs"\);/);
+
+  const copyStart = appSource.indexOf("async function copyReferencesFromTurn");
+  const copyEnd = appSource.indexOf("async function regenerateFromTurn", copyStart);
+  const copySource = appSource.slice(copyStart, copyEnd);
+  assert.match(copySource, /loadReferenceForCurrentMode/);
+  assert.match(copySource, /if \(outcome\.blocked\)[\s\S]*t\("reference\.chatNotSent"\)/);
+
+  const continueStart = appSource.indexOf("async function continueFromTurn");
+  const continueEnd = appSource.indexOf("return (", continueStart);
+  const continueSource = appSource.slice(continueStart, continueEnd);
+  assert.match(continueSource, /referenceUiState\(submitModeRef\.current, references\.length\)/);
+  assert.match(continueSource, /const accepted = await addOutputAsReference/);
+  assert.match(continueSource, /if \(accepted\) \{[\s\S]*t\("reference\.releaseAsContext"\)/);
+
+  assert.match(appSource, /const referenceActionsDisabled = !referenceState\.canAdd;/);
+  assert.match(appSource, /title=\{t\("history\.useReference"\)\} disabled=\{!src \|\| referenceActionsDisabled\}/);
+  assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !turn\.referenceSnapshots\?\.some/);
+  assert.match(appSource, /aria-label=\{t\("image\.continueEdit"\)\}[\s\S]*disabled=\{referenceActionsDisabled\}/);
+  assert.match(appSource, /aria-label=\{t\("reference\.addAsReference"\)\}[\s\S]*disabled=\{referenceActionsDisabled\}/);
+  assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !imageSrc\(historyDetail\.images\?\.\[0\]\)\}/);
+  assert.match(appSource, /title=\{t\("preview\.useReference"\)\} disabled=\{referenceActionsDisabled\}/);
 });
