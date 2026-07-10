@@ -363,9 +363,11 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
             for host in (
                 "127.0.0.1:7861",
+                "127.0.0.42:7861",
                 "localhost",
                 "localhost.",
                 "[::1]:7861",
+                "[0:0:0:0:0:0:0:1]:7861",
             ):
                 with self.subTest(host=host):
                     response = self.client.get(
@@ -374,7 +376,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                     )
                     self.assertEqual(200, response.status_code)
 
-        self.assertEqual(4, defaults.call_count)
+        self.assertEqual(6, defaults.call_count)
 
     def test_testserver_host_requires_matching_asgi_server(self) -> None:
         with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
@@ -438,6 +440,104 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         self.assertEqual(403, foreign.status_code)
         self.assertNotIn("access-control-allow-origin", foreign.headers)
         request_form.assert_not_called()
+
+    def test_allowed_dev_preflight_rejects_foreign_host_before_cors(self) -> None:
+        allowed_origin = "http://localhost:5173"
+        original_boundary_call = webapp.RequestBoundaryMiddleware.__call__
+        boundary_http_calls = []
+
+        async def tracking_boundary(middleware, scope, receive, send):
+            if scope.get("type") == "http":
+                boundary_http_calls.append(scope.get("path"))
+            await original_boundary_call(middleware, scope, receive, send)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"IMAGE_TOOL_DEV_CORS_ORIGINS": allowed_origin},
+            ),
+            patch.object(
+                webapp.RequestBoundaryMiddleware,
+                "__call__",
+                tracking_boundary,
+            ),
+        ):
+            with TestClient(webapp.create_app()) as client:
+                response = client.options(
+                    "/api/generate/gpt-image-2",
+                    headers={
+                        "Host": "evil.test",
+                        "Origin": allowed_origin,
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求主机", response.json()["detail"])
+        self.assertEqual(
+            allowed_origin,
+            response.headers.get("access-control-allow-origin"),
+        )
+        self.assertIn("Origin", response.headers.get("vary", ""))
+        self.assertEqual([], boundary_http_calls)
+
+    def test_foreign_preflight_rejects_foreign_host_without_cors_echo(self) -> None:
+        allowed_origin = "http://localhost:5173"
+        original_boundary_call = webapp.RequestBoundaryMiddleware.__call__
+        boundary_http_calls = []
+
+        async def tracking_boundary(middleware, scope, receive, send):
+            if scope.get("type") == "http":
+                boundary_http_calls.append(scope.get("path"))
+            await original_boundary_call(middleware, scope, receive, send)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"IMAGE_TOOL_DEV_CORS_ORIGINS": allowed_origin},
+            ),
+            patch.object(
+                webapp.RequestBoundaryMiddleware,
+                "__call__",
+                tracking_boundary,
+            ),
+        ):
+            with TestClient(webapp.create_app()) as client:
+                response = client.options(
+                    "/api/generate/gpt-image-2",
+                    headers={
+                        "Host": "evil.test",
+                        "Origin": "https://attacker.example",
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("不允许的请求主机", response.json()["detail"])
+        self.assertNotIn("access-control-allow-origin", response.headers)
+        self.assertEqual([], boundary_http_calls)
+
+    def test_loopback_host_preflight_still_uses_configured_cors(self) -> None:
+        allowed_origin = "http://localhost:5173"
+        with patch.dict(
+            os.environ,
+            {"IMAGE_TOOL_DEV_CORS_ORIGINS": allowed_origin},
+        ):
+            with TestClient(webapp.create_app()) as client:
+                response = client.options(
+                    "/api/generate/gpt-image-2",
+                    headers={
+                        "Host": "localhost:7861",
+                        "Origin": allowed_origin,
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            allowed_origin,
+            response.headers.get("access-control-allow-origin"),
+        )
 
     def test_foreign_origin_multipart_is_rejected_before_form_parse_or_executor(self) -> None:
         with (

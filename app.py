@@ -3,6 +3,7 @@ import asyncio
 import base64
 from datetime import datetime
 import hashlib
+import ipaddress
 import math
 from html import unescape
 import json
@@ -260,12 +261,53 @@ def request_host_is_allowed(value: str, server: Any) -> bool:
     if not hostname or (port is not None and not 1 <= port <= 65535):
         return False
     normalized_host = hostname.lower()
-    if normalized_host in {"127.0.0.1", "localhost", "localhost.", "::1"}:
+    if normalized_host in {"localhost", "localhost."}:
         return True
+    try:
+        if ipaddress.ip_address(normalized_host).is_loopback:
+            return True
+    except ValueError:
+        pass
     server_host = ""
     if isinstance(server, (list, tuple)) and server:
         server_host = str(server[0] or "").lower()
     return normalized_host == "testserver" and server_host == "testserver"
+
+
+class TrustedLocalHostMiddleware:
+    def __init__(self, app: Any, *, allowed_origins: List[str]) -> None:
+        self.app = app
+        self.allowed_origins = {
+            str(origin).strip()
+            for origin in allowed_origins
+            if normalize_http_origin(origin) is not None
+        }
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        host_values = headers.getlist("host")
+        host = host_values[0] if len(host_values) == 1 else ""
+        if request_host_is_allowed(host, scope.get("server")):
+            await self.app(scope, receive, send)
+            return
+
+        response_headers: Dict[str, str] = {}
+        origin_values = headers.getlist("origin")
+        request_origin = origin_values[0] if len(origin_values) == 1 else ""
+        if request_origin in self.allowed_origins:
+            response_headers = {
+                "Access-Control-Allow-Origin": request_origin,
+                "Vary": "Origin",
+            }
+        await JSONResponse(
+            status_code=403,
+            content={"detail": "不允许的请求主机"},
+            headers=response_headers,
+        )(scope, receive, send)
 
 
 class RequestBoundaryMiddleware:
@@ -282,22 +324,14 @@ class RequestBoundaryMiddleware:
             await self.app(scope, receive, send)
             return
 
-        headers = Headers(scope=scope)
-        host_values = headers.getlist("host")
-        host = host_values[0] if len(host_values) == 1 else ""
-        if not request_host_is_allowed(host, scope.get("server")):
-            await JSONResponse(
-                status_code=403,
-                content={"detail": "不允许的请求主机"},
-            )(scope, receive, send)
-            return
-
         method = str(scope.get("method") or "GET").upper()
         path = str(scope.get("path") or "")
+        headers = Headers(scope=scope)
         if path.startswith("/api/") and method not in {"GET", "HEAD", "OPTIONS"}:
             raw_origin = headers.get("origin")
             if raw_origin:
                 request_origin = normalize_http_origin(raw_origin)
+                host = headers.get("host") or ""
                 current_origin = normalize_http_origin(f"{scope.get('scheme') or 'http'}://{host}")
                 allowed_origins = set(self.allowed_origins)
                 if current_origin is not None:
@@ -3349,6 +3383,7 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
             allow_credentials=False,
         )
+    app.add_middleware(TrustedLocalHostMiddleware, allowed_origins=origins)
     app.router.route_class = LimitedGenerationMultipartRoute
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
