@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
-from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
+from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
 import requests
@@ -549,31 +549,18 @@ def compact_text(value: str, limit: int = 600) -> str:
 def sanitize_client_url(value: str) -> str:
     raw = str(value or "")
     trailing = ""
-    while raw and raw[-1] in ".,;!?)]:":
+    while raw and raw[-1] in ".,;!?):":
         trailing = raw[-1] + trailing
         raw = raw[:-1]
     try:
         parsed = urlparse(raw)
-        if not parsed.scheme or not parsed.netloc:
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"} or not parsed.netloc:
             return f"[redacted URL]{trailing}"
-        netloc = parsed.netloc
-        if parsed.username is not None or parsed.password is not None:
-            hostname = parsed.hostname or ""
-            if ":" in hostname and not hostname.startswith("["):
-                hostname = f"[{hostname}]"
-            if parsed.port is not None:
-                hostname = f"{hostname}:{parsed.port}"
-            netloc = f"***@{hostname}"
-        query_items = []
-        for key, item in parse_qsl(parsed.query, keep_blank_values=True):
-            query_items.append(
-                (key, "***" if CLIENT_ERROR_SENSITIVE_KEY_PATTERN.search(key) else item)
-            )
-        sanitized = parsed._replace(
-            netloc=netloc,
-            query=urlencode(query_items, safe="*"),
-        ).geturl()
-        return f"{sanitized}{trailing}"
+        host = normalized_url_host(parsed, scheme)
+        if not host:
+            return f"[redacted URL]{trailing}"
+        return f"{scheme}://{host}{trailing}"
     except Exception:
         return f"[redacted URL]{trailing}"
 
@@ -1363,6 +1350,22 @@ def save_generated_images(
         raise
 
 
+def normalized_url_host(parsed: Any, scheme: str = "") -> str:
+    hostname = str(parsed.hostname or "").lower()
+    if (
+        not hostname
+        or "/" in hostname
+        or "\\" in hostname
+        or any(character.isspace() for character in hostname)
+    ):
+        return ""
+    normalized_host = f"[{hostname}]" if ":" in hostname else hostname
+    port = parsed.port
+    default_port = 80 if scheme == "http" else 443 if scheme == "https" else None
+    port_suffix = f":{port}" if port is not None and port != default_port else ""
+    return f"{normalized_host}{port_suffix}"
+
+
 def public_url_hint(value: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1383,19 +1386,12 @@ def public_url_hint(value: str) -> str:
         else:
             parsed = urlparse(f"//{text}")
             scheme = ""
-        hostname = parsed.hostname
-        port = parsed.port
+        host = normalized_url_host(parsed, scheme)
     except Exception:
         return PUBLIC_URL_PLACEHOLDER
-    if not hostname:
+    if not host:
         return PUBLIC_URL_PLACEHOLDER
-    normalized_host = hostname.lower()
-    if ":" in normalized_host:
-        normalized_host = f"[{normalized_host}]"
-    default_port = 80 if scheme == "http" else 443 if scheme == "https" else None
-    port_suffix = f":{port}" if port is not None and port != default_port else ""
-    path = parsed.path if parsed.path and parsed.path != "/" else ""
-    return f"{normalized_host}{port_suffix}{path}"
+    return host
 
 
 def sanitize_history_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

@@ -38,11 +38,12 @@ PNG_1X1_RAW = base64.b64decode(PNG_1X1)
 EXACT_SECRET = "exact-client-key-ABC123"
 WINDOWS_SECRET_PATH = r"C:\Users\Alice\private\token.txt"
 POSIX_SECRET_PATH = "/home/alice/private/token.txt"
+UNC_SECRET_PATH = r"\\server\share\private\token.txt"
 SENSITIVE_URL = "https://url-user:url-pass@example.com/v1?token=query-secret&safe=ok"
 SENSITIVE_ERROR = (
     f"ConnectionError {EXACT_SECRET} Bearer bearer-secret sk-abcdef123456 "
     f"{SENSITIVE_URL} api_key=kv-secret password: pass-secret "
-    f"{WINDOWS_SECRET_PATH} {POSIX_SECRET_PATH}"
+    f"{WINDOWS_SECRET_PATH} {POSIX_SECRET_PATH} {UNC_SECRET_PATH}"
 )
 SENSITIVE_MARKERS = (
     EXACT_SECRET,
@@ -55,6 +56,7 @@ SENSITIVE_MARKERS = (
     "pass-secret",
     WINDOWS_SECRET_PATH,
     POSIX_SECRET_PATH,
+    UNC_SECRET_PATH,
 )
 CLIENT_ERROR_DETAILS = {
     "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
@@ -97,21 +99,42 @@ def assert_stable_http_error(test_case, response, status_code, error_code):
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
-    def test_public_url_hint_returns_only_safe_host_port_and_path(self) -> None:
+    def test_public_url_hint_returns_only_normalized_host_and_nondefault_port(self) -> None:
         cases = {
-            "https://user:pass@Example.COM/v1?token=secret#fragment": "example.com/v1",
-            "http://Example.COM:80/v1": "example.com/v1",
-            "https://Example.COM:443/v1": "example.com/v1",
-            "https://[2001:DB8::1]:8443/v1?token=secret": "[2001:db8::1]:8443/v1",
-            "example.com:8080/v1": "example.com:8080/v1",
+            "https://user:pass@Example.COM/proxy/path-token?token=secret#fragment": "example.com",
+            "http://Example.COM:80/v1": "example.com",
+            "http://Example.COM:8080/v1": "example.com:8080",
+            "https://Example.COM:443/v1": "example.com",
+            "https://Example.COM:8443/v1": "example.com:8443",
+            "https://[2001:DB8::1]:443/v1": "[2001:db8::1]",
+            "https://[2001:DB8::1]:8443/v1?credential=secret": "[2001:db8::1]:8443",
+            "http://127.0.0.1:8080/private": "127.0.0.1:8080",
+            "example.com:8080/v1?code=secret&arbitrary=query-secret": "example.com:8080",
+            "Example.COM/v1#fragment": "example.com",
             "ftp://example.com/private": SAFE_URL_PLACEHOLDER,
             WINDOWS_SECRET_PATH: SAFE_URL_PLACEHOLDER,
             POSIX_SECRET_PATH: SAFE_URL_PLACEHOLDER,
+            UNC_SECRET_PATH: SAFE_URL_PLACEHOLDER,
         }
 
         for value, expected in cases.items():
             with self.subTest(value=value):
                 self.assertEqual(expected, webapp.public_url_hint(value))
+
+    def test_sanitize_client_url_keeps_only_scheme_host_and_nondefault_port(self) -> None:
+        cases = {
+            "https://user:pass@Example.COM/proxy/path-token?key=secret#fragment": "https://example.com",
+            "http://Example.COM:80/v1?credential=secret": "http://example.com",
+            "https://Example.COM:443/v1?code=secret": "https://example.com",
+            "https://Example.COM:8443/v1?arbitrary=query-secret": "https://example.com:8443",
+            "https://[2001:DB8::1]:8443/private": "https://[2001:db8::1]:8443",
+            "https://127.0.0.1:443/private": "https://127.0.0.1",
+            "not-a-url": "[redacted URL]",
+        }
+
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(expected, webapp.sanitize_client_url(value))
 
     def test_sanitize_history_meta_is_idempotent_and_raw_urls_win(self) -> None:
         raw_priority = {
@@ -124,7 +147,7 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
         expected_priority = {
             "custom_meta": {"keep": True},
             "api_base_url_host": SAFE_URL_PLACEHOLDER,
-            "api_url_host": "example.com/v1",
+            "api_url_host": "example.com",
         }
         old_host_only = {
             "api_url_host": "url-user:url-pass@example.com/v2?token=query-secret#fragment",
@@ -134,7 +157,7 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
         expected_old_host = {
             "custom_meta": "keep",
             "api_base_url_host": SAFE_URL_PLACEHOLDER,
-            "api_url_host": "example.com/v2",
+            "api_url_host": "example.com",
         }
 
         for value, expected in (
@@ -155,7 +178,9 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
 
         assert_client_payload_is_sanitized(self, sanitized)
         self.assertIn("ConnectionError", sanitized)
-        self.assertIn("safe=ok", sanitized)
+        self.assertIn("https://example.com", sanitized)
+        self.assertNotIn("/v1", sanitized)
+        self.assertNotIn("safe=ok", sanitized)
         self.assertIn("Bearer ***", sanitized)
 
     def test_extract_error_message_sanitizes_json_html_and_text_payloads(self) -> None:
@@ -1318,7 +1343,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 SENSITIVE_URL,
                 [webapp.requests.ConnectionError(SENSITIVE_ERROR)],
                 "1",
-                "example.com/v1",
+                "example.com",
                 False,
             ),
             (
@@ -1368,7 +1393,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_gpt_generation_meta_never_exposes_endpoint_secrets_or_paths(self) -> None:
         cases = [
-            (SENSITIVE_URL, "example.com/v1"),
+            (SENSITIVE_URL, "example.com"),
             (WINDOWS_SECRET_PATH, SAFE_URL_PLACEHOLDER),
             (POSIX_SECRET_PATH, SAFE_URL_PLACEHOLDER),
         ]
@@ -1435,7 +1460,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(200, response.status_code)
             payload = response.json()
             assert_client_payload_is_sanitized(self, payload)
-            self.assertEqual("example.com/v1", payload["meta"]["api_base_url_host"])
+            self.assertEqual("example.com", payload["meta"]["api_base_url_host"])
 
     async def test_legacy_history_meta_is_sanitized_on_read_and_patch_writeback(self) -> None:
         self.outputs.mkdir(parents=True, exist_ok=True)
@@ -1488,7 +1513,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             {
                 "custom_meta": {"keep": "raw-priority"},
                 "api_base_url_host": SAFE_URL_PLACEHOLDER,
-                "api_url_host": "example.com/v1",
+                "api_url_host": "example.com",
             },
             first_entries[target_id]["meta"],
         )
@@ -1496,7 +1521,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             {
                 "custom_meta": "keep-old-host",
                 "api_base_url_host": SAFE_URL_PLACEHOLDER,
-                "api_url_host": "example.com/v2",
+                "api_url_host": "example.com",
             },
             first_entries["history-old-host-only"]["meta"],
         )
@@ -1510,7 +1535,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(200, updated.status_code)
         self.assertTrue(updated.json()["entry"]["favorite"])
-        self.assertEqual("example.com/v1", updated.json()["entry"]["meta"]["api_url_host"])
+        self.assertEqual("example.com", updated.json()["entry"]["meta"]["api_url_host"])
         self.assertEqual(SAFE_URL_PLACEHOLDER, updated.json()["entry"]["meta"]["api_base_url_host"])
         assert_client_payload_is_sanitized(self, updated.json())
 
@@ -1519,9 +1544,9 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for entry in persisted_entries.values():
             self.assertNotIn("api_url", entry.get("meta", {}))
             self.assertNotIn("api_base_url", entry.get("meta", {}))
-        self.assertEqual("example.com/v1", persisted_entries[target_id]["meta"]["api_url_host"])
+        self.assertEqual("example.com", persisted_entries[target_id]["meta"]["api_url_host"])
         self.assertEqual(SAFE_URL_PLACEHOLDER, persisted_entries[target_id]["meta"]["api_base_url_host"])
-        self.assertEqual("example.com/v2", persisted_entries["history-old-host-only"]["meta"]["api_url_host"])
+        self.assertEqual("example.com", persisted_entries["history-old-host-only"]["meta"]["api_url_host"])
         assert_client_payload_is_sanitized(self, persisted)
 
         second_read = await self.client.get("/api/history")
@@ -1785,7 +1810,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         result = diagnostic_payload["results"][0]
         self.assertEqual("E_UPSTREAM_NETWORK", result.get("error_code"))
         self.assertEqual(CLIENT_ERROR_DETAILS["E_UPSTREAM_NETWORK"], result.get("error"))
-        self.assertEqual("https://example.com/v1/images/generations", result.get("endpoint"))
+        self.assertEqual("https://example.com", result.get("endpoint"))
         self.assertIsInstance(result.get("latency_ms"), int)
         assert_client_payload_is_sanitized(self, diagnostic_payload)
         assert_stable_http_error(

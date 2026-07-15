@@ -240,7 +240,7 @@ class StudioSessionTests(unittest.TestCase):
             {
                 "custom_meta": {"keep": "session"},
                 "api_base_url_host": "[invalid endpoint]",
-                "api_url_host": "example.com/v1",
+                "api_url_host": "example.com",
             },
             turn["meta"],
         )
@@ -265,6 +265,32 @@ class StudioSessionTests(unittest.TestCase):
         conflict_text = json.dumps(conflict.json(), ensure_ascii=False)
         for marker in ("url-user", "url-pass", "query-secret", windows_path, posix_path):
             self.assertNotIn(marker, conflict_text)
+
+    def test_studio_session_write_persists_only_host_port_metadata_hints(self) -> None:
+        payload = studio_session_payload("会话 URL 脱敏")
+        payload["sessions"][0]["turns"][0]["meta"] = {
+            "api_url": "https://user:pass@Example.COM:8443/proxy/path-token?key=secret#fragment",
+            "api_base_url": "https://[2001:DB8::1]:443/private?arbitrary=query-secret",
+            "custom_meta": {"keep": True},
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        meta = response.json()["sessions"][0]["turns"][0]["meta"]
+        self.assertEqual(
+            {
+                "custom_meta": {"keep": True},
+                "api_base_url_host": "[2001:db8::1]",
+                "api_url_host": "example.com:8443",
+            },
+            meta,
+        )
+        persisted = json.loads((self.outputs / "studio_sessions.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta, persisted["sessions"][0]["turns"][0]["meta"])
+        serialized = json.dumps(persisted, ensure_ascii=False)
+        for marker in ("user", "pass", "path-token", "secret", "fragment", "/proxy", "/private"):
+            self.assertNotIn(marker, serialized)
 
     def test_studio_session_write_bounds_turn_and_draft_text_fields(self) -> None:
         text_limit = 200_000
@@ -1404,8 +1430,8 @@ class StudioSessionTests(unittest.TestCase):
         self.assertFalse(results["chat"]["ok"])
         self.assertEqual("gpt-image-2", results["generation"]["model"])
         self.assertEqual("gpt-5.5", results["chat"]["model"])
-        self.assertIn("/v1/images/generations", results["generation"]["endpoint"])
-        self.assertIn("/v1/chat/completions", results["chat"]["endpoint"])
+        self.assertEqual("https://example.com", results["generation"]["endpoint"])
+        self.assertEqual("https://example.com", results["chat"]["endpoint"])
         self.assertNotIn("sk-test-secret", json.dumps(payload, ensure_ascii=False))
         self.assertEqual(
             [
@@ -1441,8 +1467,9 @@ class StudioSessionTests(unittest.TestCase):
         self.assertNotIn("sk-test-secret", payload_text)
         self.assertNotIn("url-token", payload_text)
         self.assertNotIn("query-secret", payload_text)
-        self.assertIn("***@example.com", payload_text)
-        self.assertIn("api_key=***", payload_text)
+        self.assertNotIn("/v1", payload_text)
+        self.assertNotIn("api_key", payload_text)
+        self.assertIn("https://example.com", payload_text)
 
     def test_banana_chat_forwards_conversation_context(self) -> None:
         captured = {}
@@ -1665,7 +1692,7 @@ class StudioSessionTests(unittest.TestCase):
             ],
             urls,
         )
-        self.assertEqual("yuzapi.fun/v1/images/generations", response.json()["meta"]["api_url"])
+        self.assertEqual("yuzapi.fun", response.json()["meta"]["api_url"])
 
     def test_gpt_generation_reports_upstream_524_timeout_clearly(self) -> None:
         class FakeResponse:
