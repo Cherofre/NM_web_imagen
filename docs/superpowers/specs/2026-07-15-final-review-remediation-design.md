@@ -1,169 +1,186 @@
-# v1.0.6 Final Review Remediation Design
+# v1.0.6 最终审查问题修复设计
 
-## 1. Context
+## 1. 背景
 
-The final whole-branch review of `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484..99d8d911f889eb3c6b905e89327a5f1ed696c041` found zero Critical issues and five unresolved Important issues:
+对 Git 范围 f4afcd0b8d65b045091c6cafd4aa94b95cf3d484..99d8d911f889eb3c6b905e89327a5f1ed696c041 的最终整分支审查发现：Critical 为 0，但仍有 5 个未解决的 Important：
 
-1. Invalid upstream image candidates consume memory/network work without consuming the request-wide byte budget.
-2. Unsafe API writes outside generation have no encoded-body limit, and Studio session normalization can persist oversized arbitrary fields.
-3. Startup hydration replaces newer browser-local sessions whenever the server has any sessions.
-4. Successful session saves do not apply server-normalized reference URLs back to the current browser state, causing repeated Base64 uploads and unstable UUID paths.
-5. Public endpoint hints and diagnostic error URLs can retain sensitive path or uncommon query credentials.
+1. 无效的上游图片候选会消耗内存和网络资源，却不计入单次请求的总字节预算。
+2. 生图以外的写接口没有编码后请求体上限，Studio 会话规范化还可能保存体积过大的任意字段。
+3. 启动加载时，只要服务端存在会话，就会覆盖浏览器中更新的本地会话。
+4. 会话保存成功后，前端没有把后端规范化后的参考图 URL 写回当前状态，导致 Base64 被反复上传、UUID 文件地址不断变化。
+5. 对外显示的接口地址和诊断错误 URL 仍可能保留敏感路径或不常见的查询凭据。
 
-The user approved the complete but conservative remediation approach. The current v1.0.6 ZIP with SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains on disk but is a rejected candidate and must not be treated as the final release.
+用户已确认采用“完整但克制”的修复方案。当前 v1.0.6 ZIP 的 SHA256 为 56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216，文件仍保留在磁盘上，但它是已否决候选，不能视为正式发布包。
 
-## 2. Goals
+## 2. 修复目标
 
-- Bound all upstream image inspection work by one request-wide byte budget, including invalid candidates.
-- Bound every unsafe `/api` request before FastAPI parses its body.
-- Keep Studio session JSON compact, predictable, and backward-compatible with existing stored sessions.
-- Preserve newer browser-local work during startup while retaining server-only changes and correct deletion semantics after a baseline has been established.
-- Replace saved reference Base64 with stable local `/outputs` URLs without overwriting references edited while a save is in flight.
-- Prevent public diagnostics, errors, history, and session metadata from exposing URL userinfo, paths, query values, or fragments.
-- Preserve the current FastAPI + React/Vite architecture, `/classic`, Windows PowerShell 5.1 launchers, offline packaging, and v1.0.5 data compatibility.
+- 使用同一个单次请求字节预算限制所有上游图片检查工作，包括最终验证失败的候选图片。
+- 在 FastAPI 解析请求体之前，限制所有不安全 /api 写请求的体积。
+- 让 Studio 会话 JSON 保持紧凑、可预测，并兼容现有会话数据。
+- 启动时保留浏览器中较新的本地修改，同时保留只存在于服务端的修改；建立同步基线后，还要正确处理删除操作。
+- 把已保存参考图的 Base64 替换成稳定的本地 /outputs URL，同时不能覆盖保存过程中被用户重新修改的参考图。
+- 阻止诊断、错误、历史和会话 metadata 暴露 URL 中的 userinfo、路径、查询参数或 fragment。
+- 保留现有 FastAPI + React/Vite 架构、/classic、Windows PowerShell 5.1 启动脚本、离线打包方式以及 v1.0.5 数据兼容性。
 
-## 3. Non-goals
+## 3. 本轮不做的内容
 
-- Do not add Pillow or another raster decoder in this remediation. Magic-byte validation remains the approved v1.0.6 contract; full decode verification is a later enhancement.
-- Do not redesign the Studio interface or change its visual character.
-- Do not migrate persistence to SQLite or add accounts, LAN/remote mode, or a backend worker queue.
-- Do not lower the existing 25 MiB per-reference and 150 MiB aggregate raw-reference limits.
-- Do not automatically rewrite old session files during GET requests.
+- 本轮不引入 Pillow 或其他栅格图片解码器。文件魔数验证仍是已批准的 v1.0.6 合同；完整图片解码留到后续增强。
+- 不重新设计 Studio 界面，也不改变当前视觉气质。
+- 不迁移到 SQLite，不增加账号、局域网/远程模式或后端工作队列。
+- 不降低现有“单张参考图 25 MiB、单次请求参考图原始数据合计 150 MiB”的限制。
+- GET 请求只读取旧会话文件，不自动改写旧文件。
 
-## 4. Chosen Architecture
+## 4. 确认采用的技术方案
 
-### 4.1 Upstream inspection budget
+### 4.1 上游图片检查预算
 
-`UpstreamImageBudget` will separate two concepts:
+UpstreamImageBudget 将明确拆分两个概念：
 
-- `checked_bytes`: every decoded or downloaded candidate byte inspected during the request.
-- `accepted_images`: candidates that pass raster validation and are returned to the caller.
+- checked_bytes：本次请求实际解码、下载并检查过的所有候选图片字节。
+- accepted_images：通过栅格验证并最终返回给调用方的图片数量。
 
-For Base64 candidates, estimate decoded size before decoding, reserve that amount against `checked_bytes`, then decode and validate. Invalid Base64 or invalid raster content does not refund the reservation. For remote URLs, charge each streamed chunk before adding it to the in-memory payload; validation failure likewise does not refund bytes. `Content-Length` remains an early rejection hint but is not trusted as the final accounting source.
+对于 Base64 候选，先估算解码后的字节数并占用 checked_bytes，然后再解码和验证。即使 Base64 无效或内容不是有效栅格图片，也不会退还已经占用的预算。
 
-The existing limits remain:
+对于远程 URL，每收到一个流式数据块，都先计入预算，再加入内存中的图片内容。后续验证失败同样不退还预算。Content-Length 只用于提前拒绝明显超限的响应，不能作为最终计费依据。
 
-- At most 10 accepted images per request.
-- At most 150 MiB checked image bytes per request.
-- At most 50 MiB for any single candidate.
+现有限制保持不变：
 
-Intent: ten near-50 MiB invalid candidates must stop at the same 150 MiB request budget instead of causing roughly 500 MiB of work.
+- 每次请求最多接受 10 张有效图片。
+- 每次请求最多检查 150 MiB 图片数据。
+- 单个候选图片最多 50 MiB。
 
-### 4.2 Encoded request-body limits
+修改意图：当上游连续返回多张接近 50 MiB 的无效图片时，程序必须在同一个 150 MiB 总预算处停止，而不是产生接近 500 MiB 的处理量。
 
-`RequestBoundaryMiddleware` will apply a path-specific limit to every unsafe `/api` request before FastAPI calls `Body(...)`, `request.json()`, or form parsing:
+### 4.2 编码后请求体上限
 
-- `/api/generate/*`: retain the existing 152 MiB multipart/body limit.
-- `/api/studio/sessions`: allow Base64 expansion of the existing 150 MiB raw-reference budget plus 8 MiB JSON overhead. The encoded limit is exactly 208 MiB (`218,103,808` bytes).
-- Every other unsafe `/api` route: 2 MiB.
+RequestBoundaryMiddleware 将在 FastAPI 调用 Body(...)、request.json() 或表单解析之前，为所有不安全 /api 请求应用按路径区分的上限：
 
-Both declared `Content-Length` and actual streamed bytes are checked. Exceeding a limit returns HTTP 413 with a stable Chinese detail and does not enter endpoint parsing.
+- /api/generate/*：保留现有 152 MiB multipart/请求体限制。
+- /api/studio/sessions：允许现有 150 MiB 原始参考图经过 Base64 膨胀后的体积，再加 8 MiB JSON 开销；编码后上限固定为 208 MiB，即 218,103,808 字节。
+- 其他所有不安全 /api 写接口：2 MiB。
 
-### 4.3 Bounded Studio session schema
+程序同时检查请求声明的 Content-Length 和实际收到的流式字节。超过限制时返回 HTTP 413 和稳定的中文说明，并且不会进入具体接口的解析逻辑。
 
-Existing session, turn, and reference-count limits remain. Session normalization additionally applies these bounds:
+### 4.3 有边界的 Studio 会话结构
 
-- Prompt, reply, and draft strings: at most 200,000 characters each.
-- Error strings: at most 8,000 characters.
-- Generated-image scalar fields: at most 8,192 characters each.
-- Turn metadata: recursive depth at most 4, at most 50 items per mapping/list, at most 8,192 characters per string, and at most 64 KiB after normalization.
-- The complete normalized Studio session JSON: at most 32 MiB after data-URL references have been externalized to files.
+现有会话数量、turn 数量和参考图数量限制保持不变。在此基础上，会话规范化增加以下边界：
 
-Generated images are normalized to the existing known fields (`id`, `name`, `saved_name`, `saved_url`, `saved_path`, `url`, `mime_type`, `dimensions`). Raw `b64_json` and `data_url` fields are not persisted. When a valid `saved_url` exists, redundant data/remote `url` content is omitted. Unknown fields are ignored rather than copied verbatim.
+- 提示词、聊天回复和草稿字符串：每项最多 200,000 个字符。
+- 错误信息：最多 8,000 个字符。
+- 生成图片的字符串字段：每项最多 8,192 个字符。
+- turn metadata：递归深度最多 4 层；每个字典或数组最多 50 项；单个字符串最多 8,192 个字符；规范化后每个 turn 的 metadata 最多 64 KiB。
+- data URL 参考图已经保存为独立文件后，完整的规范化 Studio 会话 JSON 最多 32 MiB。
 
-Intent: legitimate prompts, replies, output links, and old sessions continue to load, while arbitrary nested blobs cannot make `studio_sessions.json` grow without bound. A normalized payload above 32 MiB is rejected with HTTP 413 before atomic replacement, and any reference files created for that failed mutation are cleaned up. Normalization occurs only on a user write; GET remains read-only.
+生成图片只保留现有已知字段：id、name、saved_name、saved_url、saved_path、url、mime_type 和 dimensions。不持久化原始 b64_json 和 data_url。如果存在有效 saved_url，就不再保存重复的 data/远程 url 内容。未知字段不再原样复制。
 
-### 4.4 Startup three-way reconciliation
+修改意图：正常的提示词、回复、输出链接和旧会话继续可用，但任意嵌套的大对象不能无限增大 studio_sessions.json。如果规范化后的内容仍超过 32 MiB，则在原子替换之前返回 HTTP 413，并清理本次失败操作中新建的参考图文件。只有用户主动写入时才规范化，GET 仍然只读。
 
-The browser will persist compact sanitized server-baseline markers containing:
+### 4.4 启动时三方合并会话
 
-- Last accepted server revision.
-- Session ID and `updatedAt` for each canonical server session.
-- Canonical active session ID.
+浏览器将持久化一份体积很小、经过安全清理的服务端同步基线标记，包含：
 
-On startup, the client compares:
+- 最近一次接受的服务端 revision。
+- 每个服务端会话的会话 ID 和 updatedAt。
+- 服务端确认的当前会话 ID。
 
-1. The stored server baseline.
-2. Current browser-local sessions.
-3. Current server sessions.
+启动时，前端比较三份数据：
 
-It reuses the existing three-way merge semantics so newer local edits survive, server-only edits survive, and a deletion wins when the opposite side is unchanged from the stored baseline markers. The complete current server response becomes the new in-memory baseline, while only compact markers are persisted in localStorage. If merged state differs from the server, the normal debounced save persists the merge.
+1. 上次保存的服务端同步基线。
+2. 当前浏览器 localStorage 中的会话。
+3. 当前后端返回的会话。
 
-For users upgrading without a stored baseline, the first startup performs an `updatedAt`-based union: newer copies win and unique sessions from either side survive. This intentionally favors avoiding silent data loss. Once the first baseline is stored, later startups have correct deletion semantics.
+程序复用现有三方合并语义：
 
-The baseline markers are sanitized before localStorage persistence, never contain API keys or image payloads, and remain small enough for normal browser storage quotas. If marker persistence fails, startup falls back to the first-start union rather than discarding local sessions.
+- 较新的本地编辑保留。
+- 只存在于服务端的编辑保留。
+- 如果一边删除了会话、另一边相对同步基线没有修改，则删除操作生效。
 
-### 4.5 Safe reference canonicalization and stable files
+当前服务端响应会成为新的完整内存基线，但 localStorage 只保存精简的 ID、时间和 revision 标记。如果合并后的结果和服务端不同，就由正常的延迟保存流程把合并结果写回后端。
 
-After a successful session PUT, the client applies server-normalized reference fields by stable session ID, turn ID, and reference ID. A server field is applied only when the current reference `src` still equals the `src` sent by that save attempt. If the user changed or replaced the reference while the request was in flight, the newer local value is preserved and will be saved normally.
+旧版本升级时还没有同步基线，因此第一次启动采用基于 updatedAt 的并集合并：较新的版本优先，两边独有的会话都保留。这里有意优先避免静默丢数据。第一次建立基线后，后续启动就能正确识别删除操作。
 
-The update covers React state, refs, localStorage, and the persisted server baseline. A save triggered only by canonical URL replacement is skipped; genuine concurrent local edits still schedule another save.
+同步基线写入 localStorage 前必须经过安全清理，不包含 API Key 或图片数据，体积也应符合正常浏览器存储额度。如果基线写入失败，启动时退回第一次启动的并集合并方式，不能因此丢弃本地会话。
 
-New data-URL reference files use a deterministic name based on sanitized session/turn/reference IDs plus a SHA-256 content prefix. If the same content already exists at that path, the backend reuses it. Existing `/outputs/session_refs/...` URLs and old UUID files remain readable and are not renamed on GET.
+### 4.5 安全回写参考图地址并使用稳定文件名
 
-Intent: repeated saves do not retransmit or rewrite the same image, and another tab's canonical URL does not become stale merely because identical content was saved again.
+会话 PUT 保存成功后，前端按照稳定的会话 ID、turn ID 和参考图 ID，把后端返回的规范化参考图字段合并回当前状态。
 
-### 4.6 Host-only public URL hints
+只有当当前参考图的 src 仍然等于本次保存请求发送的 src 时，才允许使用服务端返回值覆盖它。如果用户在请求等待期间更换或修改了参考图，必须保留更新的本地值，并由下一次正常保存处理。
 
-Public URL surfaces will retain only normalized hostname and non-default port:
+规范化结果需要同步更新：
 
-- Remove scheme credentials/userinfo.
-- Remove the complete path.
-- Remove the complete query, regardless of key name.
-- Remove the fragment.
-- Preserve normalized IPv4/IPv6 hostname and a non-default port.
+- React state。
+- 当前 refs。
+- localStorage。
+- 服务端同步基线。
 
-Diagnostics and persisted metadata will therefore expose values such as `gateway.example.com:8443`, never `/proxy/credential`, `?key=...`, or `#fragment`. The full connection URL remains available only in the user's configuration form and `config.local.json`; those are not copied into public metadata or release packages.
+如果一次状态变化只是把 Base64 换成后端 URL，就跳过额外的重复保存；如果保存过程中还发生了真实的本地编辑，则仍要安排下一次保存。
 
-## 5. Compatibility and Visible Impact
+新的 data URL 参考图文件使用稳定文件名，组成依据为：经过安全处理的会话 ID、turn ID、参考图 ID，以及 SHA-256 内容哈希前缀。如果相同内容的目标文件已经存在，后端直接复用。现有 /outputs/session_refs/... URL 和旧 UUID 文件继续可读，GET 不负责重命名旧文件。
 
-- Normal generation, chat, history, configuration profiles, queue behavior, and `/classic` remain visually unchanged.
-- Existing config, history, Studio sessions, `/outputs` links, and UUID reference files remain readable.
-- A newer browser-local session will no longer disappear merely because the server has an older non-empty file.
-- Reference-backed sessions should become smaller and stop rewriting identical files after the first successful canonical save.
-- Diagnostics will show less endpoint detail: host and port only. The editable config drawer still shows the user's complete endpoint.
-- Only abusive or accidentally enormous requests should see new HTTP 413 responses.
-- The v1.0.5 ZIP remains untouched for rollback.
+修改意图：重复保存时不再反复传输、写入同一张图片，也不会因为相同内容再次保存，就让另一个标签页持有的规范化 URL 失效。
 
-## 6. Error Handling
+### 4.6 对外 URL 只保留主机和端口
 
-- Request-body overflow: HTTP 413 before endpoint parsing.
-- Upstream checked-byte overflow: existing stable upstream result-limit error contract.
-- Oversized or unknown Studio fields: truncate bounded text/metadata or omit unknown blob fields. Reject with HTTP 413 only when the encoded request exceeds its route limit or the normalized session JSON still exceeds 32 MiB.
-- Baseline parse failure: ignore the invalid stored baseline, use the first-start `updatedAt` union, and write a fresh sanitized baseline after successful hydration.
-- Reference canonicalization mismatch: preserve current local data and allow the next normal save to resolve it.
+所有对外 URL 信息只保留规范化后的 hostname 和非默认端口：
 
-## 7. Test and Release Gates
+- 删除 URL userinfo 中的用户名、密码等凭据。
+- 删除完整路径。
+- 删除全部查询参数，不再根据参数名猜测是否敏感。
+- 删除 fragment。
+- 保留规范化后的 IPv4/IPv6 hostname 和非默认端口。
 
-Each remediation slice uses RED/GREEN regression tests before production code changes.
+因此诊断和持久化 metadata 最多显示类似 gateway.example.com:8443 的内容，不会再出现 /proxy/credential、?key=... 或 #fragment。完整接口地址只保留在用户配置表单和 config.local.json 中，不复制到公开 metadata，也不进入发布包。
 
-Required targeted coverage:
+## 5. 兼容性和可见变化
 
-- Several invalid Base64/URL candidates exhaust the checked-byte budget even though zero images are accepted.
-- Valid images still obey the accepted-image limit and are not double-charged.
-- Oversized session, chat, diagnostics, config, and generation requests return 413 before endpoint parsing.
-- Oversized nested session fields do not persist; normal legacy session shapes remain compatible.
-- Startup keeps newer local edits, keeps server-only edits, and respects deletion when a stored baseline exists.
-- Save success replaces only unchanged reference sources and preserves references edited while the request was pending.
-- Re-saving identical data-URL content reuses one deterministic file.
-- URL tests cover userinfo, path credentials, `key`, `credential`, `code`, arbitrary query names, fragments, IPv6, and non-default ports.
+- 正常生图、聊天、历史、配置档案、队列和 /classic 的界面与操作方式保持不变。
+- 现有配置、历史、Studio 会话、/outputs 链接和旧 UUID 参考图文件继续可读。
+- 浏览器中较新的本地会话不会再因为服务端存在旧的非空文件而消失。
+- 含参考图的会话在第一次成功规范化保存后会变小，也不会继续反复改写相同文件。
+- 诊断界面显示的接口信息会减少，只展示主机和端口；配置抽屉仍然显示用户填写的完整地址。
+- 只有恶意构造或意外巨大的请求会遇到新的 HTTP 413。
+- v1.0.5 ZIP 保持不变，继续作为回滚版本。
 
-Before a new candidate reaches `G:`:
+## 6. 错误处理
 
-1. Full Python suite.
-2. All Node test modules and `npm run test:size`.
-3. TypeScript/Vite build.
-4. Four-module `py_compile`.
-5. Six UTF-8 BOM and PowerShell 5.1 parser checks.
-6. Exact-manifest package and extracted portable-runtime smoke.
-7. LocalOnly preflight.
-8. API/browser smoke without paid upstream calls.
-9. Final whole-branch review with zero unresolved Critical/Important findings.
-10. Only then overwrite the v1.0.6 G: candidate and run full destination preflight.
+- 请求体超限：在具体接口解析前返回 HTTP 413。
+- 上游已检查字节超限：继续使用现有稳定的“上游图片结果超过请求级安全预算”错误合同。
+- Studio 字段过大或未知：对有明确上限的文本和 metadata 做截断，未知大对象字段直接忽略。只有编码后请求体超过路由限制，或规范化会话 JSON 仍超过 32 MiB 时，才返回 HTTP 413。
+- 本地同步基线损坏：忽略损坏基线，使用第一次启动的 updatedAt 并集合并；成功加载后重新写入安全基线。
+- 参考图规范化不匹配：保留当前本地数据，交给下一次正常保存处理。
 
-## 8. Residual Risks
+## 7. 测试与发布门禁
 
-- Cancellation still cannot guarantee provider-side cancellation or refund after an upstream accepts work.
-- Locks and the job registry remain single-process by design.
-- A first upgrade startup without a stored baseline cannot perfectly distinguish an intentional deletion from a stale local-only copy; it favors preservation once, then records a baseline for correct future merges.
-- Magic-byte validation may still accept structurally corrupt raster files. This is a documented Minor issue deferred to a future dependency-aware image-decoding enhancement.
+每一个修复分片都必须先写失败回归测试、确认 RED，再修改产品代码并确认 GREEN。
+
+必须覆盖以下定向场景：
+
+- 多个无效 Base64/URL 候选在有效图片数量为 0 时，仍然能够耗尽已检查字节预算。
+- 有效图片继续遵守有效图片数量限制，并且不会被重复计算字节。
+- 超大的 session、chat、diagnostics、config 和 generation 请求会在接口解析前返回 413。
+- 体积过大的嵌套 session 字段不会持久化，正常旧会话结构仍然兼容。
+- 启动时保留较新的本地编辑、服务端独有编辑，并在存在同步基线时正确处理删除。
+- 保存成功只替换没有被用户继续修改的参考图 src，等待期间修改的参考图保持不变。
+- 同一个 data URL 内容重复保存时复用同一个稳定文件。
+- URL 测试覆盖 userinfo、路径凭据、key、credential、code、任意查询参数名、fragment、IPv6 和非默认端口。
+
+新的候选包写入 G: 之前，必须依次通过：
+
+1. Python 全量测试。
+2. 所有 Node 测试模块和 npm run test:size。
+3. TypeScript/Vite 构建。
+4. 四个 Python 模块的 py_compile。
+5. 6 个 PowerShell 脚本的 UTF-8 BOM 和 PowerShell 5.1 语法检查。
+6. 精确白名单打包和解压后的便携 Python smoke。
+7. LocalOnly 发布预检。
+8. 不调用付费上游 API 的接口和浏览器 smoke。
+9. 最终整分支审查，未解决 Critical/Important 必须为 0。
+10. 只有以上项目全部通过，才能覆盖 G 盘 v1.0.6 候选并运行完整目标目录预检。
+
+## 8. 修复后仍然存在的限制
+
+- 上游已经接受任务后，本地取消仍不能保证供应商侧停止计算或退款。
+- 锁和任务注册表仍然是单进程设计。
+- 第一次升级启动时，因为旧版本没有保存同步基线，无法百分之百区分“用户有意删除”和“本地保存的是旧副本”。第一次启动优先保留数据，建立基线后，后续启动可正确处理删除。
+- 文件魔数验证仍可能接受结构损坏的栅格图片。这是已记录的 Minor，留给后续需要新增图片解码依赖时处理。
