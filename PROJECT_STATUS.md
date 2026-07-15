@@ -2,14 +2,14 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-15 +08:00
-- Phase: remediation Tasks 1-3 complete; Task 4 startup/session reconciliation starting
-- Superpowers Phase: TDD Task 4 frontend reconciliation -> Task 5 URL hints -> Task 6 final verification/review -> `finishing-a-development-branch`
+- Phase: remediation Tasks 1-4 complete; Task 5 public URL redaction starting
+- Superpowers Phase: TDD Task 5 host-only URL hints -> Task 6 final verification/review -> `finishing-a-development-branch`
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
 - Superpowers Plan: original `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; remediation `docs/superpowers/plans/2026-07-15-final-review-remediation.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: Task 3 landed in `56e3bc0`: new data URL references now use deterministic `ref-{digest}.{ext}` files derived from safe session/turn/reference IDs and bytes, reuse identical files, reject mismatched occupied targets, and preserve old UUID URLs. Start Task 4 with pure-function RED tests for startup three-way reconciliation and conditional canonical reference adoption. Full raster decoding remains a deferred Minor.
-- Latest Verification: Task 3 observed four stable-reference RED failures, then passed five focused stable/legacy/collision/concurrency tests, full Studio plus storage-concurrency regression 69/69, four-module `py_compile`, and `git diff --check`. The rejected local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains untouched; v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
+- Current Focus: Task 4 landed in `b263253`: startup now reconciles persisted marker/local/server sessions instead of replacing local state, while successful saves conditionally adopt canonical reference fields only when the current source still matches the sent source. Start Task 5 with URL redaction RED tests across diagnostics, history, sessions, IPv4/IPv6, credentials, paths, queries, fragments, and local paths. Full raster decoding remains a deferred Minor.
+- Latest Verification: Task 4 observed seven pure-function RED failures plus integration RED assertions, then passed 60/60 session/client-safety/UI tests, `npm run test:size`, TypeScript, and a production Vite build. Built Studio entry is `index-BC7ZuBQW.js` with current fallback assets refreshed. The rejected local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains untouched; v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
 
 ## Final Whole-Branch Review Findings
 - Critical: zero.
@@ -25,7 +25,8 @@
 - Task 1 — complete at `4c6f083`. RED: two tests reproduced that invalid Base64/remote candidates did not exhaust the byte budget. GREEN: targeted 5/5, full `tests.test_upstream_jobs` 64/64, image safety 10/10, and four-module compile passed. Compatibility aliases `image_count`, `total_bytes`, and `remaining_bytes` remain available.
 - Task 2 — complete at `4a4499e`. RED: non-generation Content-Length/chunked requests reached endpoints, Studio accepted an oversized declared body, and five persistence tests reproduced unbounded text/images/metadata/final JSON. GREEN: route limits are 152 MiB generation, 208 MiB Studio, and 2 MiB other unsafe APIs; normalized Studio text/images/metadata/final JSON are bounded with failed-write reference cleanup. Security/session regression passed 108/108 plus four-module compile and diff check.
 - Task 3 — complete at `56e3bc0`. RED: repeated and concurrent identical data URL saves returned different UUID URLs; deterministic-name collision handling did not exist. GREEN: identical references reuse one `ref-{32 hex}.{ext}` file without unlink churn, different content remains distinct, old UUID URLs remain unchanged, occupied mismatched targets return 409 without overwrite, and 69/69 Studio/storage tests pass.
-- Task 4 — next. Add compact persisted baseline markers, startup three-way reconciliation, and conditional adoption of server-canonical reference fields without overwriting edits made during a save.
+- Task 4 — complete at `b263253`. RED: startup/canonical helpers were absent and source assertions reproduced unconditional server replacement. GREEN: compact markers contain only revision/ID/updatedAt/active ID, missing or damaged markers use a union, baseline-aware deletion works both ways, and canonical reference fields are adopted only for unchanged sent sources. Frontend targeted tests passed 60/60 plus size and production build.
+- Task 5 — next. Make every public endpoint hint host-and-non-default-port only, including sanitized error text, history, diagnostics, and legacy/current Studio metadata.
 
 ## Final Remediation Verification
 - Security and behavior: trusted loopback Host validation runs before CORS and request parsing; foreign/DNS-rebinding hosts return 403, foreign unsafe Origin returns 403, production preflight does not expose CORS, and multipart/urlencoded/other generation bodies are byte-limited before form parsing.
@@ -51,7 +52,7 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: Task 4 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; add pure-function startup reconciliation and canonical-reference RED tests before changing `sessionRevision.ts` or `App.tsx`.
+- Start with: Task 5 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; update URL safety tests to require hostname plus non-default port only, observe RED, then make the smallest sanitizer change.
 - Superpowers phase: implement the five Important remediations in small RED/GREEN commits, run targeted spec/code-quality reviews, then require zero unresolved Critical/Important findings in another whole-branch review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Rejected package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`.
