@@ -3,6 +3,35 @@ export type SessionLike = {
   updatedAt?: unknown;
 };
 
+export type PersistedSessionBaselineMarkers = {
+  version: 1;
+  revision: number;
+  activeSessionId: string;
+  sessions: Array<{ id: string; updatedAt: string }>;
+};
+
+type ReferenceLike = {
+  id: string;
+  src?: unknown;
+  mime_type?: unknown;
+  size?: unknown;
+  dimensions?: unknown;
+};
+
+type TurnWithReferences = {
+  id: string;
+  referenceSnapshots?: readonly ReferenceLike[];
+};
+
+export type SessionWithReferences = SessionLike & {
+  turns?: readonly TurnWithReferences[];
+};
+
+const persistedBaselineVersion = 1;
+const persistedBaselineMaxSessions = 80;
+const persistedBaselineMaxIdChars = 512;
+const persistedBaselineMaxTimestampChars = 128;
+
 type Timestamp = {
   valid: boolean;
   value: number;
@@ -79,6 +108,91 @@ export function buildSessionSavePayload<Session>(
   };
 }
 
+function markerText(value: unknown, maxChars: number) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed.length <= maxChars ? trimmed : "";
+}
+
+function markerSession(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as { id?: unknown; updatedAt?: unknown };
+  const id = markerText(source.id, persistedBaselineMaxIdChars);
+  const updatedAt = markerText(source.updatedAt, persistedBaselineMaxTimestampChars);
+  if (!id || !updatedAt || !Number.isFinite(Date.parse(updatedAt))) return null;
+  return { id, updatedAt };
+}
+
+export function buildPersistedBaselineMarkers<Session extends SessionLike>({
+  revision,
+  activeSessionId,
+  sessions,
+}: {
+  revision: unknown;
+  activeSessionId: unknown;
+  sessions: readonly Session[];
+}): PersistedSessionBaselineMarkers {
+  const markers: PersistedSessionBaselineMarkers["sessions"] = [];
+  const seen = new Set<string>();
+  for (const session of sessions) {
+    const marker = markerSession(session);
+    if (!marker || seen.has(marker.id)) continue;
+    markers.push(marker);
+    seen.add(marker.id);
+    if (markers.length >= persistedBaselineMaxSessions) break;
+  }
+  const requestedActiveSessionId = markerText(activeSessionId, persistedBaselineMaxIdChars);
+  const normalizedActiveSessionId = seen.has(requestedActiveSessionId)
+    ? requestedActiveSessionId
+    : markers[0]?.id || "";
+  return {
+    version: persistedBaselineVersion,
+    revision: normalizeSessionRevision(revision),
+    activeSessionId: normalizedActiveSessionId,
+    sessions: markers,
+  };
+}
+
+export function normalizePersistedBaselineMarkers(
+  value: unknown,
+): PersistedSessionBaselineMarkers | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as {
+    version?: unknown;
+    revision?: unknown;
+    activeSessionId?: unknown;
+    sessions?: unknown;
+  };
+  if (
+    source.version !== persistedBaselineVersion
+    || typeof source.revision !== "number"
+    || !Number.isInteger(source.revision)
+    || source.revision < 1
+    || typeof source.activeSessionId !== "string"
+    || !Array.isArray(source.sessions)
+    || source.sessions.length > persistedBaselineMaxSessions
+  ) {
+    return null;
+  }
+
+  const sessions: PersistedSessionBaselineMarkers["sessions"] = [];
+  const seen = new Set<string>();
+  for (const item of source.sessions) {
+    const marker = markerSession(item);
+    if (!marker || seen.has(marker.id)) return null;
+    sessions.push(marker);
+    seen.add(marker.id);
+  }
+  const activeSessionId = markerText(source.activeSessionId, persistedBaselineMaxIdChars);
+  if (source.activeSessionId && (!activeSessionId || !seen.has(activeSessionId))) return null;
+  return {
+    version: persistedBaselineVersion,
+    revision: source.revision,
+    activeSessionId,
+    sessions,
+  };
+}
+
 export function advanceSessionServerBaseline<Session extends SessionLike>({
   baseline,
   serverRevision,
@@ -110,7 +224,7 @@ export function advanceSessionServerBaseline<Session extends SessionLike>({
 }
 
 export function mergeSessionsByUpdatedAt<Session extends SessionLike>(
-  baselineSessions: readonly Session[],
+  baselineSessions: readonly SessionLike[],
   localSessions: readonly Session[],
   serverSessions: readonly Session[],
 ) {
@@ -142,6 +256,154 @@ export function mergeSessionsByUpdatedAt<Session extends SessionLike>(
   }
 
   return merged.sort(compareSessionOrder);
+}
+
+export function reconcileInitialSessionState<Session extends SessionLike>({
+  baselineMarkers,
+  localSessions,
+  localActiveSessionId,
+  serverSessions,
+  serverActiveSessionId,
+}: {
+  baselineMarkers: unknown;
+  localSessions: readonly Session[];
+  localActiveSessionId: string;
+  serverSessions: readonly Session[];
+  serverActiveSessionId: string;
+}) {
+  const baseline = normalizePersistedBaselineMarkers(baselineMarkers);
+  const sessions = mergeSessionsByUpdatedAt(
+    baseline?.sessions || [],
+    localSessions,
+    serverSessions,
+  );
+  const ids = new Set(sessions.map((session) => session.id));
+  const activeSessionId = [
+    localActiveSessionId,
+    serverActiveSessionId,
+    baseline?.activeSessionId || "",
+    sessions[0]?.id || "",
+  ].find((candidate) => ids.has(candidate)) || "";
+  return {
+    sessions,
+    activeSessionId,
+    usedBaseline: baseline != null,
+  };
+}
+
+function turnById(session: SessionWithReferences | undefined): Map<string, TurnWithReferences> {
+  return new Map<string, TurnWithReferences>(
+    (Array.isArray(session?.turns) ? session.turns : [])
+      .filter((turn) => turn && typeof turn.id === "string")
+      .map((turn) => [turn.id, turn] as const),
+  );
+}
+
+function referenceById(turn: TurnWithReferences | undefined): Map<string, ReferenceLike> {
+  return new Map<string, ReferenceLike>(
+    (Array.isArray(turn?.referenceSnapshots) ? turn.referenceSnapshots : [])
+      .filter((reference) => reference && typeof reference.id === "string")
+      .map((reference) => [reference.id, reference] as const),
+  );
+}
+
+function canonicalReferenceFields(reference: ReferenceLike) {
+  const src = typeof reference.src === "string" ? reference.src : "";
+  if (!src.startsWith("/outputs/")) return null;
+  const fields: Partial<ReferenceLike> = { src };
+  if (typeof reference.mime_type === "string" && reference.mime_type) {
+    fields.mime_type = reference.mime_type;
+  }
+  if (typeof reference.size === "number" && Number.isFinite(reference.size) && reference.size >= 0) {
+    fields.size = reference.size;
+  }
+  if (reference.dimensions && typeof reference.dimensions === "object" && !Array.isArray(reference.dimensions)) {
+    fields.dimensions = { ...(reference.dimensions as Record<string, unknown>) };
+  }
+  return fields;
+}
+
+function referenceFieldsMatch(reference: ReferenceLike, fields: Partial<ReferenceLike>) {
+  const record = reference as Record<string, unknown>;
+  return Object.entries(fields).every(([key, value]) => (
+    key === "dimensions"
+      ? JSON.stringify(reference.dimensions) === JSON.stringify(value)
+      : record[key] === value
+  ));
+}
+
+export function applyCanonicalReferenceUpdates<Session extends SessionWithReferences>({
+  currentSessions,
+  sentSessions,
+  serverSessions,
+}: {
+  currentSessions: readonly Session[];
+  sentSessions: readonly Session[];
+  serverSessions: readonly Session[];
+}) {
+  const sentById = new Map(sentSessions.map((session) => [session.id, session]));
+  const serverById = new Map(serverSessions.map((session) => [session.id, session]));
+  let changed = false;
+
+  const sessions = currentSessions.map((currentSession) => {
+    const sentSession = sentById.get(currentSession.id);
+    const serverSession = serverById.get(currentSession.id);
+    if (!sentSession || !serverSession || !Array.isArray(currentSession.turns)) {
+      return currentSession;
+    }
+    const sentTurns = turnById(sentSession);
+    const serverTurns = turnById(serverSession);
+    let sessionChanged = false;
+    const turns = currentSession.turns.map((currentTurn: TurnWithReferences) => {
+      const sentTurn = sentTurns.get(currentTurn.id);
+      const serverTurn = serverTurns.get(currentTurn.id);
+      if (!sentTurn || !serverTurn || !Array.isArray(currentTurn.referenceSnapshots)) {
+        return currentTurn;
+      }
+      const sentReferences = referenceById(sentTurn);
+      const serverReferences = referenceById(serverTurn);
+      let turnChanged = false;
+      const referenceSnapshots = currentTurn.referenceSnapshots.map((currentReference: ReferenceLike) => {
+        const sentReference = sentReferences.get(currentReference.id);
+        const serverReference = serverReferences.get(currentReference.id);
+        const sentSrc = typeof sentReference?.src === "string" ? sentReference.src : "";
+        if (!sentSrc || currentReference.src !== sentSrc || !serverReference) {
+          return currentReference;
+        }
+        const fields = canonicalReferenceFields(serverReference);
+        if (!fields || referenceFieldsMatch(currentReference, fields)) {
+          return currentReference;
+        }
+        changed = true;
+        sessionChanged = true;
+        turnChanged = true;
+        return { ...currentReference, ...fields };
+      });
+      return turnChanged ? { ...currentTurn, referenceSnapshots } : currentTurn;
+    });
+    return sessionChanged ? { ...currentSession, turns } as Session : currentSession;
+  });
+
+  return { sessions, changed };
+}
+
+export function sessionStateMatchesSnapshot<Session>({
+  currentSessions,
+  currentActiveSessionId,
+  snapshotSessions,
+  snapshotActiveSessionId,
+}: {
+  currentSessions: readonly Session[];
+  currentActiveSessionId: string;
+  snapshotSessions: readonly Session[];
+  snapshotActiveSessionId: string;
+}) {
+  if (currentActiveSessionId !== snapshotActiveSessionId) return false;
+  try {
+    return JSON.stringify(currentSessions) === JSON.stringify(snapshotSessions);
+  } catch {
+    return false;
+  }
 }
 
 export function reconcileSessionConflictState<Session extends SessionLike>({

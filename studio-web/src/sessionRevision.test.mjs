@@ -142,6 +142,248 @@ test("sessions created independently on both sides are merged as a union", () =>
   );
 });
 
+test("persisted baseline markers keep only compact server identity data", () => {
+  assert.equal(typeof sessionRevision.buildPersistedBaselineMarkers, "function");
+  assert.equal(typeof sessionRevision.normalizePersistedBaselineMarkers, "function");
+  const serverSessions = [
+    {
+      id: "server-one",
+      updatedAt: "2026-07-15T10:00:00Z",
+      turns: [{ referenceSnapshots: [{ src: "data:image/png;base64,secret-image" }] }],
+      api_key: "secret-key",
+    },
+    {
+      id: "server-two",
+      updatedAt: "2026-07-15T11:00:00Z",
+      turns: [],
+    },
+  ];
+
+  const markers = sessionRevision.buildPersistedBaselineMarkers({
+    revision: 7,
+    activeSessionId: "server-two",
+    sessions: serverSessions,
+  });
+
+  assert.deepEqual(markers, {
+    version: 1,
+    revision: 7,
+    activeSessionId: "server-two",
+    sessions: [
+      { id: "server-one", updatedAt: "2026-07-15T10:00:00Z" },
+      { id: "server-two", updatedAt: "2026-07-15T11:00:00Z" },
+    ],
+  });
+  assert.deepEqual(sessionRevision.normalizePersistedBaselineMarkers(markers), markers);
+  const serialized = JSON.stringify(markers);
+  assert.doesNotMatch(serialized, /secret-key|secret-image|referenceSnapshots|api_key/);
+  assert.equal(sessionRevision.normalizePersistedBaselineMarkers({ ...markers, revision: "7" }), null);
+  assert.equal(sessionRevision.normalizePersistedBaselineMarkers({ ...markers, sessions: "broken" }), null);
+});
+
+test("initial reconciliation keeps newer edits and sessions unique to either side", () => {
+  assert.equal(typeof sessionRevision.reconcileInitialSessionState, "function");
+  const localSessions = [
+    { id: "local-newer", updatedAt: "2026-07-15T12:00:00Z", value: "local-newer" },
+    { id: "server-newer", updatedAt: "2026-07-15T09:00:00Z", value: "local-older" },
+    { id: "local-only", updatedAt: "2026-07-15T10:00:00Z", value: "local-only" },
+  ];
+  const serverSessions = [
+    { id: "local-newer", updatedAt: "2026-07-15T08:00:00Z", value: "server-older" },
+    { id: "server-newer", updatedAt: "2026-07-15T13:00:00Z", value: "server-newer" },
+    { id: "server-only", updatedAt: "2026-07-15T11:00:00Z", value: "server-only" },
+  ];
+
+  const reconciled = sessionRevision.reconcileInitialSessionState({
+    baselineMarkers: null,
+    localSessions,
+    localActiveSessionId: "local-only",
+    serverSessions,
+    serverActiveSessionId: "server-only",
+  });
+  const byId = Object.fromEntries(reconciled.sessions.map((session) => [session.id, session]));
+
+  assert.equal(reconciled.usedBaseline, false);
+  assert.deepEqual(reconciled.sessions.map((session) => session.id), [
+    "server-newer",
+    "local-newer",
+    "server-only",
+    "local-only",
+  ]);
+  assert.equal(byId["local-newer"].value, "local-newer");
+  assert.equal(byId["server-newer"].value, "server-newer");
+  assert.equal(reconciled.activeSessionId, "local-only");
+});
+
+test("initial reconciliation applies baseline-aware deletions in both directions", () => {
+  const baselineSessions = [
+    { id: "deleted-locally", updatedAt: "2026-07-15T10:00:00Z" },
+    { id: "deleted-on-server", updatedAt: "2026-07-15T10:01:00Z" },
+    { id: "kept", updatedAt: "2026-07-15T10:02:00Z" },
+  ];
+  const markers = sessionRevision.buildPersistedBaselineMarkers({
+    revision: 4,
+    activeSessionId: "deleted-locally",
+    sessions: baselineSessions,
+  });
+  const localSessions = [
+    { ...baselineSessions[1] },
+    { ...baselineSessions[2] },
+  ];
+  const serverSessions = [
+    { ...baselineSessions[0] },
+    { ...baselineSessions[2] },
+  ];
+
+  const reconciled = sessionRevision.reconcileInitialSessionState({
+    baselineMarkers: markers,
+    localSessions,
+    localActiveSessionId: "deleted-on-server",
+    serverSessions,
+    serverActiveSessionId: "deleted-locally",
+  });
+
+  assert.equal(reconciled.usedBaseline, true);
+  assert.deepEqual(reconciled.sessions.map((session) => session.id), ["kept"]);
+  assert.equal(reconciled.activeSessionId, "kept");
+});
+
+test("missing or damaged startup baseline falls back to a loss-avoiding union", () => {
+  const localSessions = [{ id: "local-only", updatedAt: "2026-07-15T10:00:00Z" }];
+  const serverSessions = [{ id: "server-only", updatedAt: "2026-07-15T11:00:00Z" }];
+  const damaged = {
+    version: 1,
+    revision: 3,
+    activeSessionId: "server-only",
+    sessions: [{ id: "broken", updatedAt: 123 }],
+  };
+
+  const reconciled = sessionRevision.reconcileInitialSessionState({
+    baselineMarkers: damaged,
+    localSessions,
+    localActiveSessionId: "missing-local-active",
+    serverSessions,
+    serverActiveSessionId: "server-only",
+  });
+
+  assert.equal(reconciled.usedBaseline, false);
+  assert.deepEqual(reconciled.sessions.map((session) => session.id), ["server-only", "local-only"]);
+  assert.equal(reconciled.activeSessionId, "server-only");
+});
+
+test("canonical reference updates apply only to unchanged sent sources without mutation", () => {
+  assert.equal(typeof sessionRevision.applyCanonicalReferenceUpdates, "function");
+  const sentSessions = [{
+    id: "session-one",
+    updatedAt: "2026-07-15T10:00:00Z",
+    turns: [{
+      id: "turn-one",
+      referenceSnapshots: [
+        { id: "ref-apply", name: "keep-name.png", src: "data:image/png;base64,apply" },
+        { id: "ref-edited", src: "data:image/png;base64,old" },
+      ],
+    }],
+  }];
+  const currentSessions = structuredClone(sentSessions);
+  currentSessions[0].turns[0].referenceSnapshots[1].src = "data:image/png;base64,user-edited";
+  const serverSessions = [{
+    id: "session-one",
+    updatedAt: "2026-07-15T10:00:00Z",
+    turns: [{
+      id: "turn-one",
+      referenceSnapshots: [
+        {
+          id: "ref-apply",
+          name: "server-name.png",
+          src: "/outputs/session_refs/ref-applied.png",
+          mime_type: "image/png",
+          size: 123,
+          dimensions: { width: 1, height: 1 },
+        },
+        {
+          id: "ref-edited",
+          src: "/outputs/session_refs/ref-must-not-overwrite.png",
+          mime_type: "image/png",
+          size: 456,
+        },
+      ],
+    }],
+  }];
+  const currentBefore = structuredClone(currentSessions);
+  const sentBefore = structuredClone(sentSessions);
+  const serverBefore = structuredClone(serverSessions);
+
+  const result = sessionRevision.applyCanonicalReferenceUpdates({
+    currentSessions,
+    sentSessions,
+    serverSessions,
+  });
+
+  assert.equal(result.changed, true);
+  assert.notEqual(result.sessions, currentSessions);
+  const references = result.sessions[0].turns[0].referenceSnapshots;
+  assert.deepEqual(references[0], {
+    id: "ref-apply",
+    name: "keep-name.png",
+    src: "/outputs/session_refs/ref-applied.png",
+    mime_type: "image/png",
+    size: 123,
+    dimensions: { width: 1, height: 1 },
+  });
+  assert.equal(references[1].src, "data:image/png;base64,user-edited");
+  assert.equal(references[1].mime_type, undefined);
+  assert.deepEqual(currentSessions, currentBefore);
+  assert.deepEqual(sentSessions, sentBefore);
+  assert.deepEqual(serverSessions, serverBefore);
+});
+
+test("canonical reference updates ignore mismatched identities and report no change", () => {
+  const currentSessions = [{
+    id: "session-current",
+    updatedAt: "2026-07-15T10:00:00Z",
+    turns: [{ id: "turn-current", referenceSnapshots: [{ id: "ref-current", src: "data:image/png;base64,x" }] }],
+  }];
+  const sentSessions = structuredClone(currentSessions);
+  const serverSessions = [{
+    id: "session-other",
+    updatedAt: "2026-07-15T10:00:00Z",
+    turns: [{ id: "turn-current", referenceSnapshots: [{ id: "ref-current", src: "/outputs/session_refs/other.png" }] }],
+  }];
+
+  const result = sessionRevision.applyCanonicalReferenceUpdates({
+    currentSessions,
+    sentSessions,
+    serverSessions,
+  });
+
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.sessions, currentSessions);
+});
+
+test("session snapshot comparison detects real local edits", () => {
+  assert.equal(typeof sessionRevision.sessionStateMatchesSnapshot, "function");
+  const sessions = [{ id: "session-one", updatedAt: "2026-07-15T10:00:00Z", value: "same" }];
+
+  assert.equal(sessionRevision.sessionStateMatchesSnapshot({
+    currentSessions: sessions,
+    currentActiveSessionId: "session-one",
+    snapshotSessions: structuredClone(sessions),
+    snapshotActiveSessionId: "session-one",
+  }), true);
+  assert.equal(sessionRevision.sessionStateMatchesSnapshot({
+    currentSessions: [{ ...sessions[0], value: "edited" }],
+    currentActiveSessionId: "session-one",
+    snapshotSessions: sessions,
+    snapshotActiveSessionId: "session-one",
+  }), false);
+  assert.equal(sessionRevision.sessionStateMatchesSnapshot({
+    currentSessions: sessions,
+    currentActiveSessionId: "missing",
+    snapshotSessions: sessions,
+    snapshotActiveSessionId: "session-one",
+  }), false);
+});
+
 test("stale first conflict keeps latest local state and retries with the newer baseline revision", async () => {
   assert.equal(typeof sessionRevision.advanceSessionServerBaseline, "function");
   const revisionTwoSessions = [

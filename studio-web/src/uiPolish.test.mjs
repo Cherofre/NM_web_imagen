@@ -250,7 +250,7 @@ test("session persistence defers heavy storage work while typing", () => {
 });
 
 test("session persistence keeps one atomic server baseline and ignores stale responses", () => {
-  assert.match(appSource, /import \{ advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave \} from "\.\/sessionRevision";/);
+  assert.match(appSource, /import \{[\s\S]*advanceSessionServerBaseline,[\s\S]*buildSessionSavePayload,[\s\S]*normalizeSessionRevision,[\s\S]*reconcileSessionConflictState,[\s\S]*runSessionSaveWithRetry,[\s\S]*shouldSkipSessionSave,[\s\S]*\} from "\.\/sessionRevision";/);
   assert.match(appSource, /function normalizeSessionStatePayload\([\s\S]*revision:\s*normalizeSessionRevision\(source\.revision\)/);
   assert.match(appSource, /const sessionsRef = useRef<WorkbenchSession\[\]>\(sessions\);/);
   assert.match(appSource, /const sessionServerBaselineRef = useRef<\{[\s\S]*revision: number;[\s\S]*sessions: WorkbenchSession\[\];[\s\S]*\}>\(\{[\s\S]*revision: 1,[\s\S]*sessions: \[\],[\s\S]*\}\);/);
@@ -301,7 +301,7 @@ test("session persistence keeps one atomic server baseline and ignores stale res
     "A stale initial snapshot must return before replacing the server baseline",
   );
   assert.ok(
-    loadSource.indexOf("if (!advancedBaseline.accepted) return;") < loadSource.indexOf("setSessions(normalized.sessions);"),
+    loadSource.indexOf("if (!advancedBaseline.accepted) return;") < loadSource.indexOf("setSessions(mergedSessions);"),
     "A stale initial snapshot must return before replacing session UI",
   );
   assert.match(saveSource, /skipNextSessionSaveRef\.current = \{ sessions: mergedSessions, activeSessionId: mergedActiveSessionId \};/);
@@ -316,6 +316,34 @@ test("session persistence keeps one atomic server baseline and ignores stale res
   assert.match(appSource, /const skipSave = skipNextSessionSaveRef\.current;[\s\S]*skipNextSessionSaveRef\.current = null;[\s\S]*if \(shouldSkipSessionSave\(skipSave, sessions, activeSessionId\)\) \{[\s\S]*return undefined;/);
   assert.match(i18nSource, /"status\.sessionConflictRefresh": "会话已在其他页面更新；自动合并重试仍冲突，请刷新页面后再继续。"/);
   assert.match(i18nSource, /"status\.sessionConflictRefresh": "This chat changed in another tab\. Automatic merge still conflicted; refresh the page before continuing\."/);
+});
+
+test("session startup merges local and server state while save success adopts only safe canonical references", () => {
+  assert.match(appSource, /const sessionBaselineStorageKey = "image-generate-web-tool:studio-session-server-baseline-v1";/);
+  assert.match(appSource, /function loadPersistedSessionBaselineMarkers\(\)[\s\S]*normalizePersistedBaselineMarkers/);
+  assert.match(appSource, /function persistSessionBaselineMarkers\([\s\S]*buildPersistedBaselineMarkers\([\s\S]*localStorage\.setItem\(sessionBaselineStorageKey/);
+  assert.match(appSource, /catch \{[\s\S]*localStorage\.removeItem\(sessionBaselineStorageKey\)/);
+
+  const loadStart = appSource.indexOf("async function loadServerSessions()");
+  const loadEnd = appSource.indexOf("void loadServerSessions();", loadStart);
+  const loadSource = appSource.slice(loadStart, loadEnd);
+  assert.match(loadSource, /const persistedBaselineMarkers = loadPersistedSessionBaselineMarkers\(\);/);
+  assert.match(loadSource, /reconcileInitialSessionState\(\{[\s\S]*baselineMarkers: persistedBaselineMarkers,[\s\S]*localSessions,[\s\S]*serverSessions: normalized\.sessions/);
+  assert.match(loadSource, /persistSessionBaselineMarkers\(\s*normalized\.revision,\s*normalized\.activeSessionId,\s*normalized\.sessions,?\s*\)/);
+  assert.match(loadSource, /sessionStateMatchesSnapshot\(\{[\s\S]*snapshotSessions: normalized\.sessions,[\s\S]*snapshotActiveSessionId: normalized\.activeSessionId/);
+  assert.doesNotMatch(loadSource, /setSessions\(normalized\.sessions\)/);
+
+  const saveStart = appSource.indexOf("async function saveStudioSessionsOnce(");
+  const saveEnd = appSource.indexOf("useEffect(() =>", saveStart);
+  const saveSource = appSource.slice(saveStart, saveEnd);
+  const successStart = saveSource.indexOf('if (result.kind === "success")');
+  const exhaustedStart = saveSource.indexOf('if (result.kind === "exhausted")', successStart);
+  const successSource = saveSource.slice(successStart, exhaustedStart);
+  assert.match(successSource, /persistSessionBaselineMarkers\(\s*normalized\.revision,\s*normalized\.activeSessionId,\s*normalized\.sessions,?\s*\)/);
+  assert.match(successSource, /const currentMatchesSent = sessionStateMatchesSnapshot\(\{[\s\S]*snapshotSessions: result\.state\.sessions,[\s\S]*snapshotActiveSessionId: result\.state\.activeSessionId/);
+  assert.match(successSource, /applyCanonicalReferenceUpdates\(\{[\s\S]*currentSessions: sessionsRef\.current,[\s\S]*sentSessions: result\.state\.sessions,[\s\S]*serverSessions: normalized\.sessions/);
+  assert.match(successSource, /if \(canonical\.changed\) \{[\s\S]*sessionsRef\.current = canonical\.sessions;[\s\S]*setSessions\(canonical\.sessions\);/);
+  assert.match(successSource, /if \(currentMatchesSent\) \{[\s\S]*skipNextSessionSaveRef\.current = \{ sessions: canonical\.sessions, activeSessionId: canonicalActiveSessionId \};/);
 });
 
 test("generation queue does not block additional generation submissions", () => {

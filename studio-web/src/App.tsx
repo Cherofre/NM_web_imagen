@@ -89,7 +89,19 @@ import {
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
-import { advanceSessionServerBaseline, buildSessionSavePayload, normalizeSessionRevision, reconcileSessionConflictState, runSessionSaveWithRetry, shouldSkipSessionSave } from "./sessionRevision";
+import {
+  advanceSessionServerBaseline,
+  applyCanonicalReferenceUpdates,
+  buildPersistedBaselineMarkers,
+  buildSessionSavePayload,
+  normalizePersistedBaselineMarkers,
+  normalizeSessionRevision,
+  reconcileInitialSessionState,
+  reconcileSessionConflictState,
+  runSessionSaveWithRetry,
+  sessionStateMatchesSnapshot,
+  shouldSkipSessionSave,
+} from "./sessionRevision";
 
 type Translator = ReturnType<typeof createTranslator>;
 
@@ -289,6 +301,7 @@ type ConfigPayload = {
 const sessionStorageKey = "image-generate-web-tool:studio-session";
 const sessionsStorageKey = "image-generate-web-tool:studio-sessions";
 const activeSessionStorageKey = "image-generate-web-tool:studio-active-session";
+const sessionBaselineStorageKey = "image-generate-web-tool:studio-session-server-baseline-v1";
 const gptStorageKey = "image-generate-web-tool:studio-gpt-form";
 const bananaStorageKey = "image-generate-web-tool:studio-banana-form";
 const engineStorageKey = "image-generate-web-tool:studio-active-engine";
@@ -628,6 +641,38 @@ function loadJson<T>(key: string, fallback: T): T {
     return parsed;
   } catch {
     return fallback;
+  }
+}
+
+function loadPersistedSessionBaselineMarkers() {
+  try {
+    const raw = localStorage.getItem(sessionBaselineStorageKey);
+    return normalizePersistedBaselineMarkers(raw ? JSON.parse(raw) : null);
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionBaselineMarkers(
+  revision: number,
+  activeSessionId: string,
+  sessions: WorkbenchSession[],
+) {
+  const markers = buildPersistedBaselineMarkers({
+    revision,
+    activeSessionId,
+    sessions,
+  });
+  try {
+    localStorage.setItem(sessionBaselineStorageKey, JSON.stringify(markers));
+    return markers;
+  } catch {
+    try {
+      localStorage.removeItem(sessionBaselineStorageKey);
+    } catch {
+      // A missing marker intentionally falls back to the loss-avoiding startup union.
+    }
+    return null;
   }
 }
 
@@ -1186,6 +1231,11 @@ function App() {
         revision: reconciled.baseline.revision,
         sessions: compactSessionsForStorage(reconciled.baseline.sessions),
       };
+      persistSessionBaselineMarkers(
+        normalizedCurrent.revision,
+        normalizedCurrent.activeSessionId,
+        normalizedCurrent.sessions,
+      );
       sessionsRef.current = mergedSessions;
       activeSessionIdRef.current = mergedActiveSessionId;
       skipNextSessionSaveRef.current = { sessions: mergedSessions, activeSessionId: mergedActiveSessionId };
@@ -1245,6 +1295,43 @@ function App() {
         revision: advancedBaseline.baseline.revision,
         sessions: compactSessionsForStorage(advancedBaseline.baseline.sessions),
       };
+      persistSessionBaselineMarkers(
+        normalized.revision,
+        normalized.activeSessionId,
+        normalized.sessions,
+      );
+      const currentMatchesSent = sessionStateMatchesSnapshot({
+        currentSessions: compactSessionsForStorage(sessionsRef.current),
+        currentActiveSessionId: activeSessionIdRef.current,
+        snapshotSessions: result.state.sessions,
+        snapshotActiveSessionId: result.state.activeSessionId,
+      });
+      const canonical = applyCanonicalReferenceUpdates({
+        currentSessions: sessionsRef.current,
+        sentSessions: result.state.sessions,
+        serverSessions: normalized.sessions,
+      });
+      if (canonical.changed) {
+        const canonicalActiveSessionId = canonical.sessions.some((session) => session.id === activeSessionIdRef.current)
+          ? activeSessionIdRef.current
+          : canonical.sessions.some((session) => session.id === normalized.activeSessionId)
+          ? normalized.activeSessionId
+          : canonical.sessions[0]?.id || "";
+        sessionsRef.current = canonical.sessions;
+        activeSessionIdRef.current = canonicalActiveSessionId;
+        if (currentMatchesSent) {
+          skipNextSessionSaveRef.current = { sessions: canonical.sessions, activeSessionId: canonicalActiveSessionId };
+        }
+        setSessions(canonical.sessions);
+        setActiveSessionId(canonicalActiveSessionId);
+        try {
+          localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(canonical.sessions)));
+          localStorage.setItem(activeSessionStorageKey, canonicalActiveSessionId);
+        } catch {
+          // The next debounced save keeps the latest in-memory state when browser storage is full.
+        }
+        return;
+      }
       try {
         localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(sessionsRef.current)));
       } catch {
@@ -1360,6 +1447,15 @@ function App() {
         const payload = await response.json();
         const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
         if (!cancelled && normalized) {
+          const persistedBaselineMarkers = loadPersistedSessionBaselineMarkers();
+          const localSessions = compactSessionsForStorage(sessionsRef.current);
+          const reconciled = reconcileInitialSessionState({
+            baselineMarkers: persistedBaselineMarkers,
+            localSessions,
+            localActiveSessionId: activeSessionIdRef.current,
+            serverSessions: normalized.sessions,
+            serverActiveSessionId: normalized.activeSessionId,
+          });
           const advancedBaseline = advanceSessionServerBaseline({
             baseline: sessionServerBaselineRef.current,
             serverRevision: normalized.revision,
@@ -1370,13 +1466,37 @@ function App() {
             revision: advancedBaseline.baseline.revision,
             sessions: compactSessionsForStorage(advancedBaseline.baseline.sessions),
           };
-          if (normalized.sessions.length > 0) {
-            sessionsRef.current = normalized.sessions;
-            activeSessionIdRef.current = normalized.activeSessionId;
-            setSessions(normalized.sessions);
-            setActiveSessionId(normalized.activeSessionId);
-            localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(normalized.sessions)));
-            localStorage.setItem(activeSessionStorageKey, normalized.activeSessionId);
+          persistSessionBaselineMarkers(
+            normalized.revision,
+            normalized.activeSessionId,
+            normalized.sessions,
+          );
+          const mergedSessions = reconciled.sessions.length > 0
+            ? reconciled.sessions
+            : [createEmptySession(t("session.new"))];
+          const mergedActiveSessionId = mergedSessions.some((session) => session.id === reconciled.activeSessionId)
+            ? reconciled.activeSessionId
+            : mergedSessions[0]?.id || "";
+          if (sessionStateMatchesSnapshot({
+            currentSessions: mergedSessions,
+            currentActiveSessionId: mergedActiveSessionId,
+            snapshotSessions: normalized.sessions,
+            snapshotActiveSessionId: normalized.activeSessionId,
+          })) {
+            skipNextSessionSaveRef.current = {
+              sessions: mergedSessions,
+              activeSessionId: mergedActiveSessionId,
+            };
+          }
+          sessionsRef.current = mergedSessions;
+          activeSessionIdRef.current = mergedActiveSessionId;
+          setSessions(mergedSessions);
+          setActiveSessionId(mergedActiveSessionId);
+          try {
+            localStorage.setItem(sessionsStorageKey, JSON.stringify(compactSessionsForStorage(mergedSessions)));
+            localStorage.setItem(activeSessionStorageKey, mergedActiveSessionId);
+          } catch {
+            // In-memory sessions remain authoritative until a later browser-storage write succeeds.
           }
         }
       } catch {
