@@ -10,9 +10,9 @@
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: Task 5 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; begin with failing URL sanitizer tests for userinfo, paths, arbitrary queries, fragments, IPv4/IPv6, ports, schemeless hosts, and local paths.
-- Do not redo: remediation Tasks 1-4, fixes through `b263253`, Tasks 1-5 before the final review, or the July 11 full verification merely to prove the rejected candidate again. New code changes will receive targeted tests first and the full matrix at the end.
-- Verify next: diagnostics/history/session/error surfaces expose only normalized hostname plus non-default port or `[invalid endpoint]`; configuration inputs and `config.local.json` retain the full user-entered URL.
+- Start here: Task 6 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; run the full local matrix, inspect status/assets, package with no G: write, then perform API/browser smoke and whole-branch review.
+- Do not redo: remediation Tasks 1-5, fixes through `746cd5b`, Tasks 1-5 before the final review, or the July 11 full verification merely to prove the rejected candidate again. Task 6 must generate fresh evidence for the current HEAD.
+- Verify next: all Python and Node tests, size rules, build, compile, six PowerShell checks, exact-manifest package smoke, LocalOnly preflight, API/browser smoke, and a zero Critical/Important whole-branch review pass before G: sync.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: local/G v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is rejected. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected. No current v1.0.6 package is final.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
