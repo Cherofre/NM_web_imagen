@@ -1,15 +1,25 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-11 05:12 +08:00
-- Phase: v1.0.6 P1 hardening remediation and release re-verification complete; final whole-branch review pending
-- Superpowers Phase: fresh final verification and whole-branch review, then `finishing-a-development-branch`
-- Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`
+- Last Updated: 2026-07-15 +08:00
+- Phase: final whole-branch review remediation design approved and documented; written-spec review pending before implementation planning
+- Superpowers Phase: approved remediation design -> user review -> implementation plan -> TDD slices -> final verification/review -> `finishing-a-development-branch`
+- Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: All reproduced final-review gaps are fixed through `baf20c5`: unsafe cross-site/body parsing, upstream result budgets, public error redaction, cancel/remove settlement, complete release gates, trusted Host/DNS-rebinding boundaries, diagnostics classification, runtime queue cleanup, and legacy metadata read sanitization. The remaining gate is a fresh complete verification plus final review of base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest ledger commit.
-- Latest Verification: Fresh Python 215/215 and Node 101/101 passed after ledger commit `69c37e2`, along with four-module compile, frontend size rules, TypeScript/Vite build, PowerShell 5.1 parsing/BOM checks, exact-manifest packaging, portable-runtime smoke, LocalOnly preflight, G: overwrite, and full destination preflight. API/browser smoke on port `18767` passed without paid upstream calls. Local and G: v1.0.6 ZIPs now share SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4`; the G: folder has 52 files and zero forbidden items, while v1.0.5 remains for rollback. Tracked worktree is clean; only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: The review of base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through code HEAD `99d8d911f889eb3c6b905e89327a5f1ed696c041` confirmed zero Critical and five Important issues: invalid-candidate upstream bytes are not charged, non-generation API bodies/session fields are insufficiently bounded, startup can overwrite newer local sessions, successful saves do not adopt canonical reference URLs, and public URL hints retain sensitive path/query content. The user approved the complete conservative remediation design; full raster decoding remains a deferred Minor.
+- Latest Verification: Before the final review, fresh Python 216/216, 14 Node modules with 101/101, size rules, TypeScript/Vite build, four-module compile, six BOM/PowerShell 5.1 checks, portable package smoke, LocalOnly preflight, G: sync, and destination preflight passed. API/browser smoke on port `18768` also passed without paid upstream calls. Those results prove the current code state but do not close the five newly confirmed Important findings. Local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is therefore a rejected candidate, not the final release. v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
+
+## Final Whole-Branch Review Findings
+- Critical: zero.
+- Important 1: upstream request-wide bytes count only accepted rasters, so several invalid near-limit candidates can cause substantially more than 150 MiB of decode/download work.
+- Important 2: unsafe API bodies outside generation are parsed without an encoded limit, and Studio session writes can persist oversized arbitrary image/meta/text fields.
+- Important 3: startup GET replaces non-empty localStorage sessions with any non-empty server state, risking silent rollback after a delayed or failed PUT.
+- Important 4: successful PUT responses update only the server baseline; current browser state keeps Base64 references, causing repeated upload/file churn and unstable UUID URLs across tabs.
+- Important 5: public URL/error sanitization can retain credential-bearing paths or uncommon query keys.
+- Minor: magic-byte-only raster validation can accept structurally corrupt images, but it matches the approved v1.0.6 design and is deferred to a later dependency-aware decoder enhancement.
+- Approved remediation: separate checked-byte/accepted-image budgets; path-specific body limits plus bounded session schema; compact persisted baseline markers and startup three-way merge; conditional reference canonicalization plus stable content-hash paths; host-and-port-only public URL hints.
 
 ## Final Remediation Verification
 - Security and behavior: trusted loopback Host validation runs before CORS and request parsing; foreign/DNS-rebinding hosts return 403, foreign unsafe Origin returns 403, production preflight does not expose CORS, and multipart/urlencoded/other generation bodies are byte-limited before form parsing.
@@ -35,13 +45,13 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: commit this ledger update, then run fresh full verification and a final whole-branch review from `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest HEAD.
-- Superpowers phase: require zero unresolved Critical/Important findings; if review changes code, rerun the affected tests, rebuild/repackage/resync if any packaged file changes, and update this ledger again.
+- Start with: user review of `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`; after approval, write the bite-sized TDD implementation plan before touching product code.
+- Superpowers phase: implement the five Important remediations in small RED/GREEN commits, run targeted spec/code-quality reviews, then require zero unresolved Critical/Important findings in another whole-branch review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
-- Current release candidate package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4`.
-- Verified sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; share ZIP is its sibling `NM_web_imagen-v1.0.6.zip` with the same final hash. The older v1.0.5 ZIP remains.
+- Rejected package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`.
+- Sync target: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具\NM_web_imagen`; its current v1.0.6 folder/ZIP is also rejected and must not be overwritten again until all local gates and final review pass. The older v1.0.5 ZIP remains.
 - Runtime artifacts should stay out of commits and sync packages: `outputs/`, `config.local.json`, `logs/`, `.chrome-debug/`, `.runtime/`, `.venv/`, `.playwright-mcp/`, `__pycache__/`, `studio-web/node_modules/`, `studio-web/tsconfig.tsbuildinfo`, generated screenshots, and temporary zips.
-- Current-project release rule: the final package and G: candidate are verified, but branch completion still requires fresh final verification and whole-branch review. Internal ledger files remain excluded from packages and sync. Do not claim merge, push, tag, pull request, GitHub Release, or cleanup without an explicit successful action.
+- Current-project release rule: no package is final while any Critical/Important review finding remains. Internal ledger/spec/plan files remain excluded from packages and sync. Do not claim merge, push, tag, pull request, GitHub Release, or cleanup without an explicit successful action.
 
 ## v1.0.3 Planning Draft
 - Confirmed scope:

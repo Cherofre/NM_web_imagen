@@ -1,18 +1,20 @@
 # Next Actions
 
 ## Now
-- [x] Complete and review approved Tasks 1-5: application security/behavior/concurrency/persistence hardening, Windows release hardening, v1.0.6 build, package, and initial release verification.
-- [x] Fix all final-review Important findings with RED/GREEN tests and targeted spec/code-quality re-review.
-- [x] Rebuild, rerun the complete release/API/browser matrix, overwrite the rejected G: candidate, and verify fresh final SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4`.
-- [ ] Run fresh complete verification and repeat final whole-branch review until no Critical/Important remains; record the evidence and exact final HEAD in the ledger.
+- [x] Complete and review approved Tasks 1-5 plus the earlier RED/GREEN final-review remediation through code HEAD `99d8d91`.
+- [x] Rebuild and verify candidate `56aef66b…`, then reject it after the final whole-branch review confirmed zero Critical and five new Important findings.
+- [x] Get user approval for the complete conservative remediation approach and write `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`.
+- [ ] Obtain user review of the written remediation spec, then write the bite-sized TDD implementation plan.
+- [ ] Implement and review all five Important remediations: upstream checked-byte accounting, all-write body/session bounds, startup reconciliation, reference canonicalization/stable files, and host-only URL hints.
+- [ ] Rebuild, package, smoke, run LocalOnly gates, repeat final whole-branch review until no Critical/Important remains, then overwrite G: and verify the destination.
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: commit the ledger update, run fresh final verification, then review base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through the latest HEAD in worktree `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\p1-hardening-v1.0.6`.
-- Do not redo: Tasks 1-5, final-review remediation through `baf20c5`, canonical packaging, browser/API smoke on port `18767`, or the verified G: overwrite unless review changes a packaged file.
-- Verify next: full Python/Node/size/build/compile/PowerShell/package/preflight matrix, then requirements/spec/code-quality review with zero unresolved Critical/Important findings.
+- Start here: review `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`; after user approval, create the implementation plan and begin with a failing upstream-budget regression test.
+- Do not redo: Tasks 1-5, fixes through `99d8d91`, or the July 11 full verification merely to prove the rejected candidate again. New code changes will receive targeted tests first and the full matrix at the end.
+- Verify next: written-spec approval, implementation-plan self-review, then per-slice RED/GREEN evidence.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
-- Release boundary: local/G v1.0.6 SHA256 `28479e4d98c2afc68e2f1205da4fc904d8c59604291fdcd300db6a646cf766a4` is the current verified candidate. `51f75e…` was content-identical but superseded by the fresh rebuild's ZIP timestamps; the rejected `958334…` and intermediate `c355…` candidates are also superseded. Final review is still required before branch finishing.
+- Release boundary: local/G v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is rejected. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected. No current v1.0.6 package is final.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
 
 ## Prior Release Context
