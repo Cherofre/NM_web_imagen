@@ -1455,6 +1455,7 @@ function App() {
             localActiveSessionId: activeSessionIdRef.current,
             serverSessions: normalized.sessions,
             serverActiveSessionId: normalized.activeSessionId,
+            serverRevision: normalized.revision,
           });
           const advancedBaseline = advanceSessionServerBaseline({
             baseline: sessionServerBaselineRef.current,

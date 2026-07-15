@@ -264,14 +264,33 @@ export function reconcileInitialSessionState<Session extends SessionLike>({
   localActiveSessionId,
   serverSessions,
   serverActiveSessionId,
+  serverRevision,
 }: {
   baselineMarkers: unknown;
   localSessions: readonly Session[];
   localActiveSessionId: string;
   serverSessions: readonly Session[];
   serverActiveSessionId: string;
+  serverRevision: unknown;
 }) {
-  const baseline = normalizePersistedBaselineMarkers(baselineMarkers);
+  const parsedBaseline = normalizePersistedBaselineMarkers(baselineMarkers);
+  const normalizedServerRevision = normalizeSessionRevision(serverRevision);
+  const sameRevisionServerMarkers = parsedBaseline && normalizedServerRevision === parsedBaseline.revision
+    ? buildPersistedBaselineMarkers({
+        revision: normalizedServerRevision,
+        activeSessionId: serverActiveSessionId,
+        sessions: serverSessions,
+      })
+    : null;
+  const baseline = parsedBaseline && (
+    normalizedServerRevision > parsedBaseline.revision
+    || (
+      sameRevisionServerMarkers != null
+      && JSON.stringify(sameRevisionServerMarkers) === JSON.stringify(parsedBaseline)
+    )
+  )
+    ? parsedBaseline
+    : null;
   const sessions = mergeSessionsByUpdatedAt(
     baseline?.sessions || [],
     localSessions,

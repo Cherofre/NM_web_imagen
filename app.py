@@ -1566,6 +1566,11 @@ def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
     total_bytes = 0
     sessions_value = payload.get("sessions") if isinstance(payload, dict) else []
     sessions = sessions_value if isinstance(sessions_value, list) else []
+    if len(sessions) > STUDIO_MAX_SESSIONS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"会话数量超过 {STUDIO_MAX_SESSIONS} 个上限",
+        )
     for session in sessions:
         if not isinstance(session, dict):
             continue

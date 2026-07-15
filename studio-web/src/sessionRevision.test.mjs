@@ -200,6 +200,7 @@ test("initial reconciliation keeps newer edits and sessions unique to either sid
     localActiveSessionId: "local-only",
     serverSessions,
     serverActiveSessionId: "server-only",
+    serverRevision: 1,
   });
   const byId = Object.fromEntries(reconciled.sessions.map((session) => [session.id, session]));
 
@@ -241,6 +242,7 @@ test("initial reconciliation applies baseline-aware deletions in both directions
     localActiveSessionId: "deleted-on-server",
     serverSessions,
     serverActiveSessionId: "deleted-locally",
+    serverRevision: 5,
   });
 
   assert.equal(reconciled.usedBaseline, true);
@@ -264,11 +266,62 @@ test("missing or damaged startup baseline falls back to a loss-avoiding union", 
     localActiveSessionId: "missing-local-active",
     serverSessions,
     serverActiveSessionId: "server-only",
+    serverRevision: 3,
   });
 
   assert.equal(reconciled.usedBaseline, false);
   assert.deepEqual(reconciled.sessions.map((session) => session.id), ["server-only", "local-only"]);
   assert.equal(reconciled.activeSessionId, "server-only");
+});
+
+test("older or reset server state ignores stale deletion markers and preserves local sessions", () => {
+  const localSessions = [
+    { id: "keep-local", updatedAt: "2026-07-15T10:00:00Z", value: "browser-copy" },
+  ];
+  const markers = sessionRevision.buildPersistedBaselineMarkers({
+    revision: 8,
+    activeSessionId: "keep-local",
+    sessions: localSessions,
+  });
+
+  for (const serverRevision of [1, 8]) {
+    const reconciled = sessionRevision.reconcileInitialSessionState({
+      baselineMarkers: markers,
+      localSessions,
+      localActiveSessionId: "keep-local",
+      serverSessions: [],
+      serverActiveSessionId: "",
+      serverRevision,
+    });
+
+    assert.equal(reconciled.usedBaseline, false, `server revision ${serverRevision}`);
+    assert.deepEqual(reconciled.sessions, localSessions, `server revision ${serverRevision}`);
+    assert.equal(reconciled.activeSessionId, "keep-local", `server revision ${serverRevision}`);
+  }
+});
+
+test("same server revision still applies a local deletion when the server snapshot matches baseline", () => {
+  const baselineSessions = [
+    { id: "deleted-locally", updatedAt: "2026-07-15T10:00:00Z" },
+  ];
+  const markers = sessionRevision.buildPersistedBaselineMarkers({
+    revision: 8,
+    activeSessionId: "deleted-locally",
+    sessions: baselineSessions,
+  });
+
+  const reconciled = sessionRevision.reconcileInitialSessionState({
+    baselineMarkers: markers,
+    localSessions: [],
+    localActiveSessionId: "",
+    serverSessions: baselineSessions,
+    serverActiveSessionId: "deleted-locally",
+    serverRevision: 8,
+  });
+
+  assert.equal(reconciled.usedBaseline, true);
+  assert.deepEqual(reconciled.sessions, []);
+  assert.equal(reconciled.activeSessionId, "");
 });
 
 test("canonical reference updates apply only to unchanged sent sources without mutation", () => {

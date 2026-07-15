@@ -328,7 +328,7 @@ test("session startup merges local and server state while save success adopts on
   const loadEnd = appSource.indexOf("void loadServerSessions();", loadStart);
   const loadSource = appSource.slice(loadStart, loadEnd);
   assert.match(loadSource, /const persistedBaselineMarkers = loadPersistedSessionBaselineMarkers\(\);/);
-  assert.match(loadSource, /reconcileInitialSessionState\(\{[\s\S]*baselineMarkers: persistedBaselineMarkers,[\s\S]*localSessions,[\s\S]*serverSessions: normalized\.sessions/);
+  assert.match(loadSource, /reconcileInitialSessionState\(\{[\s\S]*baselineMarkers: persistedBaselineMarkers,[\s\S]*localSessions,[\s\S]*serverSessions: normalized\.sessions,[\s\S]*serverRevision: normalized\.revision/);
   assert.match(loadSource, /persistSessionBaselineMarkers\(\s*normalized\.revision,\s*normalized\.activeSessionId,\s*normalized\.sessions,?\s*\)/);
   assert.match(loadSource, /sessionStateMatchesSnapshot\(\{[\s\S]*snapshotSessions: normalized\.sessions,[\s\S]*snapshotActiveSessionId: normalized\.activeSessionId/);
   assert.doesNotMatch(loadSource, /setSessions\(normalized\.sessions\)/);

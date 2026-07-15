@@ -331,6 +331,36 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual(text_limit, len(saved_session["drafts"]["gpt"]["poster_text"]))
         self.assertEqual(text_limit, len(saved_session["drafts"]["banana"]["prompt"]))
 
+    def test_studio_session_write_rejects_too_many_sessions_before_compaction(self) -> None:
+        payload = studio_session_payload("会话数量边界")
+        template = payload["sessions"][0]
+        payload["sessions"] = [
+            {
+                **template,
+                "id": f"session-{index}",
+                "title": f"会话 {index}",
+                "createdAt": f"2026-07-15T0{index}:00:00Z",
+                "updatedAt": f"2026-07-15T0{index}:00:00Z",
+                "turns": [],
+            }
+            for index in range(1, 4)
+        ]
+
+        with (
+            patch.object(webapp, "STUDIO_MAX_SESSIONS", 2),
+            patch.object(
+                webapp,
+                "compact_studio_session",
+                wraps=webapp.compact_studio_session,
+            ) as compact_session,
+        ):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual("会话数量超过 2 个上限", response.json()["detail"])
+        compact_session.assert_not_called()
+        self.assertFalse((self.outputs / "studio_sessions.json").exists())
+
     def test_studio_session_write_compacts_generated_images_to_bounded_whitelist(self) -> None:
         string_limit = 8_192
         oversized = "x" * (string_limit + 1)
