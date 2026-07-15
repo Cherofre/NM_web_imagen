@@ -36,7 +36,6 @@ from image_safety import (
     decode_raster_data_url,
     detect_raster_mime,
     raster_extension,
-    read_limited_chunks,
     resolve_output_image,
     validate_raster_bytes,
 )
@@ -174,28 +173,49 @@ class UpstreamImageBudget:
     ) -> None:
         self.max_images = max(1, int(max_images if max_images is not None else UPSTREAM_RESULT_MAX_IMAGES))
         self.max_bytes = max(1, int(max_bytes if max_bytes is not None else UPSTREAM_RESULT_MAX_BYTES))
-        self.image_count = 0
-        self.total_bytes = 0
+        self.accepted_images = 0
+        self.checked_bytes = 0
+
+    @property
+    def image_count(self) -> int:
+        return self.accepted_images
+
+    @property
+    def total_bytes(self) -> int:
+        return self.checked_bytes
 
     @property
     def remaining_images(self) -> int:
-        return max(0, self.max_images - self.image_count)
+        return max(0, self.max_images - self.accepted_images)
 
     @property
     def remaining_bytes(self) -> int:
-        return max(0, self.max_bytes - self.total_bytes)
+        return max(0, self.max_bytes - self.checked_bytes)
+
+    @property
+    def remaining_checked_bytes(self) -> int:
+        return self.remaining_bytes
 
     def ensure_image_slot(self) -> None:
         if self.remaining_images < 1 or self.remaining_bytes < 1:
             raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
 
-    def consume(self, byte_count: int) -> None:
-        self.ensure_image_slot()
+    def charge_checked_bytes(self, byte_count: int) -> None:
         normalized_bytes = max(0, int(byte_count))
         if normalized_bytes > self.remaining_bytes:
             raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
-        self.image_count += 1
-        self.total_bytes += normalized_bytes
+        self.checked_bytes += normalized_bytes
+
+    def accept_image(self) -> None:
+        if self.remaining_images < 1:
+            raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
+        self.accepted_images += 1
+
+    def consume(self, byte_count: int) -> None:
+        """Backward-compatible combined accounting for already validated images."""
+        self.ensure_image_slot()
+        self.charge_checked_bytes(byte_count)
+        self.accept_image()
 
 
 def dev_cors_origins() -> List[str]:
@@ -1199,23 +1219,34 @@ def extract_image_bytes(src: str) -> Optional[Tuple[bytes, str]]:
         return None
 
 
+def estimate_data_url_decoded_bytes(source: str) -> int:
+    text = str(source or "")
+    marker = ";base64,"
+    marker_index = text.lower().find(marker)
+    if marker_index < 0:
+        return 0
+    encoded = re.sub(r"\s+", "", text[marker_index + len(marker):])
+    if not encoded:
+        return 0
+    padding = len(encoded) - len(encoded.rstrip("="))
+    return max(0, ((len(encoded) + 3) // 4) * 3 - min(padding, 2))
+
+
 def decode_upstream_raster(
     source: str,
     budget: UpstreamImageBudget,
 ) -> Optional[Tuple[bytes, str]]:
     budget.ensure_image_slot()
-    remaining_bytes = budget.remaining_bytes
-    decode_limit = min(REMOTE_RESULT_MAX_BYTES, remaining_bytes)
+    estimated_bytes = estimate_data_url_decoded_bytes(source)
+    budget.charge_checked_bytes(estimated_bytes)
     try:
         raw_bytes, mime_type = decode_raster_data_url(
             source,
-            max_bytes=decode_limit,
+            max_bytes=REMOTE_RESULT_MAX_BYTES,
         )
-    except ImageSafetyError as exc:
-        if exc.status_code == 413 and remaining_bytes < REMOTE_RESULT_MAX_BYTES:
-            raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE) from exc
+    except ImageSafetyError:
         return None
-    budget.consume(len(raw_bytes))
+    budget.accept_image()
     return raw_bytes, mime_type
 
 
@@ -2194,29 +2225,28 @@ def download_remote_image(
                 parsed_content_length = int(content_length)
             except ValueError:
                 parsed_content_length = 0
-            if parsed_content_length > active_budget.remaining_bytes:
+            if parsed_content_length > active_budget.remaining_checked_bytes:
                 raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE)
             if parsed_content_length > REMOTE_RESULT_MAX_BYTES:
                 raise ImageSafetyError("远程图片超过容量限制", 413)
-        download_limit = min(REMOTE_RESULT_MAX_BYTES, active_budget.remaining_bytes)
-        try:
-            raw_bytes = read_limited_chunks(
-                response.iter_content(64 * 1024),
-                max_bytes=download_limit,
-            )
-        except ImageSafetyError as exc:
-            if exc.status_code == 413 and active_budget.remaining_bytes < REMOTE_RESULT_MAX_BYTES:
-                raise UpstreamResultLimitError(UPSTREAM_RESULT_LIMIT_MESSAGE) from exc
-            raise
+        payload = bytearray()
+        for chunk in response.iter_content(64 * 1024):
+            if not chunk:
+                continue
+            active_budget.charge_checked_bytes(len(chunk))
+            if len(payload) + len(chunk) > REMOTE_RESULT_MAX_BYTES:
+                raise ImageSafetyError("远程图片超过容量限制", 413)
+            payload.extend(chunk)
+        raw_bytes = bytes(payload)
         claimed_mime = (
             response.headers.get("Content-Type", "").split(";", 1)[0].strip()
         )
         mime_type = validate_raster_bytes(
             raw_bytes,
-            max_bytes=download_limit,
+            max_bytes=REMOTE_RESULT_MAX_BYTES,
             claimed_mime=claimed_mime,
         )
-        active_budget.consume(len(raw_bytes))
+        active_budget.accept_image()
         payload = base64.b64encode(raw_bytes).decode("utf-8")
         return {
             "src": data_url_from_base64(payload, mime_type),

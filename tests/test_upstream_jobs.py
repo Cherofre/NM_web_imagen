@@ -299,6 +299,81 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, budget.image_count)
         self.assertEqual(len(PNG_1X1_RAW), budget.total_bytes)
 
+    def test_invalid_base64_candidates_consume_checked_byte_budget(self) -> None:
+        first_invalid_raw = b"not-a-raster-candidate-000000001"
+        second_invalid_raw = b"not-a-raster-candidate-000000002"
+        first_invalid_base64 = base64.b64encode(first_invalid_raw).decode("ascii")
+        second_invalid_base64 = base64.b64encode(second_invalid_raw).decode("ascii")
+        budget = webapp.UpstreamImageBudget(
+            max_images=10,
+            max_bytes=len(first_invalid_raw) + len(second_invalid_raw) - 1,
+        )
+
+        with self.assertRaises(webapp.UpstreamResultLimitError):
+            webapp.build_gpt_images_from_response(
+                {
+                    "data": [
+                        {"b64_json": first_invalid_base64},
+                        {"b64_json": second_invalid_base64},
+                    ]
+                },
+                max_images=2,
+                budget=budget,
+            )
+
+        self.assertEqual(0, budget.image_count)
+        self.assertEqual(len(first_invalid_raw), budget.total_bytes)
+
+    def test_invalid_remote_candidates_consume_checked_byte_budget(self) -> None:
+        invalid_raw = b"not-a-raster-candidate-000000000"
+
+        class StreamingResponse:
+            headers = {
+                "Content-Type": "image/png",
+                "Content-Length": str(len(invalid_raw)),
+            }
+
+            def __init__(self) -> None:
+                self.iter_calls = 0
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, _chunk_size):
+                self.iter_calls += 1
+                yield invalid_raw
+
+            def close(self):
+                return None
+
+        first = StreamingResponse()
+        second = StreamingResponse()
+        budget = webapp.UpstreamImageBudget(
+            max_images=10,
+            max_bytes=(len(invalid_raw) * 2) - 1,
+        )
+        with patch.object(
+            webapp.requests,
+            "get",
+            side_effect=[first, second],
+        ):
+            with self.assertRaises(webapp.UpstreamResultLimitError):
+                webapp.build_gpt_images_from_response(
+                    {
+                        "data": [
+                            {"url": "https://example.com/invalid-1.png"},
+                            {"url": "https://example.com/invalid-2.png"},
+                        ]
+                    },
+                    max_images=2,
+                    budget=budget,
+                )
+
+        self.assertEqual(1, first.iter_calls)
+        self.assertEqual(0, second.iter_calls)
+        self.assertEqual(0, budget.image_count)
+        self.assertEqual(len(invalid_raw), budget.total_bytes)
+
     def test_banana_response_accepts_at_most_one_image_candidate(self) -> None:
         payload = {
             "candidates": [
@@ -323,6 +398,7 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1, len(parsed["images"]))
         self.assertEqual(1, budget.image_count)
+        self.assertEqual(len(PNG_1X1_RAW), budget.total_bytes)
 
     async def test_slow_blocking_call_does_not_block_event_loop(self) -> None:
         executor = UpstreamExecutor(generation_limit=1, chat_limit=1, download_limit=1)
