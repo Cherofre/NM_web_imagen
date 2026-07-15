@@ -2,13 +2,13 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-15 +08:00
-- Phase: final whole-branch review remediation design approved and documented; written-spec review pending before implementation planning
-- Superpowers Phase: approved remediation design -> user review -> implementation plan -> TDD slices -> final verification/review -> `finishing-a-development-branch`
+- Phase: final-review remediation design approved; Chinese TDD implementation plan ready; Task 1 execution starting
+- Superpowers Phase: TDD Task 1 upstream checked-byte budget -> Tasks 2-5 remediation -> Task 6 final verification/review -> `finishing-a-development-branch`
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
-- Superpowers Plan: `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`
+- Superpowers Plan: original `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; remediation `docs/superpowers/plans/2026-07-15-final-review-remediation.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: The review of base `f4afcd0b8d65b045091c6cafd4aa94b95cf3d484` through code HEAD `99d8d911f889eb3c6b905e89327a5f1ed696c041` confirmed zero Critical and five Important issues: invalid-candidate upstream bytes are not charged, non-generation API bodies/session fields are insufficiently bounded, startup can overwrite newer local sessions, successful saves do not adopt canonical reference URLs, and public URL hints retain sensitive path/query content. The user approved the complete conservative remediation design; full raster decoding remains a deferred Minor.
+- Current Focus: Execute `docs/superpowers/plans/2026-07-15-final-review-remediation.md` sequentially. Start with RED tests proving invalid Base64 and remote image candidates consume the request-wide checked-byte budget; do not change product code before the failing tests are observed. Full raster decoding remains a deferred Minor.
 - Latest Verification: Before the final review, fresh Python 216/216, 14 Node modules with 101/101, size rules, TypeScript/Vite build, four-module compile, six BOM/PowerShell 5.1 checks, portable package smoke, LocalOnly preflight, G: sync, and destination preflight passed. API/browser smoke on port `18768` also passed without paid upstream calls. Those results prove the current code state but do not close the five newly confirmed Important findings. Local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is therefore a rejected candidate, not the final release. v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
 
 ## Final Whole-Branch Review Findings
@@ -45,7 +45,7 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: user review of `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`; after approval, write the bite-sized TDD implementation plan before touching product code.
+- Start with: Task 1 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; write and run the invalid-candidate checked-byte RED tests before editing `app.py` or `image_safety.py`.
 - Superpowers phase: implement the five Important remediations in small RED/GREEN commits, run targeted spec/code-quality reviews, then require zero unresolved Critical/Important findings in another whole-branch review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Rejected package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`.

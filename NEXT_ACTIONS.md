@@ -4,15 +4,15 @@
 - [x] Complete and review approved Tasks 1-5 plus the earlier RED/GREEN final-review remediation through code HEAD `99d8d91`.
 - [x] Rebuild and verify candidate `56aef66b…`, then reject it after the final whole-branch review confirmed zero Critical and five new Important findings.
 - [x] Get user approval for the complete conservative remediation approach and write `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`.
-- [ ] Obtain user review of the written remediation spec, then write the bite-sized TDD implementation plan.
+- [x] Obtain user review of the Chinese remediation spec and write/self-review `docs/superpowers/plans/2026-07-15-final-review-remediation.md`.
 - [ ] Implement and review all five Important remediations: upstream checked-byte accounting, all-write body/session bounds, startup reconciliation, reference canonicalization/stable files, and host-only URL hints.
 - [ ] Rebuild, package, smoke, run LocalOnly gates, repeat final whole-branch review until no Critical/Important remains, then overwrite G: and verify the destination.
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: review `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`; after user approval, create the implementation plan and begin with a failing upstream-budget regression test.
+- Start here: Task 1 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; begin with failing invalid Base64/remote upstream-budget regression tests.
 - Do not redo: Tasks 1-5, fixes through `99d8d91`, or the July 11 full verification merely to prove the rejected candidate again. New code changes will receive targeted tests first and the full matrix at the end.
-- Verify next: written-spec approval, implementation-plan self-review, then per-slice RED/GREEN evidence.
+- Verify next: Task 1 RED evidence, minimal budget implementation, then full `tests.test_upstream_jobs` GREEN evidence.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: local/G v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is rejected. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected. No current v1.0.6 package is final.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
