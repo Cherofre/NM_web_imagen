@@ -6,7 +6,6 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -665,104 +664,205 @@ class StudioSessionTests(unittest.TestCase):
             {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
         )
 
-    def test_session_reference_uuid_collisions_never_delete_current_reference(self) -> None:
-        colliding_hex = "a" * 32
-        with patch.object(webapp, "uuid4", return_value=SimpleNamespace(hex=colliding_hex)):
-            current, old_path = self.seed_session_reference()
-        current_json = (self.outputs / "studio_sessions.json").read_bytes()
-        old_bytes = old_path.read_bytes()
+    def test_repeated_data_url_reference_reuses_stable_file(self) -> None:
+        raw = PNG_1X1_RAW + b"stable-reference"
         payload = studio_session_payload(
-            "持续碰撞",
+            "稳定参考图",
+            expected_revision=1,
+            references=[
+                {
+                    "id": "ref-stable",
+                    "name": "stable.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(raw),
+                }
+            ],
+        )
+        first = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, first.status_code)
+        first_body = first.json()
+        first_url = first_body["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        first_path = webapp.path_from_output_url(first_url)
+        self.assertIsNotNone(first_path)
+        assert first_path is not None
+        self.assertRegex(first_url, r"^/outputs/session_refs/ref-[0-9a-f]{32}\.png$")
+        before_files = {
+            path.resolve()
+            for path in (self.outputs / "session_refs").iterdir()
+            if path.is_file()
+        }
+        unlinked_reference_paths = []
+        path_type = type(first_path)
+        original_unlink = path_type.unlink
+
+        def record_reference_unlink(path, *args, **kwargs):
+            resolved = path.resolve()
+            if (self.outputs / "session_refs").resolve() in resolved.parents:
+                unlinked_reference_paths.append(resolved)
+            return original_unlink(path, *args, **kwargs)
+
+        payload["expected_revision"] = first_body["revision"]
+        with patch.object(
+            path_type,
+            "unlink",
+            autospec=True,
+            side_effect=record_reference_unlink,
+        ):
+            second = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, second.status_code)
+        second_url = second.json()["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        after_files = {
+            path.resolve()
+            for path in (self.outputs / "session_refs").iterdir()
+            if path.is_file()
+        }
+        self.assertEqual(first_url, second_url)
+        self.assertEqual(before_files, after_files)
+        self.assertEqual([], unlinked_reference_paths)
+        self.assertEqual(raw, first_path.read_bytes())
+
+    def test_different_reference_content_gets_different_stable_url(self) -> None:
+        current, old_path = self.seed_session_reference(PNG_1X1_RAW + b"first-content")
+        old_url = current["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        replacement_raw = PNG_1X1_RAW + b"second-content"
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "不同内容",
+                expected_revision=current["revision"],
+                references=[
+                    {
+                        "id": "ref-1",
+                        "name": "same-name.png",
+                        "mime_type": "image/png",
+                        "src": raster_data_url(replacement_raw),
+                    }
+                ],
+            ),
+        )
+
+        self.assertEqual(200, response.status_code)
+        new_url = response.json()["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        new_path = webapp.path_from_output_url(new_url)
+        self.assertIsNotNone(new_path)
+        assert new_path is not None
+        self.assertNotEqual(old_url, new_url)
+        self.assertRegex(new_url, r"^/outputs/session_refs/ref-[0-9a-f]{32}\.png$")
+        self.assertFalse(old_path.exists())
+        self.assertEqual(replacement_raw, new_path.read_bytes())
+
+    def test_existing_uuid_reference_url_is_preserved(self) -> None:
+        reference_dir = self.outputs / "session_refs"
+        reference_dir.mkdir(parents=True, exist_ok=True)
+        legacy_path = reference_dir / (
+            "session-1-turn-1-01-"
+            + ("a" * 32)
+            + "-legacy-reference.png"
+        )
+        legacy_path.write_bytes(PNG_1X1_RAW)
+        legacy_url = webapp.output_url_for_path(legacy_path)
+
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "旧 UUID 参考图",
+                expected_revision=1,
+                references=[
+                    {
+                        "id": "ref-legacy",
+                        "name": "legacy-reference.png",
+                        "mime_type": "image/png",
+                        "src": legacy_url,
+                    }
+                ],
+            ),
+        )
+
+        self.assertEqual(200, response.status_code)
+        saved_url = response.json()["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+        self.assertEqual(legacy_url, saved_url)
+        self.assertTrue(legacy_path.exists())
+        self.assertEqual(PNG_1X1_RAW, legacy_path.read_bytes())
+
+    def test_stable_reference_content_collision_never_overwrites_current_file(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        collision_bytes = b"occupied-by-different-content"
+        old_path.write_bytes(collision_bytes)
+        payload = studio_session_payload(
+            "稳定文件内容冲突",
             expected_revision=current["revision"],
             references=[
                 {
                     "id": "ref-1",
                     "name": "same-name.png",
                     "mime_type": "image/png",
-                    "src": raster_data_url(PNG_1X1_RAW + b"replacement"),
+                    "src": raster_data_url(PNG_1X1_RAW),
                 }
             ],
         )
 
-        with (
-            patch.object(webapp, "uuid4", return_value=SimpleNamespace(hex=colliding_hex)),
-            patch.object(
-                webapp,
-                "prune_session_reference_files",
-                wraps=webapp.prune_session_reference_files,
-            ) as prune,
-        ):
-            with self.assertRaises(FileExistsError):
-                webapp.write_studio_session_state(payload)
+        with patch.object(
+            webapp,
+            "prune_session_reference_files",
+            wraps=webapp.prune_session_reference_files,
+        ) as prune:
+            response = self.client.put("/api/studio/sessions", json=payload)
 
         prune.assert_not_called()
+        self.assertEqual(409, response.status_code)
+        self.assertEqual("会话参考图文件内容冲突", response.json()["detail"])
         self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
         self.assertTrue(old_path.exists())
-        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(collision_bytes, old_path.read_bytes())
         self.assertEqual(
             {old_path.resolve()},
             {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
         )
 
-    def test_session_reference_uuid_collision_retries_then_commits_before_prune(self) -> None:
-        colliding_hex = "a" * 32
-        replacement_hex = "b" * 32
-        with patch.object(webapp, "uuid4", return_value=SimpleNamespace(hex=colliding_hex)):
-            current, old_path = self.seed_session_reference()
-        old_bytes = old_path.read_bytes()
-        replacement_raw = PNG_1X1_RAW + b"replacement"
+    def test_concurrent_identical_reference_writes_reuse_stable_file(self) -> None:
+        raw = PNG_1X1_RAW + b"concurrent-stable-reference"
         payload = studio_session_payload(
-            "碰撞后成功",
-            expected_revision=current["revision"],
+            "并发稳定参考图",
             references=[
                 {
-                    "id": "ref-1",
-                    "name": "same-name.png",
+                    "id": "ref-concurrent",
+                    "name": "concurrent.png",
                     "mime_type": "image/png",
-                    "src": raster_data_url(replacement_raw),
+                    "src": raster_data_url(raw),
                 }
             ],
         )
-        events = []
-        original_replace = storage_module.os.replace
-        original_prune = webapp.prune_session_reference_files
+        start = threading.Barrier(2)
 
-        def record_replace(source, destination):
-            if Path(destination).resolve() == (self.outputs / "studio_sessions.json").resolve():
-                events.append("replace")
-            return original_replace(source, destination)
+        def write():
+            start.wait(timeout=3)
+            return webapp.write_studio_session_state(payload)
 
-        def record_prune(sessions):
-            events.append("prune")
-            self.assertTrue(old_path.exists())
-            self.assertEqual(old_bytes, old_path.read_bytes())
-            return original_prune(sessions)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            states = [future.result(timeout=10) for future in [pool.submit(write), pool.submit(write)]]
 
-        with (
-            patch.object(
-                webapp,
-                "uuid4",
-                side_effect=[
-                    SimpleNamespace(hex=colliding_hex),
-                    SimpleNamespace(hex=replacement_hex),
-                ],
-            ),
-            patch.object(storage_module.os, "replace", side_effect=record_replace),
-            patch.object(webapp, "prune_session_reference_files", side_effect=record_prune),
-        ):
-            state = webapp.write_studio_session_state(payload)
-
-        snapshot = state["sessions"][0]["turns"][0]["referenceSnapshots"][0]
-        new_path = webapp.path_from_output_url(snapshot["src"])
-        self.assertIsNotNone(new_path)
-        assert new_path is not None
-        self.assertEqual(current["revision"] + 1, state["revision"])
-        self.assertEqual(["replace", "prune"], events)
-        self.assertFalse(old_path.exists())
-        self.assertTrue(new_path.exists())
-        self.assertEqual(replacement_raw, new_path.read_bytes())
+        urls = {
+            state["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"]
+            for state in states
+        }
+        self.assertEqual({2, 3}, {state["revision"] for state in states})
+        self.assertEqual(1, len(urls))
+        stable_url = next(iter(urls))
+        stable_path = webapp.path_from_output_url(stable_url)
+        self.assertIsNotNone(stable_path)
+        assert stable_path is not None
+        self.assertTrue(stable_path.exists())
+        self.assertEqual(raw, stable_path.read_bytes())
+        self.assertEqual(
+            {stable_path.resolve()},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
         saved = json.loads((self.outputs / "studio_sessions.json").read_text(encoding="utf-8"))
-        self.assertEqual(state, webapp.studio_session_state_from_payload(saved))
+        self.assertEqual(3, saved["revision"])
+        self.assertEqual(stable_url, saved["sessions"][0]["turns"][0]["referenceSnapshots"][0]["src"])
 
     def test_successful_session_json_commit_happens_before_prune(self) -> None:
         current, old_path = self.seed_session_reference()

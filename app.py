@@ -1602,6 +1602,26 @@ def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
                     )
 
 
+def stable_studio_reference_digest(
+    session_id: str,
+    turn_id: str,
+    ref_id: str,
+    raw_bytes: bytes,
+) -> str:
+    digest = hashlib.sha256()
+    for value, fallback in (
+        (session_id, "session"),
+        (turn_id, "turn"),
+        (ref_id, "reference"),
+    ):
+        encoded = safe_filename_part(value, fallback).encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+    digest.update(len(raw_bytes).to_bytes(8, "big"))
+    digest.update(raw_bytes)
+    return digest.hexdigest()[:32]
+
+
 def normalize_studio_reference(
     snapshot: Any,
     session_id: str,
@@ -1647,24 +1667,23 @@ def normalize_studio_reference(
             raise HTTPException(status_code=400, detail="参考图内容无效")
         extension = guess_extension(detected_mime_type)
         SESSION_REFS_DIR.mkdir(parents=True, exist_ok=True)
-        target_path: Optional[Path] = None
-        last_collision: Optional[FileExistsError] = None
-        for _ in range(8):
-            filename = (
-                f"{safe_filename_part(session_id, 'session')[:32]}-"
-                f"{safe_filename_part(turn_id, 'turn')[:32]}-"
-                f"{index + 1:02d}-{uuid4().hex}-"
-                f"{safe_filename_part(Path(name).stem, 'reference')[:48]}{extension}"
-            )
-            candidate_path = SESSION_REFS_DIR / filename
-            try:
-                handle = candidate_path.open("xb")
-            except FileExistsError as exc:
-                last_collision = exc
-                continue
-
-            target_path = candidate_path
-            resolved_target = target_path.resolve()
+        digest = stable_studio_reference_digest(
+            session_id,
+            turn_id,
+            ref_id,
+            raw_bytes,
+        )
+        target_path = SESSION_REFS_DIR / f"ref-{digest}{extension}"
+        resolved_target = target_path.resolve()
+        try:
+            handle = target_path.open("xb")
+        except FileExistsError:
+            if target_path.read_bytes() != raw_bytes:
+                raise HTTPException(
+                    status_code=409,
+                    detail="会话参考图文件内容冲突",
+                )
+        else:
             if created_paths is not None:
                 created_paths.add(resolved_target)
             try:
@@ -1682,11 +1701,6 @@ def normalize_studio_reference(
                 if removed and created_paths is not None:
                     created_paths.discard(resolved_target)
                 raise
-            break
-        if target_path is None:
-            if last_collision is not None:
-                raise last_collision
-            raise FileExistsError("无法创建唯一的会话参考图文件")
         normalized["src"] = output_url_for_path(target_path)
         normalized["mime_type"] = detected_mime_type
         normalized["size"] = len(raw_bytes)
