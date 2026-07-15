@@ -66,6 +66,14 @@ STUDIO_MAX_TURNS = 80
 STUDIO_MAX_REFS_PER_TURN = 8
 STUDIO_MAX_REF_FILES = 240
 STUDIO_MAX_REF_BYTES = 256 * 1024 * 1024
+STUDIO_TEXT_MAX_CHARS = 200_000
+STUDIO_ERROR_MAX_CHARS = 8_000
+STUDIO_IMAGE_STRING_MAX_CHARS = 8_192
+STUDIO_META_MAX_DEPTH = 4
+STUDIO_META_MAX_ITEMS = 50
+STUDIO_META_STRING_MAX_CHARS = 8_192
+STUDIO_META_MAX_BYTES = 64 * 1024
+STUDIO_SESSION_JSON_MAX_BYTES = 32 * 1024 * 1024
 CONFIG_FILE_CANDIDATES = [
     ROOT_DIR / "config.local.json",
     ROOT_DIR / "config.defaults.json",
@@ -88,6 +96,8 @@ MAX_GENERATION_TIMEOUT = 1800
 # boundaries get a separate fixed 2 MiB allowance, but never an unbounded one.
 GENERATION_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
 GENERATION_MULTIPART_MAX_BYTES = REFERENCE_REQUEST_MAX_BYTES + GENERATION_MULTIPART_OVERHEAD_BYTES
+STUDIO_SESSION_BODY_MAX_BYTES = 208 * 1024 * 1024
+API_WRITE_MAX_BYTES = 2 * 1024 * 1024
 GENERATION_MULTIPART_MAX_FILES = 16
 GENERATION_MULTIPART_MAX_FIELDS = 64
 GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
@@ -330,6 +340,21 @@ class TrustedLocalHostMiddleware:
         )(scope, receive, send)
 
 
+def unsafe_api_body_limit(method: str, path: str) -> Optional[Tuple[int, str]]:
+    normalized_method = str(method or "").upper()
+    normalized_path = str(path or "")
+    if (
+        normalized_method in {"GET", "HEAD", "OPTIONS"}
+        or not normalized_path.startswith("/api/")
+    ):
+        return None
+    if normalized_path.startswith("/api/generate/"):
+        return GENERATION_MULTIPART_MAX_BYTES, "上传请求超过容量限制"
+    if normalized_path == "/api/studio/sessions":
+        return STUDIO_SESSION_BODY_MAX_BYTES, "请求内容超过容量限制"
+    return API_WRITE_MAX_BYTES, "请求内容超过容量限制"
+
+
 class RequestBoundaryMiddleware:
     def __init__(self, app: Any, *, allowed_origins: List[str]) -> None:
         self.app = app
@@ -363,13 +388,11 @@ class RequestBoundaryMiddleware:
                     )(scope, receive, send)
                     return
 
-        is_generation_request = (
-            path.startswith("/api/generate/")
-            and method not in {"GET", "HEAD", "OPTIONS"}
-        )
-        if not is_generation_request:
+        body_limit = unsafe_api_body_limit(method, path)
+        if body_limit is None:
             await self.app(scope, receive, send)
             return
+        max_body_bytes, limit_detail = body_limit
 
         content_length = (headers.get("content-length") or "").strip()
         if content_length:
@@ -377,10 +400,10 @@ class RequestBoundaryMiddleware:
                 declared_bytes = int(content_length)
             except ValueError:
                 declared_bytes = 0
-            if declared_bytes > GENERATION_MULTIPART_MAX_BYTES:
+            if declared_bytes > max_body_bytes:
                 await JSONResponse(
                     status_code=413,
-                    content={"detail": "上传请求超过容量限制"},
+                    content={"detail": limit_detail},
                 )(scope, receive, send)
                 return
 
@@ -392,8 +415,8 @@ class RequestBoundaryMiddleware:
             if message.get("type") == "http.request":
                 body = message.get("body", b"")
                 next_total = received_bytes + len(body)
-                if next_total > GENERATION_MULTIPART_MAX_BYTES:
-                    raise HTTPException(status_code=413, detail="上传请求超过容量限制")
+                if next_total > max_body_bytes:
+                    raise HTTPException(status_code=413, detail=limit_detail)
                 received_bytes = next_total
             return message
 
@@ -1673,6 +1696,145 @@ def normalize_studio_reference(
     return normalized
 
 
+def bounded_text(value: Any, limit: int) -> str:
+    try:
+        max_chars = max(0, int(limit))
+    except (TypeError, ValueError):
+        max_chars = 0
+    if value is None:
+        return ""
+    return str(value)[:max_chars]
+
+
+def bounded_json_value(
+    value: Any,
+    depth: int,
+    item_limit: int,
+    string_limit: int,
+    max_depth: int = STUDIO_META_MAX_DEPTH,
+) -> Any:
+    if isinstance(value, str):
+        return bounded_text(value, string_limit)
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    try:
+        max_items = max(0, int(item_limit))
+        current_depth = max(0, int(depth))
+        allowed_depth = max(0, int(max_depth))
+    except (TypeError, ValueError):
+        return None
+
+    if isinstance(value, dict):
+        if current_depth >= allowed_depth:
+            return {}
+        bounded: Dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= max_items:
+                break
+            bounded_key = bounded_text(key, string_limit)
+            bounded[bounded_key] = bounded_json_value(
+                item,
+                current_depth + 1,
+                max_items,
+                string_limit,
+                allowed_depth,
+            )
+        return bounded
+
+    if isinstance(value, list):
+        if current_depth >= allowed_depth:
+            return []
+        return [
+            bounded_json_value(
+                item,
+                current_depth + 1,
+                max_items,
+                string_limit,
+                allowed_depth,
+            )
+            for item in value[:max_items]
+        ]
+    return None
+
+
+def compact_json_size(value: Any) -> int:
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+    )
+
+
+def compact_studio_metadata(meta: Any) -> Dict[str, Any]:
+    if not isinstance(meta, dict):
+        return {}
+    bounded = bounded_json_value(
+        sanitize_history_meta(meta),
+        0,
+        STUDIO_META_MAX_ITEMS,
+        STUDIO_META_STRING_MAX_CHARS,
+        STUDIO_META_MAX_DEPTH,
+    )
+    if not isinstance(bounded, dict):
+        return {}
+    while bounded and compact_json_size(bounded) > STUDIO_META_MAX_BYTES:
+        bounded.pop(next(reversed(bounded)))
+    return bounded
+
+
+def compact_studio_image(image: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(image, dict):
+        return None
+    compact: Dict[str, Any] = {}
+    for key in (
+        "id",
+        "name",
+        "saved_name",
+        "saved_url",
+        "saved_path",
+        "url",
+        "mime_type",
+    ):
+        value = image.get(key)
+        if isinstance(value, str) and value:
+            compact[key] = bounded_text(value, STUDIO_IMAGE_STRING_MAX_CHARS)
+
+    dimensions = image.get("dimensions")
+    if isinstance(dimensions, dict):
+        compact_dimensions: Dict[str, Any] = {}
+        for key in ("width", "height"):
+            value = dimensions.get(key)
+            if (
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(float(value))
+                and value > 0
+            ):
+                compact_dimensions[key] = value
+        if compact_dimensions:
+            compact["dimensions"] = compact_dimensions
+
+    saved_url = str(compact.get("saved_url") or "")
+    try:
+        has_valid_saved_url = bool(saved_url and path_from_output_url(saved_url))
+    except (OSError, ValueError):
+        has_valid_saved_url = False
+    url = str(compact.get("url") or "").strip().lower()
+    if has_valid_saved_url and url.startswith(("data:", "http://", "https://")):
+        compact.pop("url", None)
+    return compact or None
+
+
+def normalized_session_json_size(state: Dict[str, Any]) -> int:
+    serialized = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+    return len(serialized.encode("utf-8"))
+
+
 def compact_studio_turn(
     turn: Any,
     session_id: str,
@@ -1686,19 +1848,36 @@ def compact_studio_turn(
         "id": turn_id,
         "engine": str(turn.get("engine") or "gpt-image-2"),
         "mode": str(turn.get("mode") or "generate"),
-        "prompt": str(turn.get("prompt") or ""),
+        "prompt": bounded_text(turn.get("prompt"), STUDIO_TEXT_MAX_CHARS),
         "createdAt": str(turn.get("createdAt") or now),
         "status": str(turn.get("status") or "success"),
-        "images": [image for image in turn.get("images", []) if isinstance(image, dict)][:20],
+        "images": [
+            compact_image
+            for image in (
+                turn.get("images", [])
+                if isinstance(turn.get("images"), list)
+                else []
+            )[:20]
+            if (compact_image := compact_studio_image(image))
+        ],
     }
-    for key in ("negativePrompt", "posterText", "finishedAt", "reply", "error"):
+    for key in ("negativePrompt", "posterText", "reply"):
         value = turn.get(key)
         if isinstance(value, str) and value:
-            compact[key] = value
+            compact[key] = bounded_text(value, STUDIO_TEXT_MAX_CHARS)
+    finished_at = turn.get("finishedAt")
+    if isinstance(finished_at, str) and finished_at:
+        compact["finishedAt"] = bounded_text(
+            finished_at,
+            STUDIO_IMAGE_STRING_MAX_CHARS,
+        )
+    error = turn.get("error")
+    if isinstance(error, str) and error:
+        compact["error"] = bounded_text(error, STUDIO_ERROR_MAX_CHARS)
     if isinstance(turn.get("elapsedSeconds"), (int, float)):
         compact["elapsedSeconds"] = turn["elapsedSeconds"]
     if isinstance(turn.get("meta"), dict):
-        compact["meta"] = sanitize_history_meta(turn["meta"])
+        compact["meta"] = compact_studio_metadata(turn["meta"])
 
     snapshots = turn.get("referenceSnapshots")
     if isinstance(snapshots, list):
@@ -1759,20 +1938,35 @@ def compact_studio_session(
         shared_draft = drafts.get("shared")
         if isinstance(shared_draft, dict):
             compact_drafts["shared"] = {
-                "fixed_prompt": str(shared_draft.get("fixed_prompt") or ""),
+                "fixed_prompt": bounded_text(
+                    shared_draft.get("fixed_prompt"),
+                    STUDIO_TEXT_MAX_CHARS,
+                ),
             }
         gpt_draft = drafts.get("gpt")
         if isinstance(gpt_draft, dict):
             compact_gpt = {
-                "prompt": str(gpt_draft.get("prompt") or ""),
-                "negative_prompt": str(gpt_draft.get("negative_prompt") or ""),
-                "poster_text": str(gpt_draft.get("poster_text") or ""),
+                "prompt": bounded_text(
+                    gpt_draft.get("prompt"),
+                    STUDIO_TEXT_MAX_CHARS,
+                ),
+                "negative_prompt": bounded_text(
+                    gpt_draft.get("negative_prompt"),
+                    STUDIO_TEXT_MAX_CHARS,
+                ),
+                "poster_text": bounded_text(
+                    gpt_draft.get("poster_text"),
+                    STUDIO_TEXT_MAX_CHARS,
+                ),
             }
             compact_drafts["gpt"] = compact_gpt
         banana_draft = drafts.get("banana")
         if isinstance(banana_draft, dict):
             compact_drafts["banana"] = {
-                "prompt": str(banana_draft.get("prompt") or ""),
+                "prompt": bounded_text(
+                    banana_draft.get("prompt"),
+                    STUDIO_TEXT_MAX_CHARS,
+                ),
             }
         if compact_drafts:
             compact_session["drafts"] = compact_drafts
@@ -1905,6 +2099,8 @@ def write_studio_session_state(payload: Dict[str, Any]) -> Dict[str, Any]:
         normalized = normalize_studio_session_state(payload, created_paths)
         normalized["revision"] = current["revision"] + 1
         validate_session_reference_capacity(normalized["sessions"])
+        if normalized_session_json_size(normalized) > STUDIO_SESSION_JSON_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="会话数据超过容量限制")
         return normalized
 
     def after_write(normalized: Dict[str, Any]) -> None:

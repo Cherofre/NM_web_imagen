@@ -673,6 +673,141 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         request_form.assert_not_called()
         executor_run.assert_not_awaited()
 
+    def test_non_generation_json_content_length_limit_rejects_before_endpoint(self) -> None:
+        with patch.object(webapp, "API_WRITE_MAX_BYTES", 64, create=True):
+            with TestClient(webapp.create_app()) as client, patch.object(
+                webapp,
+                "run_diagnostics",
+                new_callable=AsyncMock,
+                return_value={"ok": True, "results": []},
+            ) as diagnostics:
+                response = client.post(
+                    "/api/diagnostics",
+                    content=b"{}",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": "65",
+                    },
+                )
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual("请求内容超过容量限制", response.json()["detail"])
+        diagnostics.assert_not_awaited()
+
+    def test_unsafe_api_body_limits_are_selected_by_path_and_method(self) -> None:
+        with (
+            patch.object(webapp, "GENERATION_MULTIPART_MAX_BYTES", 152),
+            patch.object(webapp, "STUDIO_SESSION_BODY_MAX_BYTES", 208),
+            patch.object(webapp, "API_WRITE_MAX_BYTES", 2),
+        ):
+            self.assertEqual(
+                (152, "上传请求超过容量限制"),
+                webapp.unsafe_api_body_limit("POST", "/api/generate/gpt-image-2"),
+            )
+            self.assertEqual(
+                (208, "请求内容超过容量限制"),
+                webapp.unsafe_api_body_limit("PUT", "/api/studio/sessions"),
+            )
+            for method, path in (
+                ("POST", "/api/chat/gpt-image-2"),
+                ("POST", "/api/diagnostics"),
+                ("POST", "/api/config/local-file"),
+                ("PATCH", "/api/history/entry-1"),
+                ("DELETE", "/api/history/entry-1"),
+            ):
+                with self.subTest(method=method, path=path):
+                    self.assertEqual(
+                        (2, "请求内容超过容量限制"),
+                        webapp.unsafe_api_body_limit(method, path),
+                    )
+
+            for method in ("GET", "HEAD", "OPTIONS"):
+                with self.subTest(method=method):
+                    self.assertIsNone(
+                        webapp.unsafe_api_body_limit(method, "/api/studio/sessions")
+                    )
+            self.assertIsNone(webapp.unsafe_api_body_limit("POST", "/classic"))
+
+    def test_studio_session_body_uses_its_larger_dedicated_limit(self) -> None:
+        with (
+            patch.object(webapp, "API_WRITE_MAX_BYTES", 32, create=True),
+            patch.object(webapp, "STUDIO_SESSION_BODY_MAX_BYTES", 64, create=True),
+            TestClient(webapp.create_app()) as client,
+        ):
+            allowed = client.put(
+                "/api/studio/sessions",
+                content=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": "48",
+                },
+            )
+            blocked = client.put(
+                "/api/studio/sessions",
+                content=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": "65",
+                },
+            )
+
+        self.assertEqual(200, allowed.status_code)
+        self.assertEqual(413, blocked.status_code)
+        self.assertEqual("请求内容超过容量限制", blocked.json()["detail"])
+
+    def test_non_generation_chunked_limit_rejects_before_json_endpoint(self) -> None:
+        async def invoke_chunked(app):
+            incoming = iter(
+                [
+                    {"type": "http.request", "body": b"{" + (b"a" * 15), "more_body": True},
+                    {"type": "http.request", "body": b"b" * 32, "more_body": False},
+                ]
+            )
+            sent = []
+
+            async def receive():
+                try:
+                    return next(incoming)
+                except StopIteration:
+                    return {"type": "http.disconnect"}
+
+            async def send(message):
+                sent.append(message)
+
+            await app(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0"},
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/api/diagnostics",
+                    "raw_path": b"/api/diagnostics",
+                    "query_string": b"",
+                    "headers": [
+                        (b"host", b"testserver"),
+                        (b"content-type", b"application/json"),
+                    ],
+                    "client": ("127.0.0.1", 12345),
+                    "server": ("testserver", 80),
+                },
+                receive,
+                send,
+            )
+            return sent
+
+        with patch.object(webapp, "API_WRITE_MAX_BYTES", 32, create=True):
+            sent = asyncio.run(invoke_chunked(webapp.create_app()))
+
+        response_start = next(message for message in sent if message["type"] == "http.response.start")
+        response_body = b"".join(
+            message.get("body", b"")
+            for message in sent
+            if message["type"] == "http.response.body"
+        )
+        self.assertEqual(413, response_start["status"])
+        self.assertEqual("请求内容超过容量限制", json.loads(response_body)["detail"])
+
     def test_generation_chunked_limit_stops_before_overflow_chunk_reaches_parser(self) -> None:
         parser_chunks = []
 

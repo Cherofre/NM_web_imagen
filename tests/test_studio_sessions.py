@@ -267,6 +267,173 @@ class StudioSessionTests(unittest.TestCase):
         for marker in ("url-user", "url-pass", "query-secret", windows_path, posix_path):
             self.assertNotIn(marker, conflict_text)
 
+    def test_studio_session_write_bounds_turn_and_draft_text_fields(self) -> None:
+        text_limit = 200_000
+        error_limit = 8_000
+        payload = studio_session_payload("文本边界")
+        session = payload["sessions"][0]
+        turn = session["turns"][0]
+        turn.update(
+            {
+                "prompt": "提" * (text_limit + 1),
+                "negativePrompt": "负" * (text_limit + 1),
+                "posterText": "字" * (text_limit + 1),
+                "reply": "答" * (text_limit + 1),
+                "error": "错" * (error_limit + 1),
+            }
+        )
+        session["drafts"] = {
+            "shared": {"fixed_prompt": "固" * (text_limit + 1)},
+            "gpt": {
+                "prompt": "画" * (text_limit + 1),
+                "negative_prompt": "避" * (text_limit + 1),
+                "poster_text": "文" * (text_limit + 1),
+            },
+            "banana": {"prompt": "蕉" * (text_limit + 1)},
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        saved_session = response.json()["sessions"][0]
+        saved_turn = saved_session["turns"][0]
+        for key in ("prompt", "negativePrompt", "posterText", "reply"):
+            self.assertEqual(text_limit, len(saved_turn[key]), key)
+        self.assertEqual(error_limit, len(saved_turn["error"]))
+        self.assertEqual(text_limit, len(saved_session["drafts"]["shared"]["fixed_prompt"]))
+        self.assertEqual(text_limit, len(saved_session["drafts"]["gpt"]["prompt"]))
+        self.assertEqual(text_limit, len(saved_session["drafts"]["gpt"]["negative_prompt"]))
+        self.assertEqual(text_limit, len(saved_session["drafts"]["gpt"]["poster_text"]))
+        self.assertEqual(text_limit, len(saved_session["drafts"]["banana"]["prompt"]))
+
+    def test_studio_session_write_compacts_generated_images_to_bounded_whitelist(self) -> None:
+        string_limit = 8_192
+        oversized = "x" * (string_limit + 1)
+        payload = studio_session_payload("图片字段边界")
+        payload["sessions"][0]["turns"][0]["images"] = [
+            {
+                "id": oversized,
+                "name": oversized,
+                "saved_name": oversized,
+                "saved_path": oversized,
+                "url": f"https://example.com/{oversized}",
+                "mime_type": oversized,
+                "dimensions": {"width": 1024, "height": 768, "unknown": oversized},
+                "b64_json": oversized,
+                "data_url": f"data:image/png;base64,{oversized}",
+                "unknown_large_field": {"nested": oversized},
+            },
+            {
+                "id": "canonical-image",
+                "saved_url": "/outputs/canonical.png",
+                "url": "https://provider.example.com/private/result.png?token=secret",
+                "b64_json": oversized,
+                "data_url": f"data:image/png;base64,{oversized}",
+                "unknown_large_field": oversized,
+            },
+        ]
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        images = response.json()["sessions"][0]["turns"][0]["images"]
+        self.assertEqual(2, len(images))
+        first = images[0]
+        self.assertEqual(
+            {"id", "name", "saved_name", "saved_path", "url", "mime_type", "dimensions"},
+            set(first),
+        )
+        for key, value in first.items():
+            if isinstance(value, str):
+                self.assertLessEqual(len(value), string_limit, key)
+        self.assertEqual({"width": 1024, "height": 768}, first["dimensions"])
+        second = images[1]
+        self.assertEqual(
+            {"id": "canonical-image", "saved_url": "/outputs/canonical.png"},
+            second,
+        )
+
+    def test_studio_session_write_bounds_turn_metadata_shape(self) -> None:
+        string_limit = 8_192
+        payload = studio_session_payload("元数据结构边界")
+        payload["sessions"][0]["turns"][0]["meta"] = {
+            "mapping": {f"key-{index:02d}": index for index in range(55)},
+            "array": list(range(55)),
+            "long_text": "m" * (string_limit + 1),
+            "deep": {
+                "level_1": {
+                    "level_2": {
+                        "level_3": {
+                            "level_4": {"level_5": "must-not-survive"},
+                        }
+                    }
+                }
+            },
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        meta = response.json()["sessions"][0]["turns"][0]["meta"]
+        self.assertEqual(50, len(meta["mapping"]))
+        self.assertEqual(50, len(meta["array"]))
+        self.assertEqual(string_limit, len(meta["long_text"]))
+        self.assertNotIn("must-not-survive", json.dumps(meta, ensure_ascii=False))
+
+    def test_studio_session_write_bounds_each_turn_metadata_to_64_kib(self) -> None:
+        payload = studio_session_payload("元数据容量边界")
+        payload["sessions"][0]["turns"][0]["meta"] = {
+            f"field-{index:02d}": "m" * 8_192
+            for index in range(50)
+        }
+
+        response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(200, response.status_code)
+        meta = response.json()["sessions"][0]["turns"][0]["meta"]
+        encoded = json.dumps(
+            meta,
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+        self.assertLessEqual(len(encoded), 64 * 1024)
+        self.assertIn("field-00", meta)
+
+    def test_studio_session_normalized_json_limit_rolls_back_new_reference(self) -> None:
+        current, old_path = self.seed_session_reference()
+        current_json = (self.outputs / "studio_sessions.json").read_bytes()
+        old_bytes = old_path.read_bytes()
+        payload = studio_session_payload(
+            "规范化 JSON 超限",
+            expected_revision=current["revision"],
+            references=[
+                {
+                    "id": "ref-new",
+                    "name": "new.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW + b"normalized-json-limit"),
+                }
+            ],
+        )
+
+        with patch.object(
+            webapp,
+            "STUDIO_SESSION_JSON_MAX_BYTES",
+            1,
+            create=True,
+        ):
+            response = self.client.put("/api/studio/sessions", json=payload)
+
+        self.assertEqual(413, response.status_code)
+        self.assertEqual("会话数据超过容量限制", response.json()["detail"])
+        self.assertEqual(current_json, (self.outputs / "studio_sessions.json").read_bytes())
+        self.assertTrue(old_path.exists())
+        self.assertEqual(old_bytes, old_path.read_bytes())
+        self.assertEqual(
+            {old_path.resolve()},
+            {path.resolve() for path in (self.outputs / "session_refs").iterdir()},
+        )
+
     def test_legacy_writes_increment_revision_and_invalid_expected_values_are_400(self) -> None:
         first = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端一"))
         second = self.client.put("/api/studio/sessions", json=studio_session_payload("旧客户端二"))
