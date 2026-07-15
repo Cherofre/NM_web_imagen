@@ -2,13 +2,13 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-15 +08:00
-- Phase: final-review remediation design approved; Chinese TDD implementation plan ready; Task 1 execution starting
-- Superpowers Phase: TDD Task 1 upstream checked-byte budget -> Tasks 2-5 remediation -> Task 6 final verification/review -> `finishing-a-development-branch`
+- Phase: remediation Task 1 complete; Task 2 request-body and Studio session bounds starting
+- Superpowers Phase: TDD Task 2 body/session bounds -> Tasks 3-5 remediation -> Task 6 final verification/review -> `finishing-a-development-branch`
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
 - Superpowers Plan: original `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; remediation `docs/superpowers/plans/2026-07-15-final-review-remediation.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: Execute `docs/superpowers/plans/2026-07-15-final-review-remediation.md` sequentially. Start with RED tests proving invalid Base64 and remote image candidates consume the request-wide checked-byte budget; do not change product code before the failing tests are observed. Full raster decoding remains a deferred Minor.
+- Current Focus: Task 1 landed in `4c6f083`: invalid Base64 and remote candidates now consume one request-wide checked-byte budget even when raster validation fails, while accepted-image count remains separate. Start Task 2 with RED tests for path-specific unsafe API body limits and bounded Studio session persistence. Full raster decoding remains a deferred Minor.
 - Latest Verification: Before the final review, fresh Python 216/216, 14 Node modules with 101/101, size rules, TypeScript/Vite build, four-module compile, six BOM/PowerShell 5.1 checks, portable package smoke, LocalOnly preflight, G: sync, and destination preflight passed. API/browser smoke on port `18768` also passed without paid upstream calls. Those results prove the current code state but do not close the five newly confirmed Important findings. Local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is therefore a rejected candidate, not the final release. v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
 
 ## Final Whole-Branch Review Findings
@@ -20,6 +20,10 @@
 - Important 5: public URL/error sanitization can retain credential-bearing paths or uncommon query keys.
 - Minor: magic-byte-only raster validation can accept structurally corrupt images, but it matches the approved v1.0.6 design and is deferred to a later dependency-aware decoder enhancement.
 - Approved remediation: separate checked-byte/accepted-image budgets; path-specific body limits plus bounded session schema; compact persisted baseline markers and startup three-way merge; conditional reference canonicalization plus stable content-hash paths; host-and-port-only public URL hints.
+
+## Remediation Execution
+- Task 1 — complete at `4c6f083`. RED: two tests reproduced that invalid Base64/remote candidates did not exhaust the byte budget. GREEN: targeted 5/5, full `tests.test_upstream_jobs` 64/64, image safety 10/10, and four-module compile passed. Compatibility aliases `image_count`, `total_bytes`, and `remaining_bytes` remain available.
+- Task 2 — next. Add path-specific encoded-body limits for every unsafe API write, then bound normalized Studio text, image and metadata fields plus the final persisted JSON size.
 
 ## Final Remediation Verification
 - Security and behavior: trusted loopback Host validation runs before CORS and request parsing; foreign/DNS-rebinding hosts return 403, foreign unsafe Origin returns 403, production preflight does not expose CORS, and multipart/urlencoded/other generation bodies are byte-limited before form parsing.
@@ -45,7 +49,7 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: Task 1 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; write and run the invalid-candidate checked-byte RED tests before editing `app.py` or `image_safety.py`.
+- Start with: Task 2 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; write and run non-generation body-limit and oversized Studio field RED tests before the next `app.py` implementation change.
 - Superpowers phase: implement the five Important remediations in small RED/GREEN commits, run targeted spec/code-quality reviews, then require zero unresolved Critical/Important findings in another whole-branch review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Rejected package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`.

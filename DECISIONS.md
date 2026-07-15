@@ -1,6 +1,7 @@
 # Decisions
 
 ## Active Decisions
+- 2026-07-15 — Status: active: Upstream image result accounting separates checked bytes from accepted image count. Base64 estimates reserve bytes before decode; remote chunks charge before entering the in-memory payload; invalid candidates do not refund work. Existing read-only budget property names remain as compatibility aliases.
 - 2026-07-15 — Status: active: Execute `docs/superpowers/plans/2026-07-15-final-review-remediation.md` sequentially in six tasks. Each product change requires observed RED evidence first, then minimal GREEN, targeted regression, and a small commit. No G: write occurs before the complete local matrix and final whole-branch review pass.
 - 2026-07-15 — Status: active: The user approved the complete conservative remediation in `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`: checked-byte upstream accounting, limits for every unsafe API body plus bounded session persistence, compact persisted baseline markers with startup three-way merge, conditional canonical reference adoption plus deterministic content-hash paths, and host/port-only public URL hints. Full raster decode remains a deferred Minor to avoid new offline Pillow dependencies.
 - 2026-07-15 — Status: active: No v1.0.6 package is currently releasable. Code HEAD `99d8d91` has zero Critical and five unresolved Important final-review findings. The next external write to G: is forbidden until all five are fixed, the full local matrix passes, and final whole-branch review reports zero Critical/Important.
