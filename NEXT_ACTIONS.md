@@ -1,21 +1,19 @@
 # Next Actions
 
 ## Now
-- [x] Complete and review approved Tasks 1-5 plus the earlier RED/GREEN final-review remediation through code HEAD `99d8d91`.
-- [x] Rebuild and verify candidate `56aef66b…`, then reject it after the final whole-branch review confirmed zero Critical and five new Important findings.
-- [x] Get user approval for the complete conservative remediation approach and write `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`.
-- [x] Obtain user review of the Chinese remediation spec and write/self-review `docs/superpowers/plans/2026-07-15-final-review-remediation.md`.
-- [ ] Implement and review all five Important remediations: upstream checked-byte accounting, all-write body/session bounds, startup reconciliation, reference canonicalization/stable files, and host-only URL hints.
-- [ ] Rebuild, package, smoke, run LocalOnly gates, repeat final whole-branch review until no Critical/Important remains, then overwrite G: and verify the destination.
-- [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
+- [x] Implement and review all five approved Important remediations, then fix the final-review reset-baseline loss case and pre-cap Studio session-count amplification with RED/GREEN tests.
+- [x] Pass Python 233/233, Node 111/111, size/build/compile/PowerShell gates, exact package smoke, LocalOnly preflight, API/static/reference smoke, and a zero unresolved Critical/Important whole-branch review.
+- [ ] Complete a fresh real-browser smoke in an environment allowed to open loopback URLs; the in-app browser here is policy-blocked and alternate-browser workarounds are prohibited.
+- [ ] Only after browser PASS, sync the clean v1.0.6 candidate to G:, run full destination preflight, and verify local/G hashes, exact manifest, v1.0.5 rollback hash, and zero temp/forbidden files.
+- [ ] After all release gates pass, present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: Task 6 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; run the full local matrix, inspect status/assets, package with no G: write, then perform API/browser smoke and whole-branch review.
-- Do not redo: remediation Tasks 1-5, fixes through `746cd5b`, Tasks 1-5 before the final review, or the July 11 full verification merely to prove the rejected candidate again. Task 6 must generate fresh evidence for the current HEAD.
-- Verify next: all Python and Node tests, size rules, build, compile, six PowerShell checks, exact-manifest package smoke, LocalOnly preflight, API/browser smoke, and a zero Critical/Important whole-branch review pass before G: sync.
+- Start here: run only the missing real-browser checks against a temporary current-candidate server: Studio and `/classic` rendering, local/server startup merge, stable `/outputs/session_refs/ref-{hash}.png` adoption, secret-free baseline marker, chat reference disclosure, and absence of GPT edit/reference-strength controls.
+- Do not redo: remediation Tasks 1-5, final two review fixes at `2a8b014`, Python 233/233, Node 111/111, size/build/compile/PowerShell gates, local package smoke/preflight, API/static/reference smoke, or whole-branch review unless product code changes.
+- Verify next: browser PASS first; then G: sync and full destination preflight. If browser cannot run, do not call the package final and do not write G:.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
-- Release boundary: local/G v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is rejected. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected. No current v1.0.6 package is final.
-- Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
+- Release boundary: local candidate SHA256 `d9ceb67249c4e3e9360b7cd8eb2fcfb32936213e6cfe3c1900a23e2c287a5b11` is locally verified but not final/synced. G: v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains rejected and unchanged. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected.
+- Known limits: real browser smoke is blocked in this environment; cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
 
 ## Prior Release Context
 - Historical start point: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
