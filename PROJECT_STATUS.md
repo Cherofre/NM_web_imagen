@@ -2,14 +2,14 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-15 +08:00
-- Phase: remediation Task 1 complete; Task 2 request-body and Studio session bounds starting
-- Superpowers Phase: TDD Task 2 body/session bounds -> Tasks 3-5 remediation -> Task 6 final verification/review -> `finishing-a-development-branch`
+- Phase: remediation Tasks 1-2 complete; Task 3 stable Studio reference files starting
+- Superpowers Phase: TDD Task 3 stable references -> Tasks 4-5 remediation -> Task 6 final verification/review -> `finishing-a-development-branch`
 - Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
 - Superpowers Plan: original `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; remediation `docs/superpowers/plans/2026-07-15-final-review-remediation.md`
 - Branch: `codex/p1-hardening-v1.0.6`
 - Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: Task 1 landed in `4c6f083`: invalid Base64 and remote candidates now consume one request-wide checked-byte budget even when raster validation fails, while accepted-image count remains separate. Start Task 2 with RED tests for path-specific unsafe API body limits and bounded Studio session persistence. Full raster decoding remains a deferred Minor.
-- Latest Verification: Before the final review, fresh Python 216/216, 14 Node modules with 101/101, size rules, TypeScript/Vite build, four-module compile, six BOM/PowerShell 5.1 checks, portable package smoke, LocalOnly preflight, G: sync, and destination preflight passed. API/browser smoke on port `18768` also passed without paid upstream calls. Those results prove the current code state but do not close the five newly confirmed Important findings. Local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is therefore a rejected candidate, not the final release. v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
+- Current Focus: Task 2 landed in `4a4499e`: every unsafe `/api` write now has a pre-parser encoded-body limit, while Studio writes bound text, generated-image fields, metadata shape/bytes, and the final persisted JSON. Start Task 3 with RED tests proving repeated identical data URL references currently create different UUID files. Full raster decoding remains a deferred Minor.
+- Latest Verification: Task 2 observed five Studio persistence RED failures, then passed 108/108 targeted security/session tests, four-module `py_compile`, and `git diff --check`. The rejected local and G: ZIP SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains untouched; v1.0.5 remains for rollback. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
 
 ## Final Whole-Branch Review Findings
 - Critical: zero.
@@ -23,7 +23,8 @@
 
 ## Remediation Execution
 - Task 1 — complete at `4c6f083`. RED: two tests reproduced that invalid Base64/remote candidates did not exhaust the byte budget. GREEN: targeted 5/5, full `tests.test_upstream_jobs` 64/64, image safety 10/10, and four-module compile passed. Compatibility aliases `image_count`, `total_bytes`, and `remaining_bytes` remain available.
-- Task 2 — next. Add path-specific encoded-body limits for every unsafe API write, then bound normalized Studio text, image and metadata fields plus the final persisted JSON size.
+- Task 2 — complete at `4a4499e`. RED: non-generation Content-Length/chunked requests reached endpoints, Studio accepted an oversized declared body, and five persistence tests reproduced unbounded text/images/metadata/final JSON. GREEN: route limits are 152 MiB generation, 208 MiB Studio, and 2 MiB other unsafe APIs; normalized Studio text/images/metadata/final JSON are bounded with failed-write reference cleanup. Security/session regression passed 108/108 plus four-module compile and diff check.
+- Task 3 — next. Replace new UUID reference filenames with deterministic content-hash filenames while preserving old UUID URLs and rollback/concurrency safety.
 
 ## Final Remediation Verification
 - Security and behavior: trusted loopback Host validation runs before CORS and request parsing; foreign/DNS-rebinding hosts return 403, foreign unsafe Origin returns 403, production preflight does not expose CORS, and multipart/urlencoded/other generation bodies are byte-limited before form parsing.
@@ -49,7 +50,7 @@
 - Review result: Task 5 spec compliant and Ready to sync. Non-blocking notes: the exact-version test name still says “file exists”; informational OpenAPI/README version literals are not release authority; package smoke does not yet accept an explicit expected-version parameter.
 
 ## Resume Here
-- Start with: Task 2 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; write and run non-generation body-limit and oversized Studio field RED tests before the next `app.py` implementation change.
+- Start with: Task 3 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; write and run repeated-identical-reference RED tests before the next `app.py` implementation change.
 - Superpowers phase: implement the five Important remediations in small RED/GREEN commits, run targeted spec/code-quality reviews, then require zero unresolved Critical/Important findings in another whole-branch review.
 - Explain intent, visible behavior, compatibility impact, and residual risk at each phase boundary.
 - Rejected package: `C:\Users\mumengfei\.config\superpowers\worktrees\NM_web_imagen\NM_web_imagen-v1.0.6.zip`, SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`.

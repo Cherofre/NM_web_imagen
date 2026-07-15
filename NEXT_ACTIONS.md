@@ -10,9 +10,9 @@
 - [ ] Use `finishing-a-development-branch` to present merge, PR, keep, or discard options; do not push or merge without the user's choice.
 
 ## Handoff Notes
-- Start here: Task 2 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; begin with failing body-limit and oversized Studio persistence tests.
-- Do not redo: Tasks 1-5, fixes through `99d8d91`, or the July 11 full verification merely to prove the rejected candidate again. New code changes will receive targeted tests first and the full matrix at the end.
-- Verify next: non-generation unsafe API requests return 413 before parsing; oversized Studio fields are bounded without breaking legacy GET/read compatibility.
+- Start here: Task 3 in `docs/superpowers/plans/2026-07-15-final-review-remediation.md`; begin with a failing test that saves the same data URL reference twice and observes two different UUID URLs/files.
+- Do not redo: remediation Tasks 1-2, fixes through `4a4499e`, Tasks 1-5 before the final review, or the July 11 full verification merely to prove the rejected candidate again. New code changes will receive targeted tests first and the full matrix at the end.
+- Verify next: identical session/turn/reference IDs plus identical bytes reuse one stable `/outputs/session_refs/...` URL/file; different bytes remain distinct; old UUID URLs stay unchanged.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: local/G v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` is rejected. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected. No current v1.0.6 package is final.
 - Known limits: cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
