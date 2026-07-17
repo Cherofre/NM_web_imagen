@@ -3,17 +3,17 @@
 ## Now
 - [x] Create `codex/mask-editor-v1.0.7`, stop the old v1.0.6 temporary service, record the Chinese design/plan, and pass the focused baseline.
 - [x] Add backend RED tests for mask PNG/Alpha/dimensions/endpoint/multipart behavior, then implement GREEN; combined regression passed 131/131.
-- [ ] Add frontend RED tests for mask state, queue snapshot and submission protocol, then implement the Canvas editor.
-- [ ] Run the full Python/Node/build/size/compile matrix and a no-paid-API mock edits smoke.
-- [ ] Prepare Studio-only manual acceptance; do not sync G:, push, merge, or publish without the user's confirmation.
+- [x] Add frontend RED tests for mask state, queue snapshot and submission protocol, then implement the Canvas editor at `b72a6f8`.
+- [x] Run the full Python/Node/build/size/compile matrix and a no-paid-API mock edits smoke.
+- [ ] User manually accepts the Studio Canvas at `http://127.0.0.1:14260/`; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: follow Task 3 in `docs/superpowers/plans/2026-07-17-mask-editor-v1.0.7.md`; add frontend RED tests before changing Studio mask state or submission code.
-- Do not redo: v1.0.6 P1 fixes and the focused v1.0.7 baseline. The old PID `47808` is already stopped.
-- Verify next: frontend mask state and submission tests must show observed RED, then pass together with existing submission/UI tests. The blocked exact temp directory cleanup is housekeeping, not permission to use destructive workarounds.
+- Start here: open `http://127.0.0.1:14260/` in a normal local browser and manually exercise first-reference mask drawing, erasing, undo/redo, clear/fill, zoom/move, apply/reopen/remove, mode switching and narrow-window layout.
+- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 119/119, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
+- Verify next: confirm visually that red means editable, the applied badge appears only in GPT generation mode, changing/reordering the first reference clears the mask, and no controls overlap at browser zoom 200% or a narrow window.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
-- Release boundary: local candidate SHA256 `d9ceb67249c4e3e9360b7cd8eb2fcfb32936213e6cfe3c1900a23e2c287a5b11` is locally verified but not final/synced. G: v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216` remains rejected and unchanged. `28479e…`, `51f75e…`, `958334…`, and `c355…` are also superseded/rejected.
-- Known limits: real browser smoke is blocked in this environment; cancellation cannot guarantee provider-side stop/refund after acceptance; locks and JobRegistry are single-process; chat remains text-only; session concurrency is file-based with one automatic merge retry; a Windows file lock lasting beyond bounded retry still surfaces as an error. Exact-manifest validation exists in three scripts; the exact-version test name is stale; informational OpenAPI/README version literals are non-authoritative; package smoke lacks an explicit expected-version parameter.
+- Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
+- Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
 - Historical start point: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.

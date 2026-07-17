@@ -2,20 +2,24 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-17 +08:00
-- Phase: v1.0.7 mask editor design and TDD implementation
-- Superpowers Phase: approved design -> Chinese spec/plan -> backend RED/GREEN -> frontend RED/GREEN -> full verification
+- Phase: v1.0.7 mask editor locally verified; awaiting Studio manual acceptance
+- Superpowers Phase: approved design -> Chinese spec/plan -> backend RED/GREEN -> frontend RED/GREEN -> full local verification -> manual browser gate
 - Superpowers Spec: `docs/superpowers/specs/2026-07-17-mask-editor-v1.0.7-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-17-mask-editor-v1.0.7.md`
 - Branch: `codex/mask-editor-v1.0.7`
 - Goal: Add a truthful first-reference mask editor for GPT Image 2 using native Canvas and `/v1/images/edits`, without adding large frontend libraries, Pillow, localStorage image blobs, or breaking existing workflows.
-- Current Focus: backend mask contract is GREEN; add frontend RED tests for base-image identity, invalidation, mode capability, FormData and queue mask snapshots before implementing the Canvas editor. Do not write G:, call paid upstream APIs, or reuse the v1.0.6 candidate as a v1.0.7 artifact.
-- Latest Verification: Python 233/233; 14 Node modules with 111/111 tests; size rules, TypeScript/Vite build, four-module `py_compile`, six UTF-8 BOM/PowerShell 5.1 parser checks, exact 52-file package plus one directory entry, portable package smoke, and LocalOnly preflight all passed. Current assets are `index-B7h4N0fo.js` and `index-Gv_GDUKl.css`; local candidate SHA256 is `d9ceb67249c4e3e9360b7cd8eb2fcfb32936213e6cfe3c1900a23e2c287a5b11`, package smoke instance ID `e92ba34f914ee9b2d630`. API/static smoke verified stable `ref-{32 hex}.png` reuse, `nosniff`, current Studio assets, `/classic`, pure startup merge/canonicalization, and secret-free baseline markers. The in-app browser was blocked from `127.0.0.1` by enterprise network policy, its one test tab was closed, and PID `7728`, port `14334`, and the exact temp directory were removed. G: still contains rejected v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`; v1.0.5 remains `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
+- Current Focus: product implementation is committed through `b72a6f8`; keep the temporary Studio at `http://127.0.0.1:14260/` available for user manual Canvas acceptance. Do not package, write G:, call paid upstream APIs, push, merge, or publish before that acceptance.
+- Latest Verification: Python 238/238; 16 Node modules with 119/119 tests; release/cache gates 33/33; `npm run test:size`; TypeScript/Vite production build; four-module `py_compile`; no-paid-API mock edits smoke; and runtime health/index/current JS/current CSS/`/classic` HTTP smoke all passed. Current Studio assets are `index-BnyXd0Tq.js` and `index-S5ne8IcQ.css`. The mock received `/v1/images/edits` multipart fields in `image[] -> mask` order and the response/history recorded `mask_used=true`. The in-app browser again denied loopback navigation by enterprise policy and its test tab was finalized; no alternative browser automation was used. Temporary manual service PID `56600` remains on port `14260`. No v1.0.7 package or G: sync exists. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
 - v1.0.7 Baseline: branch created from `ed28d20`; Python image/upstream regression passed 126/126, frontend submission/UI regression passed 36/36, and `app.py`, `image_safety.py`, `storage.py`, `upstream.py` compiled. The old PID `47808` was stopped. Exact temporary directory cleanup remains pending because the execution host blocks recursive deletion even after a successful path verification.
 - v1.0.7 Backend Mask Contract: RED reproduced that `mask_file` was ignored, invalid masks returned 200, non-edit endpoints were accepted, and multipart lacked `mask`. GREEN adds PNG IHDR/Alpha/dimension validation, first-base and endpoint guards, a 150 MiB combined reference/mask budget, edits multipart forwarding, and safe `mask_used` metadata. Five targeted tests and the combined security/upstream suite passed 131/131; four-module compile passed.
+- v1.0.7 Frontend Mask Contract: native Canvas supports brush, eraser, move, size, undo/redo, clear/fill, zoom/fit, PNG export, first-base invalidation, exact in-memory `File` identity, queue snapshots, endpoint validation, focus containment, reduced-motion handling, and bilingual copy. Base/mask badges are visible only in GPT generation mode so Banana/chat do not imply mask submission.
 
 ## v1.0.7 Mask Editor Execution
 - Task 1 — complete at `614aab6`: branch, Chinese spec/plan, baseline and release boundary recorded.
-- Task 2 — backend RED/GREEN complete and awaiting its stable commit: optional `mask_file` is accepted only with a PNG first base and auto/edits, the RGBA PNG mask must match dimensions, and the upstream receives `image[]` plus `mask`.
+- Task 2 — complete at `41aed72`: optional `mask_file` is accepted only with a PNG first base and auto/edits, the RGBA PNG mask must match dimensions, and the upstream receives `image[]` plus `mask`.
+- Tasks 3-4 — complete at `b72a6f8`: frontend state/submission protocol, Canvas editor, bilingual UI, production assets, v1.0.7 version and README are committed.
+- Task 5 — local automation complete: Python/Node/build/size/compile, real local mock multipart, and HTTP static smoke passed without a paid request.
+- Task 6 — pending only user manual Studio acceptance. Automatic browser access is policy-blocked; no v1.0.7 package, G: sync, push, merge, tag, PR, or release has occurred.
 
 ## Final Whole-Branch Review Findings
 - Current unresolved Critical: zero.
