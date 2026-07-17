@@ -14,6 +14,15 @@ test("reference fingerprint is stable and changes with the base image identity",
   assert.notEqual(masks.referenceFileFingerprint(first), masks.referenceFileFingerprint({ ...first, lastModified: 11 }));
 });
 
+test("preview mask editing promotes the selected image to the first reference", () => {
+  const first = fileLike("first.png", 120, 10);
+  const second = fileLike("second.png", 121, 11);
+  const selected = fileLike("selected.png", 122, 12);
+
+  assert.deepEqual(masks.referencesWithMaskBase([first, second], second, 16), [second, first]);
+  assert.deepEqual(masks.referencesWithMaskBase([first, second], selected, 2), [selected, first]);
+});
+
 test("mask editor is available only for GPT generation with a reference image", () => {
   assert.deepEqual(masks.maskEditorCapability("gpt-image-2", "generate", 1), {
     available: true,

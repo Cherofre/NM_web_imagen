@@ -18,6 +18,19 @@ test("Studio exposes a first-reference mask editor and snapshots the mask into q
   assert.match(appSource, /index === 0 && maskCapability\.available/);
 });
 
+test("result preview can become the first reference and open mask editing directly", () => {
+  assert.match(appSource, /async function editPreviewMask/);
+  assert.match(appSource, /setActiveEngine\("gpt-image-2"\)/);
+  assert.match(appSource, /setSubmitMode\("generate"\)/);
+  assert.match(appSource, /referencesWithMaskBase\(current, file, 16\)/);
+  assert.match(appSource, /const keepCurrentMask = references\[0\] === file/);
+  assert.match(appSource, /if \(!keepCurrentMask\) setMaskAttachment\(null\)/);
+  assert.match(appSource, /setMaskEditorOpen\(true\)/);
+  assert.match(appSource, /className="preview-mask-action"/);
+  assert.match(appSource, /onClick=\{\(\) => void editPreviewMask\(previewImage\)\}/);
+  assert.match(i18nSource, /"preview\.editMask"/);
+});
+
 test("mask editor provides real canvas drawing, PNG export, undo redo and pan controls", () => {
   assert.match(editorSource, /onPointerDown/);
   assert.match(editorSource, /setPointerCapture/);

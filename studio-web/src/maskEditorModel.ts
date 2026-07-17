@@ -22,6 +22,15 @@ export function referenceFileFingerprint(file: ReferenceFileIdentity | null | un
   ].join("\u0000");
 }
 
+export function referencesWithMaskBase<FileType>(
+  references: readonly FileType[],
+  base: FileType,
+  limit = 16,
+) {
+  const normalizedLimit = Math.max(1, Math.floor(Number(limit) || 1));
+  return [base, ...references.filter((file) => file !== base)].slice(0, normalizedLimit);
+}
+
 export function maskEditorCapability(engine: string, mode: string, referenceCount: number) {
   if (engine !== "gpt-image-2") {
     return { available: false, reasonKey: "mask.gptOnly" };

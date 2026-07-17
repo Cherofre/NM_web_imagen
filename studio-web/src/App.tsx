@@ -95,6 +95,7 @@ import {
   appendGenerationFiles,
   maskEditorCapability,
   referenceFileFingerprint,
+  referencesWithMaskBase,
   resolveMaskEndpoint,
   type MaskAttachment,
 } from "./maskEditorModel";
@@ -331,6 +332,7 @@ type PreviewImage = {
   dimensions?: { width?: number; height?: number };
   requestedSize?: string;
   objectUrl?: boolean;
+  sourceFile?: File;
   gallery?: PreviewImage[];
   galleryIndex?: number;
 };
@@ -1112,6 +1114,7 @@ function App() {
   const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "count" | null>(null);
   const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  const [previewMaskLoading, setPreviewMaskLoading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [previewDragging, setPreviewDragging] = useState(false);
@@ -1143,6 +1146,7 @@ function App() {
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const previewMaskRequestRef = useRef(0);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
   const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
@@ -2339,10 +2343,12 @@ function App() {
 
   function previewReference(file: File) {
     const src = URL.createObjectURL(file);
-    openPreviewImage({ src, name: file.name, objectUrl: true });
+    openPreviewImage({ src, name: file.name, objectUrl: true, sourceFile: file });
   }
 
   function openPreviewImage(next: PreviewImage) {
+    previewMaskRequestRef.current += 1;
+    setPreviewMaskLoading(false);
     setPreviewImage((current) => {
       if (current?.objectUrl) URL.revokeObjectURL(current.src);
       return next;
@@ -2364,6 +2370,8 @@ function App() {
   }
 
   function shiftPreviewImage(direction: -1 | 1) {
+    previewMaskRequestRef.current += 1;
+    setPreviewMaskLoading(false);
     setPreviewImage((current) => {
       if (!current?.gallery || current.gallery.length <= 1) return current;
       const galleryIndex = (Number(current.galleryIndex) + direction + current.gallery.length) % current.gallery.length;
@@ -2373,6 +2381,8 @@ function App() {
   }
 
   function closePreviewImage() {
+    previewMaskRequestRef.current += 1;
+    setPreviewMaskLoading(false);
     setPreviewImage((current) => {
       if (current?.objectUrl) URL.revokeObjectURL(current.src);
       return null;
@@ -2590,18 +2600,25 @@ function App() {
     closeOnEscape(event);
   }
 
+  async function outputReferenceFile(src: string, name: string) {
+    if (!isSameOriginOutput(src)) throw new Error(t("status.outputOnly"));
+    const response = await fetch(src, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const mimeType = blob.type || "image/png";
+    if (!mimeType.startsWith("image/")) throw new Error(t("status.noImageFiles"));
+    return new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
+      type: mimeType,
+      lastModified: Date.now(),
+    });
+  }
+
   async function addOutputAsReference(src: string, name: string) {
     try {
-      const outcome = await loadReferenceForCurrentMode(() => submitModeRef.current, async () => {
-        if (!isSameOriginOutput(src)) throw new Error(t("status.outputOnly"));
-        const response = await fetch(src, { cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        return new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
-          type: blob.type || "image/png",
-          lastModified: Date.now(),
-        });
-      });
+      const outcome = await loadReferenceForCurrentMode(
+        () => submitModeRef.current,
+        () => outputReferenceFile(src, name),
+      );
       if (outcome.blocked) {
         setNotice(t("reference.chatNotSent"));
         return false;
@@ -2614,6 +2631,33 @@ function App() {
       }
       setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed"));
       return false;
+    }
+  }
+
+  async function editPreviewMask(preview: PreviewImage) {
+    if (previewMaskLoading) return;
+    const requestId = previewMaskRequestRef.current + 1;
+    previewMaskRequestRef.current = requestId;
+    setPreviewMaskLoading(true);
+    try {
+      const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
+      if (previewMaskRequestRef.current !== requestId) return;
+      if (!file.type.startsWith("image/")) throw new Error(t("status.noImageFiles"));
+      const keepCurrentMask = references[0] === file && Boolean(activeMaskAttachment(maskAttachment, references));
+      setActiveEngine("gpt-image-2");
+      setSubmitMode("generate");
+      setReferences((current) => referencesWithMaskBase(current, file, 16));
+      if (!keepCurrentMask) setMaskAttachment(null);
+      closePreviewImage();
+      setMaskEditorOpen(true);
+    } catch (error) {
+      if (previewMaskRequestRef.current === requestId) {
+        setNotice(error instanceof Error && error.message ? error.message : t("status.addReferenceFailed"));
+      }
+    } finally {
+      if (previewMaskRequestRef.current === requestId) {
+        setPreviewMaskLoading(false);
+      }
     }
   }
 
@@ -4817,6 +4861,18 @@ function App() {
               <span>
                 <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
                 <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
+                <button
+                  type="button"
+                  className="preview-mask-action"
+                  onClick={() => void editPreviewMask(previewImage)}
+                  title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
+                  aria-label={t("preview.editMask")}
+                  aria-busy={previewMaskLoading}
+                  disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
+                >
+                  {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
+                  <span>{t("preview.editMask")}</span>
+                </button>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>

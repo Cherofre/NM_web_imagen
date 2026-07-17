@@ -3355,6 +3355,39 @@ button.primary-action:focus-visible,
   text-decoration: none;
 }
 
+.lightbox-card .preview-mask-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 11px;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+}
+
+.lightbox-card .preview-mask-action:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.lightbox-card .preview-mask-action:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateY(1px);
+}
+
+.lightbox-card .preview-mask-action:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.lightbox-card .preview-mask-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.lightbox-card .preview-mask-action[aria-busy="true"] {
+  cursor: wait;
+}
+
 .lightbox-stage {
   position: relative;
   display: grid;
@@ -3815,6 +3848,14 @@ button.primary-action:focus-visible,
 }
 
 @media (max-width: 720px) {
+  .lightbox-card .preview-mask-action {
+    padding: 0;
+  }
+
+  .preview-mask-action span {
+    display: none;
+  }
+
   .mask-editor-card {
     width: calc(100vw - 8px);
     height: calc(100vh - 8px);
@@ -3859,6 +3900,7 @@ button.primary-action:focus-visible,
 
   .mask-editor-card button,
   .lightbox-zoom-tools button,
+  .preview-mask-action,
   .mask-editor-shortcut-help,
   .mask-editor-canvas-stack {
     transition: none;
