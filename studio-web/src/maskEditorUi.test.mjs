@@ -50,16 +50,30 @@ test("mask editor exposes discoverable keyboard shortcuts for tools, brush size 
   assert.match(i18nSource, /"mask\.shortcuts"/);
 });
 
+test("mask editor shows the real brush footprint under the pointer", () => {
+  assert.match(editorSource, /cursorCanvasRef/);
+  assert.match(editorSource, /drawBrushCursor/);
+  assert.match(editorSource, /brushSize \/ 2/);
+  assert.match(editorSource, /onPointerEnter=\{syncBrushCursor\}/);
+  assert.match(editorSource, /onPointerLeave=\{hideBrushCursor\}/);
+  assert.match(editorSource, /className="mask-editor-brush-cursor"/);
+  assert.match(styleSource, /\.mask-editor-brush-cursor\s*\{[\s\S]*?pointer-events:\s*none/);
+});
+
 test("mask editor follows the existing product vocabulary and remains usable on narrow screens", () => {
   assert.match(styleSource, /\.mask-editor-card/);
   assert.match(styleSource, /\.mask-editor-toolbar/);
   assert.match(styleSource, /\.mask-editor-stage/);
+  assert.match(editorSource, /<span>\{t\("mask\.paintHint"\)\}<\/span>/);
+  assert.doesNotMatch(editorSource, /<span>\{t\("mask\.promptLimit"\)\}<\/span>/);
+  assert.match(editorSource, /mask-editor-shortcut-help/);
   assert.match(styleSource, /@media \(max-width: 720px\)[\s\S]*\.mask-editor-card/);
   assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mask-editor-card \.spin/);
   assert.match(styleSource, /\.mask-editor-card button:focus-visible/);
   assert.match(i18nSource, /"mask\.edit"/);
   assert.match(i18nSource, /"mask\.paintHint"/);
   assert.match(i18nSource, /"mask\.promptLimit"/);
+  assert.match(i18nSource, /"mask\.shortcutHelp"/);
   assert.match(i18nSource, /刷新页面后不会保留/);
   assert.match(i18nSource, /not kept after a page refresh/);
 });

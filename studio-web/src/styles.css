@@ -3553,9 +3553,9 @@ button.primary-action:focus-visible,
 
 .mask-editor-guidance {
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 9px 11px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
   border: 1px solid rgba(251, 146, 60, 0.28);
   border-radius: 12px;
   background: rgba(124, 45, 18, 0.24);
@@ -3564,23 +3564,37 @@ button.primary-action:focus-visible,
 
 .mask-editor-guidance svg {
   flex: 0 0 auto;
-  margin-top: 1px;
 }
 
-.mask-editor-guidance > div {
-  display: grid;
-  gap: 2px;
-}
-
-.mask-editor-guidance strong {
+.mask-editor-guidance > span:first-of-type {
+  min-width: 0;
   font-size: 12px;
-  line-height: 1.4;
+  font-weight: 750;
+  line-height: 1.45;
 }
 
-.mask-editor-guidance span {
+.mask-editor-shortcut-help {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgba(255, 237, 213, 0.08);
   color: #fed7aa;
   font-size: 11px;
-  line-height: 1.45;
+  font-weight: 750;
+  line-height: 1;
+  cursor: help;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.mask-editor-shortcut-help:hover,
+.mask-editor-shortcut-help:focus-visible {
+  outline: none;
+  background: rgba(255, 237, 213, 0.16);
+  color: #fff7ed;
 }
 
 .mask-editor-toolbar {
@@ -3640,6 +3654,11 @@ button.primary-action:focus-visible,
   cursor: crosshair;
 }
 
+.mask-editor-stage.is-ready.tool-brush .mask-editor-overlay,
+.mask-editor-stage.is-ready.tool-eraser .mask-editor-overlay {
+  cursor: none;
+}
+
 .mask-editor-stage.tool-move {
   cursor: grab;
 }
@@ -3670,6 +3689,10 @@ button.primary-action:focus-visible,
 .mask-editor-overlay {
   opacity: 0.52;
   touch-action: none;
+}
+
+.mask-editor-brush-cursor {
+  pointer-events: none;
 }
 
 .mask-editor-loading,
@@ -3799,7 +3822,7 @@ button.primary-action:focus-visible,
     border-radius: 14px;
   }
 
-  .mask-editor-guidance span,
+  .mask-editor-shortcut-help > span,
   .mask-editor-tool-group button span {
     display: none;
   }
@@ -3836,6 +3859,7 @@ button.primary-action:focus-visible,
 
   .mask-editor-card button,
   .lightbox-zoom-tools button,
+  .mask-editor-shortcut-help,
   .mask-editor-canvas-stack {
     transition: none;
   }

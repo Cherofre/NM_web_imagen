@@ -4,6 +4,7 @@ import {
   Check,
   Eraser,
   Hand,
+  Keyboard,
   Loader2,
   Maximize2,
   Redo2,
@@ -130,7 +131,9 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const baselineCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cursorClientRef = useRef<MaskPoint | null>(null);
   const commandsRef = useRef<MaskCommand[]>([]);
   const redoRef = useRef<MaskCommand[]>([]);
   const activeStrokeRef = useRef<Extract<MaskCommand, { kind: "stroke" }> | null>(null);
@@ -171,12 +174,93 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
     setHistoryVersion((value) => value + 1);
   }
 
+  function clearBrushCursor() {
+    const cursor = cursorCanvasRef.current;
+    const context = cursor?.getContext("2d");
+    if (!cursor || !context) return;
+    context.clearRect(0, 0, cursor.width, cursor.height);
+  }
+
+  function drawBrushCursor(point: MaskPoint) {
+    const cursor = cursorCanvasRef.current;
+    const overlay = overlayCanvasRef.current;
+    const context = cursor?.getContext("2d");
+    if (!cursor || !overlay || !context) return;
+    context.clearRect(0, 0, cursor.width, cursor.height);
+    if (!ready || saving || tool === "move") return;
+
+    const rect = overlay.getBoundingClientRect();
+    if (!rect.width || !rect.height || !overlay.width || !overlay.height) return;
+    const scaleX = rect.width / overlay.width;
+    const scaleY = rect.height / overlay.height;
+    const displayScale = Math.max(0.0001, (scaleX + scaleY) / 2);
+    const radius = brushSize / 2;
+
+    context.save();
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.strokeStyle = "rgba(0, 0, 0, 0.9)";
+    context.lineWidth = 3 / displayScale;
+    context.stroke();
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.strokeStyle = "rgba(255, 255, 255, 0.96)";
+    context.lineWidth = 1 / displayScale;
+    context.stroke();
+    context.beginPath();
+    context.arc(point.x, point.y, 2.5 / displayScale, 0, Math.PI * 2);
+    context.fillStyle = "rgba(0, 0, 0, 0.9)";
+    context.fill();
+    context.beginPath();
+    context.arc(point.x, point.y, 1 / displayScale, 0, Math.PI * 2);
+    context.fillStyle = "rgba(255, 255, 255, 0.96)";
+    context.fill();
+    context.restore();
+  }
+
+  function redrawBrushCursor() {
+    const client = cursorClientRef.current;
+    const overlay = overlayCanvasRef.current;
+    if (!client || !overlay) {
+      clearBrushCursor();
+      return;
+    }
+    const rect = overlay.getBoundingClientRect();
+    if (
+      !rect.width
+      || !rect.height
+      || client.x < rect.left
+      || client.x > rect.right
+      || client.y < rect.top
+      || client.y > rect.bottom
+    ) {
+      clearBrushCursor();
+      return;
+    }
+    drawBrushCursor({
+      x: (client.x - rect.left) * (overlay.width / rect.width),
+      y: (client.y - rect.top) * (overlay.height / rect.height),
+    });
+  }
+
+  function syncBrushCursor(event: PointerEvent<HTMLCanvasElement>) {
+    cursorClientRef.current = { x: event.clientX, y: event.clientY };
+    redrawBrushCursor();
+  }
+
+  function hideBrushCursor() {
+    cursorClientRef.current = null;
+    clearBrushCursor();
+  }
+
   useEffect(() => {
     let cancelled = false;
     setReady(false);
     setError("");
     commandsRef.current = [];
     redoRef.current = [];
+    cursorClientRef.current = null;
+    clearBrushCursor();
     setHistoryVersion((value) => value + 1);
 
     async function prepare() {
@@ -192,17 +276,22 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
 
         const base = baseCanvasRef.current;
         const overlay = overlayCanvasRef.current;
-        if (!base || !overlay) return;
+        const cursor = cursorCanvasRef.current;
+        if (!base || !overlay || !cursor) return;
         base.width = width;
         base.height = height;
         overlay.width = width;
         overlay.height = height;
+        cursor.width = width;
+        cursor.height = height;
         const baseContext = base.getContext("2d");
         const overlayContext = overlay.getContext("2d");
-        if (!baseContext || !overlayContext) throw new Error(t("mask.loadFailed"));
+        const cursorContext = cursor.getContext("2d");
+        if (!baseContext || !overlayContext || !cursorContext) throw new Error(t("mask.loadFailed"));
         baseContext.clearRect(0, 0, width, height);
         baseContext.drawImage(image, 0, 0, width, height);
         overlayContext.clearRect(0, 0, width, height);
+        cursorContext.clearRect(0, 0, width, height);
 
         const baseline = document.createElement("canvas");
         baseline.width = width;
@@ -255,6 +344,11 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
     };
   }, [file, initialMaskFile, t]);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(redrawBrushCursor);
+    return () => window.cancelAnimationFrame(frame);
+  }, [brushSize, tool, ready, saving, zoom, pan.x, pan.y, dimensions.width, dimensions.height]);
+
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>) {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return null;
@@ -269,6 +363,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
     if (!ready || saving) return;
     event.preventDefault();
+    syncBrushCursor(event);
     event.currentTarget.setPointerCapture(event.pointerId);
     if (tool === "move") {
       pointerRef.current = {
@@ -304,6 +399,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   }
 
   function onPointerMove(event: PointerEvent<HTMLCanvasElement>) {
+    syncBrushCursor(event);
     const pointer = pointerRef.current;
     if (!pointer || pointer.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -326,6 +422,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   }
 
   function finishPointer(event: PointerEvent<HTMLCanvasElement>) {
+    syncBrushCursor(event);
     const pointer = pointerRef.current;
     if (!pointer || pointer.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -525,11 +622,11 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
 
         <div className="mask-editor-guidance" role="note">
           <AlertCircle size={17} />
-          <div>
-            <strong>{t("mask.paintHint")}</strong>
-            <span>{t("mask.promptLimit")}</span>
-            <span>{t("mask.shortcuts")}</span>
-          </div>
+          <span>{t("mask.paintHint")}</span>
+          <span className="mask-editor-shortcut-help" tabIndex={0} title={t("mask.shortcuts")} aria-label={t("mask.shortcuts")}>
+            <Keyboard size={14} />
+            <span>{t("mask.shortcutHelp")}</span>
+          </span>
         </div>
 
         <div className="mask-editor-toolbar" aria-label={t("mask.tools")}>
@@ -551,7 +648,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
           </div>
         </div>
 
-        <div className={`mask-editor-stage tool-${tool}`} onWheel={onWheel}>
+        <div className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
           {!ready && !error && <div className="mask-editor-loading"><Loader2 className="spin" size={22} /> {t("mask.loading")}</div>}
           {error && <div className="mask-editor-error" role="alert"><AlertCircle size={18} /> {error}</div>}
           <div
@@ -567,11 +664,17 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
               ref={overlayCanvasRef}
               className="mask-editor-overlay"
               aria-label={t("mask.canvas")}
+              onPointerEnter={syncBrushCursor}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={finishPointer}
-              onPointerCancel={finishPointer}
+              onPointerCancel={(event) => {
+                finishPointer(event);
+                hideBrushCursor();
+              }}
+              onPointerLeave={hideBrushCursor}
             />
+            <canvas ref={cursorCanvasRef} className="mask-editor-brush-cursor" aria-hidden="true" />
           </div>
           <div className="mask-editor-zoom-tools" aria-label={t("mask.zoomTools")}>
             <button type="button" onClick={() => setZoom((value) => clamp(value - 0.25, 0.5, 4))} title={`${t("mask.zoomOut")} (-)`} aria-label={t("mask.zoomOut")} aria-keyshortcuts="-"><ZoomOut size={17} /></button>
