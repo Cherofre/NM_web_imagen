@@ -35,6 +35,13 @@ PNG_1X1 = base64.b64encode(
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 ).decode("ascii")
 PNG_1X1_RAW = base64.b64decode(PNG_1X1)
+PNG_RGBA_1X1_RAW = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00"
+    b"\x00\x00\x00\x00"
+)
 EXACT_SECRET = "exact-client-key-ABC123"
 WINDOWS_SECRET_PATH = r"C:\Users\Alice\private\token.txt"
 POSIX_SECRET_PATH = "/home/alice/private/token.txt"
@@ -1078,6 +1085,34 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ],
             [call["kwargs"]["headers"] for call in executor.calls],
         )
+
+    async def test_gpt_mask_is_forwarded_with_the_first_edit_image(self) -> None:
+        executor = RecordingExecutor()
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", side_effect=self._gpt_post),
+        ):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "replace the selected area",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "api_endpoint": "auto",
+                },
+                files=[
+                    ("reference_files", ("base.png", PNG_1X1_RAW, "image/png")),
+                    ("mask_file", ("mask.png", PNG_RGBA_1X1_RAW, "image/png")),
+                ],
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(executor.calls))
+        self.assertTrue(str(executor.calls[0]["args"][0]).endswith("/v1/images/edits"))
+        files = executor.calls[0]["kwargs"]["files"]
+        self.assertEqual(["image[]", "mask"], [item[0] for item in files])
+        self.assertEqual("image/png", files[1][1][2])
 
     async def test_production_remote_results_use_download_executor_kind(self) -> None:
         executor = RecordingExecutor()

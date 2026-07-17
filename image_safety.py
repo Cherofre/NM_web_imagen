@@ -67,6 +67,43 @@ def validate_raster_bytes(
     return mime_type
 
 
+def _png_header(raw: bytes, *, label: str) -> tuple[int, int, int]:
+    if (
+        len(raw) < 33
+        or not raw.startswith(b"\x89PNG\r\n\x1a\n")
+        or int.from_bytes(raw[8:12], "big") != 13
+        or raw[12:16] != b"IHDR"
+    ):
+        raise ImageSafetyError(f"{label} PNG 头信息无效")
+    width = int.from_bytes(raw[16:20], "big")
+    height = int.from_bytes(raw[20:24], "big")
+    if width <= 0 or height <= 0:
+        raise ImageSafetyError(f"{label}尺寸无效")
+    return width, height, raw[25]
+
+
+def validate_edit_mask_bytes(
+    raw: bytes,
+    *,
+    base_raw: bytes,
+    max_bytes: int,
+) -> dict[str, int]:
+    mask_mime = validate_raster_bytes(raw, max_bytes=max_bytes)
+    if mask_mime != "image/png":
+        raise ImageSafetyError("遮罩只支持 PNG")
+    base_mime = detect_raster_mime(base_raw)
+    if base_mime != "image/png":
+        raise ImageSafetyError("使用遮罩时第一张底图必须是 PNG")
+
+    base_width, base_height, _base_color_type = _png_header(base_raw, label="底图")
+    mask_width, mask_height, mask_color_type = _png_header(raw, label="遮罩")
+    if mask_color_type not in {4, 6}:
+        raise ImageSafetyError("遮罩 PNG 必须包含 Alpha 通道")
+    if (mask_width, mask_height) != (base_width, base_height):
+        raise ImageSafetyError("遮罩尺寸必须与第一张底图一致")
+    return {"width": mask_width, "height": mask_height}
+
+
 def decode_raster_data_url(source: str, *, max_bytes: int) -> tuple[bytes, str]:
     match = re.fullmatch(
         r"data:(image/[^;]+);base64,([A-Za-z0-9+/=\r\n]+)",

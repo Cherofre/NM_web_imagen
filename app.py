@@ -37,6 +37,7 @@ from image_safety import (
     detect_raster_mime,
     raster_extension,
     resolve_output_image,
+    validate_edit_mask_bytes,
     validate_raster_bytes,
 )
 from storage import atomic_write_json, mutate_json, read_json
@@ -2717,6 +2718,31 @@ async def read_upload_assets(
     return assets
 
 
+async def read_edit_mask_asset(
+    upload: UploadFile,
+    *,
+    base_asset: Dict[str, Any],
+) -> Dict[str, Any]:
+    raw_bytes = await upload.read(REFERENCE_IMAGE_MAX_BYTES + 1)
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="遮罩文件为空")
+    try:
+        dimensions = validate_edit_mask_bytes(
+            raw_bytes,
+            base_raw=base_asset["bytes"],
+            max_bytes=REFERENCE_IMAGE_MAX_BYTES,
+        )
+    except ImageSafetyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {
+        "filename": upload.filename or "mask.png",
+        "request_filename": "mask.png",
+        "mime_type": "image/png",
+        "bytes": raw_bytes,
+        "dimensions": dimensions,
+    }
+
+
 def normalize_gpt_size(size: str) -> str:
     value = str(size or "auto").strip().lower().replace("×", "x")
     if value.startswith("auto"):
@@ -4314,6 +4340,7 @@ def create_app() -> FastAPI:
         custom_size: str = Form("1536x864"),
         api_endpoint: str = Form("auto"),
         reference_files: Optional[List[UploadFile]] = File(default=None),
+        mask_file: Optional[UploadFile] = File(default=None),
         job_id: str = Depends(generation_job_scope),
     ) -> Dict[str, Any]:
         JOB_REGISTRY.raise_if_canceled(job_id)
@@ -4327,8 +4354,22 @@ def create_app() -> FastAPI:
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)
             normalized_size = normalize_gpt_size(custom_size if size == "custom" else size)
-            resolved_endpoint = normalize_gpt_endpoint(api_endpoint, bool(reference_assets))
+            mask_asset: Optional[Dict[str, Any]] = None
+            if mask_file is not None:
+                if not reference_assets:
+                    raise HTTPException(status_code=400, detail="使用遮罩前请先添加第一张编辑底图")
+                requested_endpoint = str(api_endpoint or "auto").strip()
+                if requested_endpoint not in {"auto", "/v1/images/edits"}:
+                    raise HTTPException(status_code=400, detail="遮罩只支持 GPT 图片编辑接口，请使用 auto 或 /v1/images/edits")
+                mask_asset = await read_edit_mask_asset(mask_file, base_asset=reference_assets[0])
+                if sum(len(asset["bytes"]) for asset in reference_assets) + len(mask_asset["bytes"]) > REFERENCE_REQUEST_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="参考图和遮罩总大小超过 150 MiB 限制")
+                resolved_endpoint = "/v1/images/edits"
+            else:
+                resolved_endpoint = normalize_gpt_endpoint(api_endpoint, bool(reference_assets))
             api_url = build_gpt_api_url(base_url, resolved_endpoint)
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -4410,6 +4451,17 @@ def create_app() -> FastAPI:
                 )
                 for asset in reference_assets
             ]
+            if mask_asset is not None:
+                files.append(
+                    (
+                        "mask",
+                        (
+                            mask_asset["request_filename"],
+                            mask_asset["bytes"],
+                            mask_asset["mime_type"],
+                        ),
+                    )
+                )
             request_kwargs = {"data": payload, "files": files}
         else:
             headers["Content-Type"] = "application/json"
@@ -4586,6 +4638,7 @@ def create_app() -> FastAPI:
                 "style_preset": style_preset,
                 "response_format": response_format,
                 "reference_count": len(reference_assets),
+                "mask_used": mask_asset is not None,
                 "image_count": len(images),
                 "saved_count": saved_count,
                 "output_dir": "outputs",
@@ -4610,6 +4663,7 @@ def create_app() -> FastAPI:
                 "api_endpoint": api_endpoint,
                 "edit_mode": edit_mode,
                 "reference_strength": reference_strength,
+                "mask_used": mask_asset is not None,
                 "timeout": timeout,
                 "infinite_timeout": infinite_timeout,
             }

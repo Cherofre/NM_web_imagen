@@ -41,6 +41,22 @@ WEBP_RAW = RASTER_SAMPLES["image/webp"]
 WEBP_BASE64 = base64.b64encode(WEBP_RAW).decode("ascii")
 
 
+def png_header(width: int, height: int, color_type: int) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        + width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + bytes((8, color_type, 0, 0, 0))
+        + b"\x00\x00\x00\x00"
+    )
+
+
+PNG_RGB_2X2 = png_header(2, 2, 2)
+PNG_RGBA_2X2 = png_header(2, 2, 6)
+PNG_RGBA_3X2 = png_header(3, 2, 6)
+
+
 def session_payload(reference_src: str) -> dict:
     now = "2026-07-10T10:00:00Z"
     return {
@@ -130,6 +146,35 @@ class ImageSafetyTests(unittest.TestCase):
                         claimed_mime="image/png",
                     )
                 self.assertEqual(400, error.exception.status_code)
+
+    def test_validate_edit_mask_requires_png_alpha_and_matching_dimensions(self) -> None:
+        validated = image_safety_module.validate_edit_mask_bytes(
+            PNG_RGBA_2X2,
+            base_raw=PNG_RGB_2X2,
+            max_bytes=1024,
+        )
+        self.assertEqual({"width": 2, "height": 2}, validated)
+
+        with self.assertRaisesRegex(ImageSafetyError, "Alpha"):
+            image_safety_module.validate_edit_mask_bytes(
+                PNG_RGB_2X2,
+                base_raw=PNG_RGB_2X2,
+                max_bytes=1024,
+            )
+
+        with self.assertRaisesRegex(ImageSafetyError, "尺寸"):
+            image_safety_module.validate_edit_mask_bytes(
+                PNG_RGBA_3X2,
+                base_raw=PNG_RGB_2X2,
+                max_bytes=1024,
+            )
+
+        with self.assertRaisesRegex(ImageSafetyError, "底图.*PNG"):
+            image_safety_module.validate_edit_mask_bytes(
+                PNG_RGBA_2X2,
+                base_raw=RASTER_SAMPLES["image/jpeg"],
+                max_bytes=1024,
+            )
 
     def test_decode_raster_data_url_preflights_size_before_base64_decode(self) -> None:
         encoded = base64.b64encode(b"x" * 33).decode("ascii")
@@ -1164,6 +1209,70 @@ class SecurityBoundaryApiTests(unittest.TestCase):
 
         self.assertEqual(400, response.status_code)
         upstream.assert_not_called()
+
+    def test_gpt_mask_requires_a_reference_image(self) -> None:
+        with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "prompt": "x",
+                },
+                files={"mask_file": ("mask.png", PNG_RGBA_2X2, "image/png")},
+            )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("底图", response.json()["detail"])
+        upstream.assert_not_called()
+
+    def test_gpt_mask_rejects_non_alpha_and_mismatched_png_before_upstream(self) -> None:
+        common = {
+            "api_key": "sk-test",
+            "base_url": "https://example.com/v1",
+            "prompt": "x",
+        }
+        cases = (
+            (PNG_RGB_2X2, "Alpha"),
+            (PNG_RGBA_3X2, "尺寸"),
+        )
+        for mask_raw, message in cases:
+            with self.subTest(message=message):
+                with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+                    response = self.client.post(
+                        "/api/generate/gpt-image-2",
+                        data=common,
+                        files=[
+                            ("reference_files", ("base.png", PNG_RGB_2X2, "image/png")),
+                            ("mask_file", ("mask.png", mask_raw, "image/png")),
+                        ],
+                    )
+
+                self.assertEqual(400, response.status_code)
+                self.assertIn(message, response.json()["detail"])
+                upstream.assert_not_called()
+
+    def test_gpt_mask_rejects_explicit_non_edit_endpoints(self) -> None:
+        for endpoint in ("/v1/images/generations", "/v1/responses"):
+            with self.subTest(endpoint=endpoint):
+                with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+                    response = self.client.post(
+                        "/api/generate/gpt-image-2",
+                        data={
+                            "api_key": "sk-test",
+                            "base_url": "https://example.com/v1",
+                            "prompt": "x",
+                            "api_endpoint": endpoint,
+                        },
+                        files=[
+                            ("reference_files", ("base.png", PNG_RGB_2X2, "image/png")),
+                            ("mask_file", ("mask.png", PNG_RGBA_2X2, "image/png")),
+                        ],
+                    )
+
+                self.assertEqual(400, response.status_code)
+                self.assertIn("编辑接口", response.json()["detail"])
+                upstream.assert_not_called()
 
     def test_banana_upload_rejects_fake_png_before_upstream(self) -> None:
         with patch.object(webapp, "create_requests_session") as session_factory:
