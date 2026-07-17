@@ -5,12 +5,12 @@
 - [x] Add backend RED tests for mask PNG/Alpha/dimensions/endpoint/multipart behavior, then implement GREEN; combined regression passed 131/131.
 - [x] Add frontend RED tests for mask state, queue snapshot and submission protocol, then implement the Canvas editor at `b72a6f8`.
 - [x] Run the full Python/Node/build/size/compile matrix and a no-paid-API mock edits smoke.
-- [ ] User refreshes and manually re-accepts `http://127.0.0.1:14260/` after `13a08ea`; check the brush/eraser footprint ring, compact guidance and shortcut hint, then recheck the result-preview controls. Do not package, sync G:, push, merge, or publish first.
+- [ ] User refreshes and manually re-accepts `http://127.0.0.1:14260/` after `c16881c`; check preview `编辑遮罩`, the brush/eraser footprint ring, compact guidance and shortcut hint, then recheck the remaining preview controls. Do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: refresh the already-open `http://127.0.0.1:14260/` page so it loads `index-bvMs_OID.js` / `index-Dq4-KEmQ.css`, then retest the mask editor and result-preview lower-right toolbar.
-- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 122/122, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
-- Verify next: move the brush and eraser across both light and dark image areas; confirm the black/white circle matches the actual stroke diameter and follows slider, `[ ]`, zoom and pan changes. Confirm the guidance is one compact line and hovering/focusing `快捷键` exposes the full list. Then repeatedly click preview zoom controls at >100% and verify hover/press feedback, changing percentage, and no accidental drag or double-click reset.
+- Start here: refresh the already-open `http://127.0.0.1:14260/` page so it loads `index-veN3aNhZ.js` / `index-LnFPJluk.css`, then open a generated-image preview and click `编辑遮罩`.
+- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 124/124, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
+- Verify next: confirm the preview closes, GPT 生图 becomes active, the displayed image is reference position one, existing references follow it, and the mask editor opens immediately. If the previewed file was already the first masked reference, its mask should reopen instead of being discarded. Then recheck the brush footprint, compact guidance and preview zoom/drag controls.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
