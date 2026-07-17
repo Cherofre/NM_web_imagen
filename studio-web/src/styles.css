@@ -3424,6 +3424,393 @@ button.primary-action:focus-visible,
   pointer-events: none;
 }
 
+.mask-editor-shell {
+  z-index: 70;
+}
+
+.mask-editor-card {
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  gap: 10px;
+  width: min(1240px, calc(100vw - 28px));
+  height: min(920px, calc(100vh - 28px));
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: #111;
+  color: #fff;
+  box-shadow: 0 8px 8px rgba(0, 0, 0, 0.28);
+}
+
+.mask-editor-head,
+.mask-editor-footer,
+.mask-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mask-editor-head {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.mask-editor-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mask-editor-head strong {
+  font-size: 15px;
+}
+
+.mask-editor-head span,
+.mask-editor-footer > span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mask-editor-card button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mask-editor-card button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.mask-editor-card button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.mask-editor-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.mask-editor-card button.active {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: #fff;
+  color: #111;
+}
+
+.mask-editor-card button.primary-action {
+  border-color: #fff;
+  background: #fff;
+  color: #111;
+  box-shadow: none;
+}
+
+.mask-editor-card button.danger-action {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+.mask-editor-guidance {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid rgba(251, 146, 60, 0.28);
+  border-radius: 12px;
+  background: rgba(124, 45, 18, 0.24);
+  color: #ffedd5;
+}
+
+.mask-editor-guidance svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.mask-editor-guidance > div {
+  display: grid;
+  gap: 2px;
+}
+
+.mask-editor-guidance strong {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mask-editor-guidance span {
+  color: #fed7aa;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.mask-editor-toolbar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 7px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mask-editor-tool-group {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.mask-editor-tool-group.compact button {
+  width: 36px;
+  padding: 0;
+}
+
+.mask-editor-size {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 220px) 54px;
+  align-items: center;
+  gap: 8px;
+  min-width: min(360px, 100%);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mask-editor-size input {
+  width: 100%;
+  accent-color: #ef4444;
+}
+
+.mask-editor-size output {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mask-editor-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #050505;
+  touch-action: none;
+  user-select: none;
+}
+
+.mask-editor-stage.tool-brush,
+.mask-editor-stage.tool-eraser {
+  cursor: crosshair;
+}
+
+.mask-editor-stage.tool-move {
+  cursor: grab;
+}
+
+.mask-editor-canvas-stack {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  max-height: 100%;
+  transform: translate3d(var(--mask-pan-x, 0), var(--mask-pan-y, 0), 0) scale(var(--mask-zoom, 1));
+  transform-origin: center;
+}
+
+.mask-editor-canvas-stack canvas {
+  grid-area: 1 / 1;
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 290px);
+}
+
+.mask-editor-canvas-stack canvas:first-child {
+  pointer-events: none;
+}
+
+.mask-editor-overlay {
+  opacity: 0.52;
+  touch-action: none;
+}
+
+.mask-editor-loading,
+.mask-editor-error {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(440px, calc(100% - 32px));
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(17, 17, 17, 0.88);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.mask-editor-error {
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+.mask-editor-zoom-tools {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  background: rgba(17, 17, 17, 0.8);
+}
+
+.mask-editor-zoom-tools button {
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.mask-editor-zoom-tools > span {
+  min-width: 44px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mask-editor-footer {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.mask-editor-footer > span {
+  white-space: normal;
+}
+
+.mask-editor-footer > div {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.reference-mask-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.reference-mask-meta > span:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-chip .reference-mask-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: visible;
+  color: inherit;
+  text-overflow: clip;
+}
+
+.reference-mask-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.08);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.reference-mask-badge.is-applied {
+  background: rgba(180, 83, 9, 0.12);
+  color: #92400e;
+}
+
+.reference-mask-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-strong);
+}
+
+.reference-mask-action:hover,
+.reference-mask-action:focus-visible {
+  background: rgba(17, 17, 17, 0.08);
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .mask-editor-card {
+    width: calc(100vw - 8px);
+    height: calc(100vh - 8px);
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .mask-editor-guidance span,
+  .mask-editor-tool-group button span {
+    display: none;
+  }
+
+  .mask-editor-toolbar {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .mask-editor-size {
+    grid-template-columns: auto 132px 48px;
+    min-width: 250px;
+  }
+
+  .mask-editor-canvas-stack canvas {
+    max-height: calc(100vh - 275px);
+  }
+
+  .mask-editor-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mask-editor-footer > div {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mask-editor-card .spin {
+    animation: none;
+  }
+
+  .mask-editor-card button,
+  .mask-editor-canvas-stack {
+    transition: none;
+  }
+}
+
 .toast {
   position: fixed;
   top: 16px;

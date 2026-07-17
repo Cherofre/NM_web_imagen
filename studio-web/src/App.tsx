@@ -31,7 +31,7 @@ import {
   ZoomOut,
   X,
 } from "lucide-react";
-import { ChangeEvent, ClipboardEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
   GPT_CUSTOM_SIZE_MAX_PIXELS,
@@ -89,6 +89,15 @@ import {
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
+import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
+import {
+  activeMaskAttachment,
+  appendGenerationFiles,
+  maskEditorCapability,
+  referenceFileFingerprint,
+  resolveMaskEndpoint,
+  type MaskAttachment,
+} from "./maskEditorModel";
 import {
   advanceSessionServerBaseline,
   applyCanonicalReferenceUpdates,
@@ -225,6 +234,7 @@ type GenerationQueuePayload = {
   gptForm: GptForm;
   bananaForm: BananaForm;
   references: File[];
+  maskFile?: File;
   contextPrompt: string;
   negativePrompt: string;
   posterText: string;
@@ -914,6 +924,7 @@ function createFormData(
   gpt: GptForm,
   banana: BananaForm,
   references: File[],
+  maskFile: File | null | undefined,
   gptTextDraft: { context_prompt?: string; negative_prompt?: string; poster_text?: string } | undefined,
   jobId: string,
 ) {
@@ -922,7 +933,7 @@ function createFormData(
   buildSubmissionFields(engine, prompt, source, banana, gptTextDraft).forEach(([key, value]) => {
     data.append(key, String(value));
   });
-  references.forEach((file) => data.append("reference_files", file));
+  appendGenerationFiles(data, references, maskFile);
   return appendJobId(data, jobId);
 }
 
@@ -1059,6 +1070,8 @@ function App() {
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => normalizeBananaForm(loadSanitizedBrowserForm(bananaStorageKey, defaultBananaForm)));
   const [references, setReferences] = useState<File[]>([]);
+  const [maskAttachment, setMaskAttachment] = useState<MaskAttachment<File> | null>(null);
+  const [maskEditorOpen, setMaskEditorOpen] = useState(false);
   const [sessions, setSessions] = useState<WorkbenchSession[]>(() => initialSessionState.current.sessions);
   const [activeSessionId, setActiveSessionId] = useState(() => initialSessionState.current.activeSessionId);
   const [submitMode, setSubmitMode] = useState<SubmitMode>("generate");
@@ -1117,7 +1130,7 @@ function App() {
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const t = createTranslator(language);
+  const t = useMemo(() => createTranslator(language), [language]);
   const listText = (items: string[]) => items.join(language === "en" ? ", " : "、");
   const isDefaultSessionTitle = (title: string) => title === "新对话" || title === "New chat" || title === t("session.new");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1169,6 +1182,8 @@ function App() {
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
   const referenceState = referenceUiState(submitMode, references.length);
   const referenceActionsDisabled = !referenceState.canAdd;
+  const maskCapability = maskEditorCapability(activeEngine, submitMode, references.length);
+  const activeComposerMask = activeMaskAttachment(maskAttachment, references);
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
@@ -1365,6 +1380,13 @@ function App() {
       : `HTTP ${result.response.status}`;
     setNotice(detail || t("status.sessionSaveFailed"));
   }
+
+  useEffect(() => {
+    if (!maskAttachment || activeMaskAttachment(maskAttachment, references)) return;
+    setMaskAttachment(null);
+    setMaskEditorOpen(false);
+    setNotice(createTranslator(language)("mask.clearedBaseChanged"));
+  }, [language, maskAttachment, references]);
 
   useEffect(() => {
     localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
@@ -2242,6 +2264,33 @@ function App() {
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
+  function openMaskEditor() {
+    if (!maskCapability.available) {
+      setNotice(t(maskCapability.reasonKey || "mask.addBaseFirst"));
+      return;
+    }
+    setMaskEditorOpen(true);
+  }
+
+  function applyMaskResult(result: MaskEditorResult) {
+    const attachment: MaskAttachment<File> = {
+      baseFingerprint: referenceFileFingerprint(result.baseFile),
+      baseFile: result.baseFile,
+      maskFile: result.maskFile,
+      coverage: result.coverage,
+    };
+    setReferences((current) => current.length ? [result.baseFile, ...current.slice(1)] : current);
+    setMaskAttachment(attachment);
+    setMaskEditorOpen(false);
+    setNotice(t("mask.applied"));
+  }
+
+  function removeMask() {
+    setMaskAttachment(null);
+    setMaskEditorOpen(false);
+    setNotice(t("mask.removed"));
+  }
+
   function appendReferenceFiles(files: File[], sourceLabel = t("reference.button")) {
     if (!referenceUiState(submitModeRef.current, references.length).canAdd) {
       setNotice(t("reference.chatNotSent"));
@@ -2764,6 +2813,7 @@ function App() {
           payload.gptForm,
           payload.bananaForm,
           payload.references,
+          payload.maskFile,
           {
             context_prompt: payload.contextPrompt,
             negative_prompt: payload.negativePrompt,
@@ -2913,6 +2963,9 @@ function App() {
     const currentGptForm = gptForm;
     const currentBananaForm = bananaForm;
     const currentReferences = referencesForSubmitMode(currentMode, overrides.references || references);
+    const currentMask = currentEngine === "gpt-image-2" && currentMode === "generate"
+      ? activeMaskAttachment(maskAttachment, currentReferences)
+      : null;
     const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm, t);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
     const generationCount = generationCountFor(currentEngine, currentGptForm, currentBananaForm);
@@ -3098,8 +3151,17 @@ function App() {
         if (notice) setNotice(notice);
       }
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
+      try {
+        resolveMaskEndpoint(submitGptForm.api_endpoint, Boolean(currentMask));
+      } catch {
+        setNotice(t("mask.endpointInvalid"));
+        return;
+      }
     }
-    const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(currentReferences));
+    const submissionReferences = currentMask
+      ? [currentMask.baseFile, ...currentReferences.slice(1)]
+      : currentReferences;
+    const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(submissionReferences));
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
     const submitContextPrompt = submissionDrafts.context_prompt;
@@ -3116,7 +3178,8 @@ function App() {
       referenceSnapshots,
       meta: {
         model: currentModel,
-        reference_count: currentReferences.length,
+        reference_count: submissionReferences.length,
+        mask_used: Boolean(currentMask),
         context_prompt: submitContextPrompt,
         queued_at: createdAt,
       },
@@ -3153,7 +3216,8 @@ function App() {
       prompt,
       gptForm: submitGptForm,
       bananaForm: currentBananaForm,
-      references: [...currentReferences],
+      references: [...submissionReferences],
+      maskFile: currentMask?.maskFile,
       contextPrompt: submitContextPrompt,
       negativePrompt: submitNegativePrompt,
       posterText: submitPosterText,
@@ -3951,7 +4015,24 @@ function App() {
                       <button type="button" className="reference-preview" onClick={() => previewReference(file)} title={t("reference.preview")}>
                         <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
                       </button>
-                      <span>{file.name}</span>
+                      <div className="reference-mask-meta">
+                        <span>{file.name}</span>
+                        {index === 0 && maskCapability.available && (
+                          <span className="reference-mask-badges">
+                            <em className="reference-mask-badge">{t("mask.baseBadge")}</em>
+                            {activeComposerMask && <em className="reference-mask-badge is-applied">{t("mask.appliedBadge")}</em>}
+                            <button
+                              type="button"
+                              className="reference-mask-action"
+                              onClick={openMaskEditor}
+                              title={activeComposerMask ? t("mask.update") : t("mask.edit")}
+                              aria-label={activeComposerMask ? t("mask.update") : t("mask.edit")}
+                            >
+                              <PencilLine size={13} />
+                            </button>
+                          </span>
+                        )}
+                      </div>
                       <button type="button" className="reference-remove" onClick={() => setReferences((current) => current.filter((_, itemIndex) => itemIndex !== index))} title={t("reference.remove")}>
                         <X size={13} />
                       </button>
@@ -4733,6 +4814,17 @@ function App() {
             </div>
           </section>
         </div>
+      )}
+
+      {maskEditorOpen && references[0] && (
+        <MaskEditor
+          file={references[0]}
+          initialMaskFile={activeComposerMask?.maskFile}
+          t={t}
+          onCancel={() => setMaskEditorOpen(false)}
+          onApply={applyMaskResult}
+          onRemove={activeComposerMask ? removeMask : undefined}
+        />
       )}
 
       {previewImage && (

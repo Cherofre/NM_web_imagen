@@ -28,6 +28,8 @@ NEW_NODE_GATE_MODULES = (
     "chatCapabilities.test.mjs",
     "clientSafety.test.mjs",
     "jobProtocol.test.mjs",
+    "maskEditor.test.mjs",
+    "maskEditorUi.test.mjs",
     "sessionRevision.test.mjs",
 )
 NEW_PYTHON_GATE_MODULES = (
@@ -423,7 +425,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.0.6", version)
+        self.assertEqual("1.0.7", version)
 
     def test_start_script_opens_versioned_url(self) -> None:
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
@@ -534,7 +536,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('"--test"', script)
         self.assertIn('Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs"', script)
         self.assertIn("Sort-Object Name", script)
-        self.assertEqual(14, len(node_modules), node_modules)
+        self.assertEqual(16, len(node_modules), node_modules)
         for module in NEW_NODE_GATE_MODULES:
             self.assertIn(module, node_modules)
         self.assertIn('-Command "npm" -Arguments @("run", "test:size")', script)

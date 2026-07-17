@@ -38,7 +38,7 @@
 ### 4.1 组件与状态
 
 - 新增 `studio-web/src/MaskEditor.tsx`，使用原生 Canvas 和 Pointer Events。
-- 新增 `studio-web/src/maskEditor.ts`，存放可测试的底图指纹、命令历史、端点能力和遮罩状态辅助函数。
+- 新增 `studio-web/src/maskEditorModel.ts`，存放可测试的底图指纹、端点能力和遮罩状态辅助函数。
 - App 只保存当前 `MaskAttachment`：转换后的 PNG 底图、PNG 遮罩、底图指纹和覆盖率摘要。
 - 遮罩二进制只保存在内存和队列任务快照，不写入 localStorage，不在第一版跨刷新恢复。
 
@@ -100,4 +100,3 @@
 - 删除、替换或移动底图会使旧遮罩失效。
 - 无遮罩路径和 Banana 路径回归通过。
 - 不调用付费上游的本地 mock smoke 通过。
-

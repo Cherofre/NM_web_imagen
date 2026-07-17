@@ -30,7 +30,7 @@
 
 新增：
 
-- `studio-web/src/maskEditor.ts`
+- `studio-web/src/maskEditorModel.ts`
 - `studio-web/src/maskEditor.test.mjs`
 
 修改：
@@ -75,4 +75,3 @@
 - 更新台账、验证证据和剩余限制。
 - 创建新的本地候选包前，先完成 Studio 真人浏览器验收。
 - 未经用户确认，不同步 G 盘、不推送、不合并。
-
