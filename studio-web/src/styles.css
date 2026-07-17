@@ -3380,7 +3380,7 @@ button.primary-action:focus-visible,
   position: absolute;
   right: 14px;
   bottom: 14px;
-  z-index: 2;
+  z-index: 4;
   display: inline-flex;
   gap: 8px;
   padding: 6px;
@@ -3389,6 +3389,35 @@ button.primary-action:focus-visible,
   background: rgba(17, 17, 17, 0.72);
   box-shadow: 0 16px 36px -24px rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.lightbox-zoom-tools button {
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
+}
+
+.lightbox-zoom-tools button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.lightbox-zoom-tools button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateY(1px);
+}
+
+.lightbox-zoom-tools button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.lightbox-zoom-tools > span {
+  min-width: 44px;
+  align-self: center;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .lightbox-gallery-button {
@@ -3806,6 +3835,7 @@ button.primary-action:focus-visible,
   }
 
   .mask-editor-card button,
+  .lightbox-zoom-tools button,
   .mask-editor-canvas-stack {
     transition: none;
   }

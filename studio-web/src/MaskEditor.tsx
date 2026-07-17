@@ -464,6 +464,46 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
       event.preventDefault();
       if (event.shiftKey) redo();
       else undo();
+      return;
+    }
+    if (!ready || saving || event.ctrlKey || event.metaKey || event.altKey) return;
+    const shortcut = event.key.toLowerCase();
+    switch (shortcut) {
+      case "b":
+        event.preventDefault();
+        setTool("brush");
+        break;
+      case "e":
+        event.preventDefault();
+        setTool("eraser");
+        break;
+      case "h":
+        event.preventDefault();
+        setTool("move");
+        break;
+      case "[":
+        event.preventDefault();
+        setBrushSize((value) => clamp(value - 8, 8, 512));
+        break;
+      case "]":
+        event.preventDefault();
+        setBrushSize((value) => clamp(value + 8, 8, 512));
+        break;
+      case "-":
+        event.preventDefault();
+        setZoom((value) => clamp(value - 0.25, 0.5, 4));
+        break;
+      case "+":
+      case "=":
+        event.preventDefault();
+        setZoom((value) => clamp(value + 0.25, 0.5, 4));
+        break;
+      case "0":
+        event.preventDefault();
+        resetView();
+        break;
+      default:
+        break;
     }
   }
 
@@ -488,18 +528,19 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
           <div>
             <strong>{t("mask.paintHint")}</strong>
             <span>{t("mask.promptLimit")}</span>
+            <span>{t("mask.shortcuts")}</span>
           </div>
         </div>
 
         <div className="mask-editor-toolbar" aria-label={t("mask.tools")}>
           <div className="mask-editor-tool-group">
-            <button type="button" className={tool === "brush" ? "active" : ""} onClick={() => setTool("brush")} aria-pressed={tool === "brush"} title={t("mask.brush")}><Brush size={17} /><span>{t("mask.brush")}</span></button>
-            <button type="button" className={tool === "eraser" ? "active" : ""} onClick={() => setTool("eraser")} aria-pressed={tool === "eraser"} title={t("mask.eraser")}><Eraser size={17} /><span>{t("mask.eraser")}</span></button>
-            <button type="button" className={tool === "move" ? "active" : ""} onClick={() => setTool("move")} aria-pressed={tool === "move"} title={t("mask.move")}><Hand size={17} /><span>{t("mask.move")}</span></button>
+            <button type="button" className={tool === "brush" ? "active" : ""} onClick={() => setTool("brush")} aria-pressed={tool === "brush"} aria-keyshortcuts="B" title={`${t("mask.brush")} (B)`}><Brush size={17} /><span>{t("mask.brush")}</span></button>
+            <button type="button" className={tool === "eraser" ? "active" : ""} onClick={() => setTool("eraser")} aria-pressed={tool === "eraser"} aria-keyshortcuts="E" title={`${t("mask.eraser")} (E)`}><Eraser size={17} /><span>{t("mask.eraser")}</span></button>
+            <button type="button" className={tool === "move" ? "active" : ""} onClick={() => setTool("move")} aria-pressed={tool === "move"} aria-keyshortcuts="H" title={`${t("mask.move")} (H)`}><Hand size={17} /><span>{t("mask.move")}</span></button>
           </div>
           <label className="mask-editor-size">
             <span>{t("mask.brushSize")}</span>
-            <input type="range" min={8} max={512} step={4} value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} disabled={!ready} />
+            <input type="range" min={8} max={512} step={4} value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} disabled={!ready} aria-keyshortcuts="[ ]" title="[ / ]" />
             <output>{brushSize}px</output>
           </label>
           <div className="mask-editor-tool-group compact">
@@ -533,9 +574,9 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
             />
           </div>
           <div className="mask-editor-zoom-tools" aria-label={t("mask.zoomTools")}>
-            <button type="button" onClick={() => setZoom((value) => clamp(value - 0.25, 0.5, 4))} title={t("mask.zoomOut")} aria-label={t("mask.zoomOut")}><ZoomOut size={17} /></button>
-            <button type="button" onClick={() => setZoom((value) => clamp(value + 0.25, 0.5, 4))} title={t("mask.zoomIn")} aria-label={t("mask.zoomIn")}><ZoomIn size={17} /></button>
-            <button type="button" onClick={resetView} title={t("mask.fit")}><RotateCcw size={16} /> {t("mask.fit")}</button>
+            <button type="button" onClick={() => setZoom((value) => clamp(value - 0.25, 0.5, 4))} title={`${t("mask.zoomOut")} (-)`} aria-label={t("mask.zoomOut")} aria-keyshortcuts="-"><ZoomOut size={17} /></button>
+            <button type="button" onClick={() => setZoom((value) => clamp(value + 0.25, 0.5, 4))} title={`${t("mask.zoomIn")} (+)`} aria-label={t("mask.zoomIn")} aria-keyshortcuts="+ ="><ZoomIn size={17} /></button>
+            <button type="button" onClick={resetView} title={`${t("mask.fit")} (0)`} aria-keyshortcuts="0"><RotateCcw size={16} /> {t("mask.fit")}</button>
             <span>{Math.round(zoom * 100)}%</span>
           </div>
         </div>

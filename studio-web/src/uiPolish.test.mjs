@@ -423,7 +423,7 @@ test("image previews expose download and canvas zoom controls", () => {
   assert.match(appSource, /aria-label=\{t\("preview\.zoomIn"\)\}/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomOut"\)\}/);
   assert.match(appSource, /title=\{t\("preview\.fit"\)\}/);
-  assert.match(appSource, /title=\{t\("preview\.original"\)\}/);
+  assert.match(appSource, /\{Math\.round\(previewZoom \* 100\)\}%/);
   const headerStart = appSource.indexOf("<a href={previewImage.src} download={previewImage.name}");
   const headerEnd = appSource.indexOf("</span>", headerStart);
   assert.notEqual(headerStart, -1, "Missing preview header action area");
@@ -442,12 +442,28 @@ test("image preview canvas supports wheel zoom and drag panning", () => {
   assert.match(appSource, /function endPreviewPan\(event: ReactPointerEvent<HTMLDivElement>\)/);
   assert.match(appSource, /onWheel=\{handlePreviewWheel\}/);
   assert.match(appSource, /onPointerDown=\{startPreviewPan\}/);
-  assert.match(appSource, /onDoubleClick=\{resetPreviewCanvas\}/);
+  assert.match(appSource, /onDoubleClick=\{handlePreviewDoubleClick\}/);
   assert.match(appSource, /"--preview-pan-x": `\$\{previewPan\.x\}px`/);
   assert.match(appSource, /"--preview-pan-y": `\$\{previewPan\.y\}px`/);
   assert.match(cssBlock(".lightbox-stage.is-zoomed"), /cursor:\s*grab;/);
   assert.match(cssBlock(".lightbox-stage.is-dragging"), /cursor:\s*grabbing;/);
   assert.match(cssBlock(".lightbox-stage img"), /translate3d\(var\(--preview-pan-x, 0px\), var\(--preview-pan-y, 0px\), 0\) scale\(var\(--preview-zoom, 1\)\);/);
+});
+
+test("image preview zoom controls keep clicks out of canvas dragging and expose interaction feedback", () => {
+  assert.match(appSource, /function isPreviewControlTarget\(target: EventTarget \| null\)/);
+  assert.match(appSource, /if \(isPreviewControlTarget\(event\.target\)\) return;/);
+  assert.match(appSource, /function handlePreviewDoubleClick\(event: ReactMouseEvent<HTMLDivElement>\)/);
+  assert.match(appSource, /handlePreviewDoubleClick[\s\S]*if \(isPreviewControlTarget\(event\.target\)\) return;[\s\S]*resetPreviewCanvas\(\);/);
+  assert.match(appSource, /onDoubleClick=\{handlePreviewDoubleClick\}/);
+  assert.doesNotMatch(appSource, /onDoubleClick=\{resetPreviewCanvas\}/);
+  assert.doesNotMatch(appSource, /onMouseDown=\{startPreviewMousePan\}/);
+  assert.doesNotMatch(appSource, /function startPreviewMousePan/);
+  assert.match(appSource, /\{Math\.round\(previewZoom \* 100\)\}%/);
+  assert.match(cssBlock(".lightbox-zoom-tools"), /z-index:\s*4;[\s\S]*pointer-events:\s*auto;/);
+  assert.match(css, /\.lightbox-zoom-tools button:hover:not\(:disabled\)[\s\S]*background:\s*rgba\(255, 255, 255, 0\.14\);/);
+  assert.match(css, /\.lightbox-zoom-tools button:active:not\(:disabled\)[\s\S]*transform:\s*translateY\(1px\);/);
+  assert.match(css, /\.lightbox-zoom-tools button:focus-visible[\s\S]*outline:\s*2px solid #fff;/);
 });
 
 test("save-like actions are visually primary and clear", () => {

@@ -35,6 +35,21 @@ test("mask editor provides real canvas drawing, PNG export, undo redo and pan co
   assert.match(editorSource, /aria-label=\{t\("mask\.title"\)\}/);
 });
 
+test("mask editor exposes discoverable keyboard shortcuts for tools, brush size and zoom", () => {
+  assert.match(editorSource, /case "b":/);
+  assert.match(editorSource, /case "e":/);
+  assert.match(editorSource, /case "h":/);
+  assert.match(editorSource, /case "\[":/);
+  assert.match(editorSource, /case "\]":/);
+  assert.match(editorSource, /case "-":/);
+  assert.match(editorSource, /case "\+":/);
+  assert.match(editorSource, /case "0":/);
+  assert.match(editorSource, /aria-keyshortcuts="B"/);
+  assert.match(editorSource, /aria-keyshortcuts="\[ \]"/);
+  assert.match(editorSource, /aria-keyshortcuts="0"/);
+  assert.match(i18nSource, /"mask\.shortcuts"/);
+});
+
 test("mask editor follows the existing product vocabulary and remains usable on narrow screens", () => {
   assert.match(styleSource, /\.mask-editor-card/);
   assert.match(styleSource, /\.mask-editor-toolbar/);

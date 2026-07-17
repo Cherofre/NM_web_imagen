@@ -1062,6 +1062,10 @@ function isSameOriginOutput(src: string) {
   }
 }
 
+function isPreviewControlTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("button, a, .lightbox-zoom-tools"));
+}
+
 function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
@@ -1139,7 +1143,6 @@ function App() {
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
-  const previewMouseCleanupRef = useRef<(() => void) | null>(null);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
   const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
@@ -2378,8 +2381,6 @@ function App() {
   }
 
   function resetPreviewCanvas() {
-    previewMouseCleanupRef.current?.();
-    previewMouseCleanupRef.current = null;
     setPreviewZoom(1);
     setPreviewPan({ x: 0, y: 0 });
     setPreviewDragging(false);
@@ -2401,8 +2402,15 @@ function App() {
     setPreviewZoomLevel(previewZoom + (event.deltaY < 0 ? 0.2 : -0.2));
   }
 
+  function handlePreviewDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isPreviewControlTarget(event.target)) return;
+    resetPreviewCanvas();
+  }
+
   function startPreviewPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isPreviewControlTarget(event.target)) return;
     if (event.button !== 0 || previewZoom <= 1) return;
+    event.preventDefault();
     previewDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -2431,41 +2439,6 @@ function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-  }
-
-  function startPreviewMousePan(event: ReactMouseEvent<HTMLDivElement>) {
-    if (event.button !== 0 || previewZoom <= 1) return;
-    event.preventDefault();
-    previewMouseCleanupRef.current?.();
-    previewDragRef.current = {
-      pointerId: -1,
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: previewPan.x,
-      panY: previewPan.y,
-    };
-    setPreviewDragging(true);
-    const move = (moveEvent: globalThis.MouseEvent) => {
-      const drag = previewDragRef.current;
-      if (!drag || drag.pointerId !== -1) return;
-      setPreviewPan({
-        x: drag.panX + moveEvent.clientX - drag.startX,
-        y: drag.panY + moveEvent.clientY - drag.startY,
-      });
-    };
-    const end = () => {
-      const drag = previewDragRef.current;
-      if (drag?.pointerId === -1) {
-        previewDragRef.current = null;
-        setPreviewDragging(false);
-      }
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", end);
-      previewMouseCleanupRef.current = null;
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", end);
-    previewMouseCleanupRef.current = end;
   }
 
   async function createReferenceSnapshots(files: File[]): Promise<ReferenceSnapshot[]> {
@@ -4854,8 +4827,7 @@ function App() {
               onPointerMove={movePreviewPan}
               onPointerUp={endPreviewPan}
               onPointerCancel={endPreviewPan}
-              onMouseDown={startPreviewMousePan}
-              onDoubleClick={resetPreviewCanvas}
+              onDoubleClick={handlePreviewDoubleClick}
             >
               {previewImage.gallery && previewImage.gallery.length > 1 && (
                 <>
@@ -4867,7 +4839,7 @@ function App() {
                 <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label={t("preview.zoomOut")} title={t("preview.zoomOut")}><ZoomOut size={18} /></button>
                 <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label={t("preview.zoomIn")} title={t("preview.zoomIn")}><ZoomIn size={18} /></button>
                 <button type="button" onClick={resetPreviewCanvas} title={t("preview.fit")}>{t("preview.fit")}</button>
-                <button type="button" onClick={() => setPreviewZoomLevel(1)} title={t("preview.original")}>100%</button>
+                <span>{Math.round(previewZoom * 100)}%</span>
               </div>
               <img
                 src={previewImage.src}
