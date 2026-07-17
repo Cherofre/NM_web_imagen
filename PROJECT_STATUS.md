@@ -1,15 +1,16 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-15 +08:00
-- Phase: remediation Tasks 1-5 and Task 6 local verification/final review complete; real browser gate blocked by environment policy
-- Superpowers Phase: local matrix/package/API/static smoke/whole-branch review complete -> browser smoke blocked -> G: sync intentionally not run
-- Superpowers Spec: `docs/superpowers/specs/2026-07-10-p1-hardening-v1.0.6-design.md`; remediation addendum `docs/superpowers/specs/2026-07-15-final-review-remediation-design.md`
-- Superpowers Plan: original `docs/superpowers/plans/2026-07-10-p1-hardening-v1.0.6.md`; remediation `docs/superpowers/plans/2026-07-15-final-review-remediation.md`
-- Branch: `codex/p1-hardening-v1.0.6`
-- Goal: Fix all confirmed P1 security, behavior, concurrency, persistence, and Windows release risks without breaking v1.0.5 configuration, history, sessions, `/classic`, or one-click offline use.
-- Current Focus: product fixes landed at `2a8b014`; commit this verification/handoff ledger. Do not sync G: until Studio and `/classic` receive a fresh real-browser smoke in an environment permitted to open loopback URLs. Full raster decoding remains a deferred Minor.
+- Last Updated: 2026-07-17 +08:00
+- Phase: v1.0.7 mask editor design and TDD implementation
+- Superpowers Phase: approved design -> Chinese spec/plan -> backend RED/GREEN -> frontend RED/GREEN -> full verification
+- Superpowers Spec: `docs/superpowers/specs/2026-07-17-mask-editor-v1.0.7-design.md`
+- Superpowers Plan: `docs/superpowers/plans/2026-07-17-mask-editor-v1.0.7.md`
+- Branch: `codex/mask-editor-v1.0.7`
+- Goal: Add a truthful first-reference mask editor for GPT Image 2 using native Canvas and `/v1/images/edits`, without adding large frontend libraries, Pillow, localStorage image blobs, or breaking existing workflows.
+- Current Focus: write failing backend tests for PNG/Alpha/dimension/endpoint/multipart mask behavior, then implement the smallest backend contract. Do not write G:, call paid upstream APIs, or reuse the v1.0.6 candidate as a v1.0.7 artifact.
 - Latest Verification: Python 233/233; 14 Node modules with 111/111 tests; size rules, TypeScript/Vite build, four-module `py_compile`, six UTF-8 BOM/PowerShell 5.1 parser checks, exact 52-file package plus one directory entry, portable package smoke, and LocalOnly preflight all passed. Current assets are `index-B7h4N0fo.js` and `index-Gv_GDUKl.css`; local candidate SHA256 is `d9ceb67249c4e3e9360b7cd8eb2fcfb32936213e6cfe3c1900a23e2c287a5b11`, package smoke instance ID `e92ba34f914ee9b2d630`. API/static smoke verified stable `ref-{32 hex}.png` reuse, `nosniff`, current Studio assets, `/classic`, pure startup merge/canonicalization, and secret-free baseline markers. The in-app browser was blocked from `127.0.0.1` by enterprise network policy, its one test tab was closed, and PID `7728`, port `14334`, and the exact temp directory were removed. G: still contains rejected v1.0.6 SHA256 `56aef66b45c9fec40f3d9b97355c7e2bf59de7615f49d0800b49c08294a23216`; v1.0.5 remains `7c8e671fb1c00141243cd84427b0c202e9e2be9e8ef23d9537c93787fbe77109`. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` are outside commits.
+- v1.0.7 Baseline: branch created from `ed28d20`; Python image/upstream regression passed 126/126, frontend submission/UI regression passed 36/36, and `app.py`, `image_safety.py`, `storage.py`, `upstream.py` compiled. The old PID `47808` was stopped. Exact temporary directory cleanup remains pending because the execution host blocks recursive deletion even after a successful path verification.
 
 ## Final Whole-Branch Review Findings
 - Current unresolved Critical: zero.
