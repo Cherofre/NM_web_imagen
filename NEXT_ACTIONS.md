@@ -5,12 +5,12 @@
 - [x] Add backend RED tests for mask PNG/Alpha/dimensions/endpoint/multipart behavior, then implement GREEN; combined regression passed 131/131.
 - [x] Add frontend RED tests for mask state, queue snapshot and submission protocol, then implement the Canvas editor at `b72a6f8`.
 - [x] Run the full Python/Node/build/size/compile matrix and a no-paid-API mock edits smoke.
-- [ ] User manually accepts the Studio Canvas at `http://127.0.0.1:14260/`; do not package, sync G:, push, merge, or publish first.
+- [ ] User refreshes and manually re-accepts `http://127.0.0.1:14260/` after `404bf55`; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: open `http://127.0.0.1:14260/` in a normal local browser and manually exercise first-reference mask drawing, erasing, undo/redo, clear/fill, zoom/move, apply/reopen/remove, mode switching and narrow-window layout.
-- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 119/119, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
-- Verify next: confirm visually that red means editable, the applied badge appears only in GPT generation mode, changing/reordering the first reference clears the mask, and no controls overlap at browser zoom 200% or a narrow window.
+- Start here: refresh the already-open `http://127.0.0.1:14260/` page so it loads `index-CwyU8QPK.js` / `index-DXsliuZ9.css`, then retest the mask editor and result-preview lower-right toolbar.
+- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 121/121, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
+- Verify next: confirm `B/E/H`, `[ ]`, `- +`, `0` work in the mask editor; repeatedly or rapidly click preview zoom controls at >100%; verify hover highlight, pressed feedback, changing percentage, and that buttons no longer start dragging or trigger double-click reset.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
