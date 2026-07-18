@@ -1,21 +1,21 @@
 # Next Actions
 
 ## Now
-- [x] Create `codex/studio-ui-polish-v1.0.7`, record the Chinese design/plan, and pass the 124/124 Node plus production-build baseline.
-- [x] Add RED tests for result integrity, action hierarchy, sidebar structure, header cleanup and consolidated generation settings.
+- [x] Create `codex/studio-ui-polish-v1.0.7`, record the Chinese design/plan, add RED coverage, and pass the Node plus production-build baseline.
 - [x] Implement result-first layout and common conversation/composer alignment.
 - [x] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
 - [x] Apply screenshot follow-ups for compact results, image-corner actions, stable menus, neutral favorites, history cards, metadata placement and accidental image-drag protection.
+- [x] Replace the over-broad internal-image drag ban with a 180ms deliberate-hold guard while preserving native drag-to-reference behavior.
 - [x] Run the full Node/build/size/release and HTTP-static matrix without a paid upstream request.
 - [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `976595c`, especially a portrait single result, neutral empty/filled favorites, history grid/list cards, image/header/history menus, direct mask editing and narrow layout.
-- Do not redo: the screenshot-driven UI implementation, 130/130 Node suite, size/build, 33/33 release gate, compile/diff check or HTTP static smoke unless product code changes.
-- Verify next: confirm the result image has no filename or thin top/bottom edge, shared dimensions sit in the completion row, slight mouse movement does not trigger reference-file drop, menus dismiss reliably, and history actions do not overlap at desktop or narrow widths. Automatic browser automation cannot perform this loopback gate.
+- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `16b960c`, especially quick image movement versus press-then-drag, a portrait single result, neutral empty/filled favorites, history grid/list cards, menus, direct mask editing and narrow layout.
+- Do not redo: the screenshot-driven UI implementation, drag-intent tests, 133/133 Node suite, size/build, 33/33 release gate, compile/diff check or HTTP static smoke unless product code changes.
+- Verify next: confirm quick image movement stays a click, holding about 180ms then dragging still adds a reference, the result image has no filename or thin edge, shared dimensions sit in the completion row, menus dismiss reliably, and history actions do not overlap. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
-- Current Studio assets: `index-DLBx81F6.js` and `index-BeJ2EXhf.css`.
+- Current Studio assets: `index-DVmZ99xD.js` and `index-BmiGLwyN.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
@@ -56,6 +56,7 @@
 - [x] Release preflight script: verify `VERSION`, Studio assets, package exclusions, and G: sync readiness.
 
 ## Later
+- [ ] If the user confirms, add a compact `图片库` trigger beside the composer reference button. Open a non-modal image tray with `本会话 / 最近历史 / 收藏` tabs, quick preview/reference/favorite actions, and a footer link to the full history window; use a bottom sheet on narrow screens instead of a permanent right rail.
 - [ ] Next version: change history "套用参数" so missing `context_prompt / negative_prompt / poster_text` fields do not clear the current session prompt drafts; only explicit history fields should overwrite.
 - [ ] Next version: reconsider chat-mode helper text. Current behavior calls the chat API but does not generate images; wording should not imply it is purely local/offline.
 - [ ] Next version: broaden `.svnignore` to match the package-clean exclusions for `.playwright-mcp`, `studio-web/node_modules`, `studio-web/tsconfig.tsbuildinfo`, root screenshots/images, and related local artifacts.
