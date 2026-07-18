@@ -71,7 +71,6 @@ button:disabled,
 
 img {
   display: block;
-  -webkit-user-drag: none;
   user-select: none;
 }
 

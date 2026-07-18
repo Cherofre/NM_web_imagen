@@ -43,6 +43,7 @@ import {
   normalizeCustomImageSize,
   parseCustomImageSize,
 } from "./sizeRules";
+import { shouldAllowInternalImageDrag, type InternalImageDragIntent } from "./imageDragIntent";
 import {
   type GptComposerAspect,
   type GptComposerSizeTier,
@@ -1204,6 +1205,7 @@ function App() {
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
+  const internalImageDragIntentRef = useRef<(InternalImageDragIntent & { pointerId: number }) | null>(null);
   const customSizeDraftRef = useRef(customSizeDraft);
   const tooltipTimerRef = useRef<number | null>(null);
   const sessionsHydratedRef = useRef(false);
@@ -2627,8 +2629,33 @@ function App() {
     return event.dataTransfer.types.includes("application/x-web-imagen-reference");
   }
 
-  function preventInternalImageDrag(event: DragEvent<HTMLElement>) {
-    if (event.target instanceof HTMLImageElement) event.preventDefault();
+  function startInternalImageDragIntent(event: ReactPointerEvent<HTMLElement>) {
+    if (!(event.target instanceof HTMLImageElement) || event.button !== 0) {
+      internalImageDragIntentRef.current = null;
+      return;
+    }
+    internalImageDragIntentRef.current = {
+      pointerId: event.pointerId,
+      startedAt: performance.now(),
+    };
+  }
+
+  function clearInternalImageDragIntent(event?: ReactPointerEvent<HTMLElement>) {
+    const intent = internalImageDragIntentRef.current;
+    if (event && intent && intent.pointerId !== event.pointerId) return;
+    internalImageDragIntentRef.current = null;
+  }
+
+  function gateInternalImageDrag(event: DragEvent<HTMLElement>) {
+    if (!(event.target instanceof HTMLImageElement)) return;
+    const intent = internalImageDragIntentRef.current;
+    const allowed = shouldAllowInternalImageDrag(intent, performance.now());
+    if (!allowed) {
+      event.preventDefault();
+      internalImageDragIntentRef.current = null;
+      return;
+    }
+    event.dataTransfer.effectAllowed = "copy";
   }
 
   function onDragEnter(event: DragEvent<HTMLElement>) {
@@ -3700,7 +3727,11 @@ function App() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      onDragStartCapture={preventInternalImageDrag}
+      onPointerDownCapture={startInternalImageDragIntent}
+      onPointerUpCapture={clearInternalImageDragIntent}
+      onPointerCancelCapture={clearInternalImageDragIntent}
+      onDragStartCapture={gateInternalImageDrag}
+      onDragEndCapture={() => clearInternalImageDragIntent()}
       onPaste={onPaste}
     >
       {tooltip && (
@@ -4131,7 +4162,7 @@ function App() {
                             <figure className={`image-card ${resultImageOrientation(image)}`} key={`${turn.id}-${index}`}>
                               <div className="image-preview-wrap">
                                 <button type="button" className="image-preview" style={resultImageStyle(image)} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })} title={t("history.previewImage")}>
-                                  <img src={src} alt={name} loading="lazy" draggable={false} />
+                                  <img src={src} alt={name} loading="lazy" />
                                 </button>
                                 <div className="image-overlay-actions">
                                   <button

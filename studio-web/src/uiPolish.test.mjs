@@ -527,11 +527,14 @@ test("more action menus close after outside clicks, Escape, and completed action
   assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /if \(closeOpenActionMenus\(\)\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
 });
 
-test("internal images cannot accidentally enter the file drop workflow", () => {
-  assert.match(appSource, /function preventInternalImageDrag\(event: DragEvent<HTMLElement>\) \{\s*if \(event\.target instanceof HTMLImageElement\) event\.preventDefault\(\);\s*\}/);
-  assert.match(appSource, /onDragStartCapture=\{preventInternalImageDrag\}/);
-  assert.match(appSource, /<img src=\{src\} alt=\{name\} loading="lazy" draggable=\{false\} \/>/);
-  assert.match(cssBlock("img"), /-webkit-user-drag:\s*none;[\s\S]*user-select:\s*none;/);
+test("internal image dragging requires deliberate hold and movement", () => {
+  assert.match(appSource, /import \{ shouldAllowInternalImageDrag, type InternalImageDragIntent \} from "\.\/imageDragIntent";/);
+  assert.match(appSource, /const internalImageDragIntentRef = useRef<\(InternalImageDragIntent & \{ pointerId: number \}\) \| null>\(null\);/);
+  assert.match(appSource, /function startInternalImageDragIntent\(event: ReactPointerEvent<HTMLElement>\)[\s\S]*pointerId: event\.pointerId[\s\S]*startedAt: performance\.now\(\)/);
+  assert.match(appSource, /function gateInternalImageDrag\(event: DragEvent<HTMLElement>\)[\s\S]*shouldAllowInternalImageDrag\(intent, performance\.now\(\)\)[\s\S]*event\.preventDefault\(\)[\s\S]*event\.dataTransfer\.effectAllowed = "copy";/);
+  assert.match(appSource, /onPointerDownCapture=\{startInternalImageDragIntent\}[\s\S]*onPointerUpCapture=\{clearInternalImageDragIntent\}[\s\S]*onPointerCancelCapture=\{clearInternalImageDragIntent\}[\s\S]*onDragStartCapture=\{gateInternalImageDrag\}/);
+  assert.doesNotMatch(appSource, /draggable=\{false\}/);
+  assert.doesNotMatch(cssBlock("img"), /-webkit-user-drag:\s*none;/);
   assert.match(appSource, /className="reference-drag-handle"[\s\S]*draggable[\s\S]*onDragStart=\{\(event\) => onReferenceDragStart\(event, index\)\}/);
 });
 
