@@ -18,6 +18,7 @@ import {
   ImagePlus,
   ListX,
   Loader2,
+  Maximize2,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,7 +28,6 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
-  Star,
   Trash2,
   ZoomIn,
   ZoomOut,
@@ -343,6 +343,14 @@ type HistoryViewMode = "list" | "grid";
 type HistoryFavoriteFilter = "all" | "favorite";
 type HistoryDateFilter = "all" | "today" | "7d" | "30d";
 type HistoryEngineFilter = "all" | Engine;
+type HistoryActionMenuSource = "sidebar" | "browser";
+type HistoryActionMenuState = {
+  entryId: string;
+  source: HistoryActionMenuSource;
+  left: number;
+  top: number;
+  placement: "above" | "below";
+};
 
 type PendingSessionSwitch = {
   nextSessionId: string;
@@ -366,6 +374,18 @@ const QUEUE_POPOVER_MIN_HEIGHT = 220;
 const QUEUE_POPOVER_MAX_HEIGHT = 520;
 const SIDEBAR_NARROW_QUERY = "(max-width: 920px)";
 const HISTORY_BROWSER_PAGE_SIZE = 80;
+const ACTION_MENU_SELECTOR = "details.header-more-menu, details.image-more-actions";
+const OPEN_ACTION_MENU_SELECTOR = "details.header-more-menu[open], details.image-more-actions[open]";
+
+function closeOpenActionMenus(except?: Node | null) {
+  let closed = false;
+  document.querySelectorAll<HTMLDetailsElement>(OPEN_ACTION_MENU_SELECTOR).forEach((menu) => {
+    if (except && menu.contains(except)) return;
+    menu.open = false;
+    closed = true;
+  });
+  return closed;
+}
 
 type SessionPromptEditorDraft = {
   fixed_prompt: string;
@@ -480,6 +500,13 @@ function imageDimensionsLabel(image?: GeneratedImage | null) {
   const width = Number(image?.dimensions?.width || 0);
   const height = Number(image?.dimensions?.height || 0);
   return width > 0 && height > 0 ? `${width} x ${height}` : "";
+}
+
+function sharedImageDimensionsLabel(images: GeneratedImage[]) {
+  if (images.length === 0) return "";
+  const labels = images.map((image) => imageDimensionsLabel(image));
+  const firstLabel = labels[0];
+  return firstLabel && labels.every((label) => label === firstLabel) ? firstLabel : "";
 }
 
 function resultImageStyle(image?: GeneratedImage): CSSProperties {
@@ -1130,8 +1157,9 @@ function App() {
   const [composerPromptHeight, setComposerPromptHeight] = useState(COMPOSER_PROMPT_DEFAULT_HEIGHT);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-  const [composerPopover, setComposerPopover] = useState<"settings" | null>(null);
+  const [composerPopover, setComposerPopover] = useState<"size" | "settings" | null>(null);
   const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
+  const [historyActionMenu, setHistoryActionMenu] = useState<HistoryActionMenuState | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [previewMaskLoading, setPreviewMaskLoading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -1214,6 +1242,9 @@ function App() {
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
   const visibleHistory = filteredHistory.slice(0, historyBrowserLimit);
+  const historyActionEntry = historyActionMenu ? history.find((entry) => entry.id === historyActionMenu.entryId) || null : null;
+  const historyActionImage = historyActionEntry?.images?.[0];
+  const historyActionSrc = imageSrc(historyActionImage);
   const activeConfigIssues = configIssues(activeEngine, gptForm, bananaForm, t);
   const hasCompleteConfig = activeConfigIssues.length === 0;
   const configButtonLabel = hasCompleteConfig ? `${t("config.label")} · ${activeProfileName}` : t("config.check");
@@ -1474,7 +1505,7 @@ function App() {
   }, [connectionOpen]);
 
   useEffect(() => {
-    if (composerPopover === "settings") return;
+    if (composerPopover === "size") return;
     const parsed = parseCustomImageSize(gptForm.custom_size);
     const nextDraft = { width: String(parsed.width), height: String(parsed.height) };
     customSizeDraftRef.current = nextDraft;
@@ -1628,12 +1659,67 @@ function App() {
   }, []);
 
   useEffect(() => {
+    function onActionMenuPointerDown(event: globalThis.PointerEvent) {
+      closeOpenActionMenus(event.target instanceof Node ? event.target : null);
+    }
+
+    function onActionMenuClick(event: globalThis.MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const menu = target.closest<HTMLDetailsElement>(ACTION_MENU_SELECTOR);
+      if (!menu || !menu.open) return;
+      const action = target.closest("button, a");
+      if (!action || (action instanceof HTMLButtonElement && action.disabled)) return;
+      menu.open = false;
+    }
+
+    document.addEventListener("pointerdown", onActionMenuPointerDown);
+    document.addEventListener("click", onActionMenuClick);
+    return () => {
+      document.removeEventListener("pointerdown", onActionMenuPointerDown);
+      document.removeEventListener("click", onActionMenuClick);
+    };
+  }, []);
+
+  useEffect(() => {
     if (historyBrowserOpen) setHistoryBrowserLimit(HISTORY_BROWSER_PAGE_SIZE);
   }, [historyBrowserOpen, historyFavoriteFilter, historyDateFilter, historyEngineFilter, historyViewMode]);
 
   useEffect(() => {
+    if (!historyActionMenu) return undefined;
+
+    function onPointerDown(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (target instanceof Element && (target.closest(".history-action-popover") || target.closest(".history-more-trigger"))) return;
+      setHistoryActionMenu(null);
+    }
+
+    function closeForViewportChange() {
+      setHistoryActionMenu(null);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", closeForViewportChange);
+    window.addEventListener("scroll", closeForViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("resize", closeForViewportChange);
+      window.removeEventListener("scroll", closeForViewportChange, true);
+    };
+  }, [historyActionMenu]);
+
+  useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (historyActionMenu) {
+        event.preventDefault();
+        setHistoryActionMenu(null);
+        return;
+      }
+      if (closeOpenActionMenus()) {
+        event.preventDefault();
+        return;
+      }
       if (previewImage) {
         event.preventDefault();
         closePreviewImage();
@@ -1651,7 +1737,7 @@ function App() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previewImage]);
+  }, [previewImage, historyActionMenu]);
 
   useEffect(() => {
     setComposerPopover(null);
@@ -2541,6 +2627,10 @@ function App() {
     return event.dataTransfer.types.includes("application/x-web-imagen-reference");
   }
 
+  function preventInternalImageDrag(event: DragEvent<HTMLElement>) {
+    if (event.target instanceof HTMLImageElement) event.preventDefault();
+  }
+
   function onDragEnter(event: DragEvent<HTMLElement>) {
     if (hasDraggedReference(event)) return;
     event.preventDefault();
@@ -3408,7 +3498,6 @@ function App() {
 
   function currentGenerationSettingsSummary() {
     return [
-      currentSizeLabel(),
       activeEngine === "gpt-image-2" ? currentQualityLabel() : "",
       currentCountLabel(),
     ].filter(Boolean).join(" · ");
@@ -3459,7 +3548,7 @@ function App() {
   }
 
   function isTurnExpanded(turn: ConversationTurn) {
-    if (turn.images.length === 1) return true;
+    if (turn.images.length === 1) return false;
     return expandedTurns[turn.id] ?? false;
   }
 
@@ -3506,7 +3595,7 @@ function App() {
   }
 
   function closeComposerPopover() {
-    if (composerPopover === "settings" && activeEngine === "gpt-image-2") {
+    if (composerPopover === "size" && activeEngine === "gpt-image-2") {
       normalizeCustomSize(false);
     }
     setComposerPopover(null);
@@ -3580,6 +3669,30 @@ function App() {
     }
   }
 
+  function openHistoryContext(entry: HistoryEntry, closeBrowser = false) {
+    setHistoryActionMenu(null);
+    if (closeBrowser) setHistoryBrowserOpen(false);
+    setHistoryDetail(entry);
+  }
+
+  function openHistoryActionMenu(event: ReactMouseEvent<HTMLButtonElement>, entry: HistoryEntry, source: HistoryActionMenuSource) {
+    if (historyActionMenu?.entryId === entry.id && historyActionMenu.source === source) {
+      setHistoryActionMenu(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 224;
+    const estimatedHeight = source === "sidebar" ? 150 : 104;
+    const placement = window.innerHeight - rect.bottom < estimatedHeight + 12 && rect.top > estimatedHeight + 12 ? "above" : "below";
+    setHistoryActionMenu({
+      entryId: entry.id,
+      source,
+      left: Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth)),
+      top: placement === "above" ? rect.top - 6 : rect.bottom + 6,
+      placement,
+    });
+  }
+
   return (
     <main
       className={`studio-shell ${historyCollapsed ? "history-is-collapsed" : ""} ${dragActive ? "is-dragging" : ""}`}
@@ -3587,6 +3700,7 @@ function App() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onDragStartCapture={preventInternalImageDrag}
       onPaste={onPaste}
     >
       {tooltip && (
@@ -3685,7 +3799,7 @@ function App() {
                       const src = imageSrc(firstImage);
                       return (
                         <article className="history-card" key={entry.id}>
-                          <button className="history-open" type="button" onClick={() => setHistoryDetail(entry)}>
+                          <button className="history-open" type="button" onClick={() => openHistoryContext(entry)}>
                             <span className="history-thumb" aria-hidden="true">
                               {src ? <img src={src} alt="" loading="lazy" /> : <span>{t("app.noImage")}</span>}
                             </span>
@@ -3697,24 +3811,33 @@ function App() {
                               <span className="history-prompt">{entry.prompt || t("history.noPrompt")}</span>
                             </span>
                           </button>
+                          <button
+                            className={entry.favorite ? "history-favorite-button active" : "history-favorite-button"}
+                            type="button"
+                            onClick={() => void toggleFavorite(entry)}
+                            title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                            aria-label={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                            aria-pressed={Boolean(entry.favorite)}
+                            disabled={entry.legacy}
+                          >
+                            <Heart size={15} fill={entry.favorite ? "currentColor" : "none"} />
+                          </button>
                           <div className="history-tools">
-                            <button type="button" onClick={() => openHistoryPreview(entry)} title={t("history.previewImage")} disabled={!src}>
-                              <ExternalLink size={14} />
+                            <button className="history-quick-action" type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
+                              <RotateCcw size={14} /> <span>{t("history.applyShort")}</span>
                             </button>
-                            <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
-                              <RotateCcw size={14} />
+                            <button className="history-quick-action" type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
+                              <ImagePlus size={14} /> <span>{t("history.useReferenceShort")}</span>
                             </button>
-                            <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}>
-                              {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
-                            </button>
-                            <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
-                              <ImagePlus size={14} />
-                            </button>
-                            <button className="history-tool-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}>
-                              <ListX size={14} />
-                            </button>
-                            <button className="history-tool-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}>
-                              <Trash2 size={14} />
+                            <button
+                              className="history-more-trigger"
+                              type="button"
+                              onClick={(event) => openHistoryActionMenu(event, entry, "sidebar")}
+                              aria-haspopup="menu"
+                              aria-expanded={historyActionMenu?.entryId === entry.id && historyActionMenu.source === "sidebar"}
+                              title={t("history.moreActions")}
+                            >
+                              <Ellipsis size={14} /> <span>{t("history.more")}</span>
                             </button>
                           </div>
                         </article>
@@ -3975,6 +4098,7 @@ function App() {
                       </strong>
                       <div className="response-meta">
                         <span>{turn.meta?.model ? String(turn.meta.model) : engineLabel(turn.engine)}</span>
+                        {sharedImageDimensionsLabel(turn.images) && <span>{sharedImageDimensionsLabel(turn.images)}</span>}
                         {turn.elapsedSeconds ? <span>{language === "en" ? `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)}s` : `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒`}</span> : null}
                         <span>#{turnIndex + 1}</span>
                       </div>
@@ -3997,7 +4121,7 @@ function App() {
                       </div>
                     )}
                     {turn.images.length > 0 && (
-                      <div className={isTurnExpanded(turn) ? "turn-images expanded" : "turn-images collapsed"}>
+                      <div className={`${isTurnExpanded(turn) ? "turn-images expanded" : "turn-images collapsed"} ${turn.images.length === 1 ? "single-result" : "multi-result"}`}>
                         <div className={turn.images.length === 1 ? "image-grid single" : "image-grid"}>
                         {turn.images.map((image, index) => {
                           const src = imageSrc(image);
@@ -4006,32 +4130,36 @@ function App() {
                           return (
                             <figure className={`image-card ${resultImageOrientation(image)}`} key={`${turn.id}-${index}`}>
                               <div className="image-preview-wrap">
-                                <button type="button" className="image-preview" style={resultImageStyle(image)} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })}>
-                                  <img src={src} alt={name} loading="lazy" />
+                                <button type="button" className="image-preview" style={resultImageStyle(image)} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })} title={t("history.previewImage")}>
+                                  <img src={src} alt={name} loading="lazy" draggable={false} />
                                 </button>
+                                <div className="image-overlay-actions">
+                                  <button
+                                    type="button"
+                                    className="image-mask-action"
+                                    onClick={() => void editPreviewMask({ src, name, dimensions: image.dimensions })}
+                                    title={isSameOriginOutput(src) ? t("preview.editMask") : t("status.outputOnly")}
+                                    aria-label={t("preview.editMask")}
+                                    aria-busy={previewMaskLoading}
+                                    disabled={previewMaskLoading || !isSameOriginOutput(src)}
+                                  >
+                                    {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
+                                    <span>{t("preview.editMask")}</span>
+                                  </button>
+                                  <a className="image-download-action" href={src} download={name} title={t("image.download")} aria-label={t("image.download")}>
+                                    <Download size={15} />
+                                  </a>
+                                </div>
                               </div>
-                              <figcaption>
-                                <span>{name}</span>
-                                {dimensions && <small className="image-dimensions">{dimensions}</small>}
-                              </figcaption>
+                              {!sharedImageDimensionsLabel(turn.images) && dimensions && (
+                                <figcaption>
+                                  <small className="image-dimensions">{dimensions}</small>
+                                </figcaption>
+                              )}
                               <div className="image-actions">
                                 <button type="button" onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled}>
                                   <MessageSquarePlus size={14} /> <span>{t("image.continueEdit")}</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  className="image-mask-action"
-                                  onClick={() => void editPreviewMask({ src, name, dimensions: image.dimensions })}
-                                  title={isSameOriginOutput(src) ? t("preview.editMask") : t("status.outputOnly")}
-                                  aria-busy={previewMaskLoading}
-                                  disabled={previewMaskLoading || !isSameOriginOutput(src)}
-                                >
-                                  {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
-                                  <span>{t("preview.editMask")}</span>
-                                </button>
-                                <a href={src} download={name}>
-                                  <Download size={14} /> <span>{t("image.download")}</span>
-                                </a>
                                 <details className="image-more-actions">
                                   <summary aria-label={t("image.moreActions")} title={t("image.moreActions")}>
                                     <Ellipsis size={15} /> <span>{t("image.more")}</span>
@@ -4163,25 +4291,20 @@ function App() {
               <ImagePlus size={16} /> {references.length > 0 ? t("reference.count", { count: references.length }) : t("reference.button")}
             </button>
             <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={onReferenceChange} />
-            <div className="composer-popover-wrap generation-settings-wrap">
+            <div className="composer-popover-wrap size-settings-wrap">
               <button
                 type="button"
-                className="generation-settings-trigger"
-                onClick={() => openComposerPopover("settings")}
-                aria-expanded={composerPopover === "settings"}
-                {...tooltipProps(t("composer.generationSettingsTooltip"))}
+                className="size-settings-trigger"
+                onClick={() => openComposerPopover("size")}
+                aria-expanded={composerPopover === "size"}
+                {...tooltipProps(t("composer.sizeButtonTooltip"))}
               >
-                <SlidersHorizontal size={15} />
-                <span className="generation-settings-label">{t("composer.generationSettings")}</span>
-                <span className="generation-settings-summary">{currentGenerationSettingsSummary()}</span>
-                {generationCountFor(activeEngine, gptForm, bananaForm) > 1 && (
-                  <span className="generation-count-alert" title={t("composer.countTooltip")}>
-                    {generationCountFor(activeEngine, gptForm, bananaForm)}
-                  </span>
-                )}
+                <Maximize2 size={15} />
+                <span className="size-settings-label">{t("composer.size")}</span>
+                <span className="size-settings-summary">{currentSizeLabel()}</span>
               </button>
-              {composerPopover === "settings" && (
-                <div className="composer-popover generation-settings-popover" role="dialog" aria-label={t("composer.generationSettingsDialog")}>
+              {composerPopover === "size" && (
+                <div className="composer-popover size-settings-popover" role="dialog" aria-label={t("composer.sizeDialog")}>
                   <section className="generation-settings-section size-settings-section">
                     <div className="generation-settings-heading">
                       <strong>{t("composer.size")}</strong>
@@ -4282,6 +4405,28 @@ function App() {
                       </>
                     )}
                   </section>
+                </div>
+              )}
+            </div>
+            <div className="composer-popover-wrap generation-settings-wrap">
+              <button
+                type="button"
+                className="generation-settings-trigger"
+                onClick={() => openComposerPopover("settings")}
+                aria-expanded={composerPopover === "settings"}
+                {...tooltipProps(t("composer.generationSettingsTooltip"))}
+              >
+                <SlidersHorizontal size={15} />
+                <span className="generation-settings-label">{t("composer.generationSettings")}</span>
+                <span className="generation-settings-summary">{currentGenerationSettingsSummary()}</span>
+                {generationCountFor(activeEngine, gptForm, bananaForm) > 1 && (
+                  <span className="generation-count-alert" title={t("composer.countTooltip")}>
+                    {generationCountFor(activeEngine, gptForm, bananaForm)}
+                  </span>
+                )}
+              </button>
+              {composerPopover === "settings" && (
+                <div className="composer-popover generation-settings-popover" role="dialog" aria-label={t("composer.generationSettingsDialog")}>
                   {activeEngine !== "banana" && (
                     <section className="generation-settings-section quality-settings-section">
                       <div className="generation-settings-heading">
@@ -4341,28 +4486,28 @@ function App() {
             </button>
             </div>
           </div>
-          <button
-            type="button"
-            className="composer-resize-handle"
-            onPointerDown={startComposerResize}
-            onPointerMove={dragComposerResize}
-            onPointerUp={endComposerResize}
-            onPointerCancel={endComposerResize}
-            title={t("composer.resize")}
-            aria-label={t("composer.resize")}
-          >
-            <span />
-          </button>
-          <button
-            type="button"
-            className="composer-reset-button"
-            onClick={resetPromptHeight}
-            title={t("composer.resetHeight")}
-            aria-label={t("composer.resetHeight")}
-          >
-            <FoldVertical size={15} />
-          </button>
-            <div className="composer-input">
+          <div className="composer-input">
+            <button
+              type="button"
+              className="composer-resize-handle"
+              onPointerDown={startComposerResize}
+              onPointerMove={dragComposerResize}
+              onPointerUp={endComposerResize}
+              onPointerCancel={endComposerResize}
+              title={t("composer.resize")}
+              aria-label={t("composer.resize")}
+            >
+              <span />
+            </button>
+            <button
+              type="button"
+              className="composer-reset-button"
+              onClick={resetPromptHeight}
+              title={t("composer.resetHeight")}
+              aria-label={t("composer.resetHeight")}
+            >
+              <FoldVertical size={15} />
+            </button>
             <div className="composer-textarea-wrap" ref={promptWrapRef}>
               <textarea
                 ref={promptRef}
@@ -4410,7 +4555,7 @@ function App() {
             >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
-            </div>
+          </div>
           </div>
         </form>
       </section>
@@ -4733,6 +4878,82 @@ function App() {
         </div>
       )}
 
+      {historyActionMenu && historyActionEntry && (
+        <div
+          className={`history-action-popover ${historyActionMenu.placement}`}
+          style={{ left: historyActionMenu.left, top: historyActionMenu.top }}
+          role="menu"
+          aria-label={t("history.moreActions")}
+        >
+          {historyActionMenu.source === "sidebar" ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setHistoryActionMenu(null);
+                  openHistoryPreview(historyActionEntry);
+                }}
+                disabled={!historyActionSrc}
+              >
+                <ExternalLink size={14} /> <span>{t("history.previewImage")}</span>
+              </button>
+              <button
+                className="history-tool-remove"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setHistoryActionMenu(null);
+                  void deleteHistory(historyActionEntry, false);
+                }}
+                disabled={historyActionEntry.legacy}
+              >
+                <ListX size={14} /> <span>{t("history.removeRecord")}</span>
+              </button>
+              <button
+                className="history-tool-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setHistoryActionMenu(null);
+                  void deleteHistory(historyActionEntry, true);
+                }}
+                disabled={!historyActionSrc}
+              >
+                <Trash2 size={14} /> <span>{t("history.deleteFiles")}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="history-browser-action-remove"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setHistoryActionMenu(null);
+                  void deleteHistory(historyActionEntry, false);
+                }}
+                disabled={historyActionEntry.legacy}
+              >
+                <X size={14} /> <span>{t("history.removeRecord")}</span>
+              </button>
+              <button
+                className="history-browser-action-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setHistoryActionMenu(null);
+                  void deleteHistory(historyActionEntry, true);
+                }}
+                disabled={!historyActionSrc}
+              >
+                <Trash2 size={14} /> <span>{t("history.deleteFiles")}</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {historyDetail && (
         <div className="history-detail-shell">
           <button className="history-detail-backdrop" type="button" aria-label={t("history.context")} onClick={() => setHistoryDetail(null)} />
@@ -4859,10 +5080,23 @@ function App() {
                 const mismatch = dimensionMismatchLabel(entry, firstImage);
                 return (
                   <article className="history-browser-card" key={entry.id}>
-                    <button type="button" className="history-browser-preview" onClick={() => src && openPreviewImage({ src, name, dimensions: firstImage?.dimensions, requestedSize })} disabled={!src} title={t("history.previewImage")}>
-                      {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
-                    </button>
-                    <div className="history-browser-card-main">
+                    <div className="history-browser-preview-wrap">
+                      <button type="button" className="history-browser-preview" onClick={() => src && openPreviewImage({ src, name, dimensions: firstImage?.dimensions, requestedSize })} disabled={!src} title={t("history.previewImage")}>
+                        {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                      </button>
+                      <button
+                        className={entry.favorite ? "history-browser-favorite active" : "history-browser-favorite"}
+                        type="button"
+                        onClick={() => void toggleFavorite(entry)}
+                        title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                        aria-label={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                        aria-pressed={Boolean(entry.favorite)}
+                        disabled={entry.legacy}
+                      >
+                        <Heart size={15} fill={entry.favorite ? "currentColor" : "none"} />
+                      </button>
+                    </div>
+                    <button type="button" className="history-browser-card-main" onClick={() => openHistoryContext(entry, true)} title={t("history.openContext")}>
                       <div className="history-browser-meta">
                         <span>{formatTime(entry.created_at, language)}</span>
                         <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
@@ -4872,16 +5106,24 @@ function App() {
                         {actualDimensions && <span>{actualDimensions}</span>}
                         {mismatch ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : requestedSize && !actualDimensions ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : null}
                       </div>
-                    </div>
+                    </button>
                     <div className="history-browser-actions">
-                      <button type="button" onClick={() => setHistoryDetail(entry)} title={t("history.context")}><ExternalLink size={14} /></button>
-                      <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}><RotateCcw size={14} /></button>
-                      <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")} disabled={entry.legacy}>
-                        {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
+                      <button className="history-browser-quick-action" type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
+                        <RotateCcw size={14} /> <span>{t("history.applyShort")}</span>
                       </button>
-                      <button type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}><ImagePlus size={14} /></button>
-                      <button className="history-browser-action-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}><X size={14} /></button>
-                      <button className="history-browser-action-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}><Trash2 size={14} /></button>
+                      <button className="history-browser-quick-action" type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
+                        <ImagePlus size={14} /> <span>{t("history.useReferenceShort")}</span>
+                      </button>
+                      <button
+                        className="history-more-trigger"
+                        type="button"
+                        onClick={(event) => openHistoryActionMenu(event, entry, "browser")}
+                        aria-haspopup="menu"
+                        aria-expanded={historyActionMenu?.entryId === entry.id && historyActionMenu.source === "browser"}
+                        title={t("history.moreActions")}
+                      >
+                        <Ellipsis size={14} /> <span>{t("history.more")}</span>
+                      </button>
                     </div>
                   </article>
                 );
