@@ -5,15 +5,17 @@
 - [x] Add RED tests for result integrity, action hierarchy, sidebar structure, header cleanup and consolidated generation settings.
 - [x] Implement result-first layout and common conversation/composer alignment.
 - [x] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
+- [x] Apply screenshot follow-ups for compact results, image-corner actions, stable menus, neutral favorites, history cards, metadata placement and accidental image-drag protection.
 - [x] Run the full Node/build/size/release and HTTP-static matrix without a paid upstream request.
 - [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `4d22573`, especially a portrait single result, expanded multi-results, image more-actions, direct mask editing, header more-menu and generation settings.
-- Do not redo: the five UI implementation slices, 128/128 Node suite, size/build, 33/33 release gate or HTTP static smoke unless product code changes.
-- Verify next: confirm real hover/press/focus feedback, menu placement, no result cropping, sidebar list placement, and usable layout at desktop plus a narrow window. Automatic browser automation cannot perform this loopback gate.
+- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `976595c`, especially a portrait single result, neutral empty/filled favorites, history grid/list cards, image/header/history menus, direct mask editing and narrow layout.
+- Do not redo: the screenshot-driven UI implementation, 130/130 Node suite, size/build, 33/33 release gate, compile/diff check or HTTP static smoke unless product code changes.
+- Verify next: confirm the result image has no filename or thin top/bottom edge, shared dimensions sit in the completion row, slight mouse movement does not trigger reference-file drop, menus dismiss reliably, and history actions do not overlap at desktop or narrow widths. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
+- Current Studio assets: `index-DLBx81F6.js` and `index-BeJ2EXhf.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
