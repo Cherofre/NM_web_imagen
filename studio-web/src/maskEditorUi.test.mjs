@@ -81,7 +81,7 @@ test("mask editor follows the existing product vocabulary and remains usable on 
   assert.doesNotMatch(editorSource, /<span>\{t\("mask\.promptLimit"\)\}<\/span>/);
   assert.match(editorSource, /mask-editor-shortcut-help/);
   assert.match(styleSource, /@media \(max-width: 720px\)[\s\S]*\.mask-editor-card/);
-  assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mask-editor-card \.spin/);
+  assert.match(styleSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.spin/);
   assert.match(styleSource, /\.mask-editor-card button:focus-visible/);
   assert.match(i18nSource, /"mask\.edit"/);
   assert.match(i18nSource, /"mask\.paintHint"/);

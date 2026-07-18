@@ -35,9 +35,10 @@ function cssBlockIn(source, selector) {
 }
 
 test("text settings actions keep their button on one line and expose focus styling", () => {
-  assert.match(cssBlock(".composer"), /--composer-prompt-height:\s*148px;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\);/);
+  assert.match(cssBlock(".composer"), /--composer-prompt-height:\s*148px;/);
+  assert.match(cssBlock(".composer-inner"), /display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\);[\s\S]*width:\s*min\(980px, 100%\);/);
   assert.match(cssBlock(".composer-top"), /display:\s*grid;[\s\S]*gap:\s*8px;[\s\S]*min-height:\s*0;/);
-  assert.match(appSource, /<div className="composer-top">\s*\{references\.length > 0 && \(/);
+  assert.match(appSource, /<div className="composer-inner">\s*<div className="composer-top">\s*\{references\.length > 0 && \(/);
   assert.match(appSource, /<\/div>\s*<button\s+type="button"\s+className="composer-resize-handle"/);
   assert.match(cssBlock(".composer-input"), /align-items:\s*stretch;[\s\S]*min-height:\s*0;/);
   assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-9px;[\s\S]*right:\s*18px;[\s\S]*cursor:\s*ns-resize;/);
@@ -83,18 +84,16 @@ test("advanced parameter toggles align to input height without stretching", () =
   assert.match(css, /\.toggle\s*\{[\s\S]*box-sizing:\s*border-box;/);
 });
 
-test("queue entry floats as a glass capsule without pushing conversation layout", () => {
+test("queue entry stays compact and uses neutral status styling", () => {
   assert.match(cssBlock(".queue-anchor"), /height:\s*0;[\s\S]*pointer-events:\s*none;/);
-  assert.match(cssBlock(".queue-capsule"), /position:\s*absolute;[\s\S]*right:\s*0;[\s\S]*min-height:\s*32px;[\s\S]*border-radius:\s*999px;[\s\S]*background:\s*rgba\(72, 76, 84, 0\.54\);[\s\S]*backdrop-filter:\s*blur\(20px\) saturate\(1\.35\);/);
-  assert.match(cssBlock(".queue-capsule"), /pointer-events:\s*auto;/);
-  assert.doesNotMatch(cssBlock(".queue-capsule"), /background:\s*rgba\(255, 255, 255, 0\.78\)/);
-  assert.match(cssBlock(".queue-capsule::before"), /content:\s*"";[\s\S]*inset:\s*1px;[\s\S]*border-radius:\s*inherit;[\s\S]*background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 0\.24\), rgba\(255, 255, 255, 0\.04\)\);/);
-  assert.match(cssBlock(".queue-capsule.active"), /animation:\s*queue-capsule-breathe 2\.4s ease-in-out infinite;/);
-  assert.match(css, /@keyframes queue-capsule-breathe[\s\S]*0%[\s\S]*100%[\s\S]*box-shadow:[\s\S]*50%[\s\S]*box-shadow:/);
+  assert.match(cssBlock(".queue-capsule"), /position:\s*absolute;[\s\S]*right:\s*0;[\s\S]*min-height:\s*34px;[\s\S]*border-radius:\s*12px;[\s\S]*background:\s*rgba\(255, 255, 255, 0\.94\);[\s\S]*color:\s*var\(--ink\);[\s\S]*pointer-events:\s*auto;/);
+  assert.doesNotMatch(css, /\.queue-capsule::before\s*\{/);
+  assert.doesNotMatch(css, /queue-capsule-breathe/);
   assert.match(cssBlock(".queue-capsule-label"), /letter-spacing:\s*0;/);
-  assert.match(cssBlock(".queue-capsule-count"), /background:\s*rgba\(255, 255, 255, 0\.2\);/);
-  assert.match(cssBlock(".queue-capsule-dot"), /width:\s*7px;[\s\S]*height:\s*7px;[\s\S]*background:\s*#2563eb;[\s\S]*box-shadow:\s*0 0 0 5px rgba\(37, 99, 235, 0\.12\);/);
-  assert.match(cssBlock(".queue-capsule-dot.done"), /background:\s*rgba\(34, 197, 94, 0\.72\);/);
+  assert.match(cssBlock(".queue-capsule-count"), /background:\s*#efefed;[\s\S]*color:\s*var\(--ink\);/);
+  assert.match(cssBlock(".queue-capsule-dot"), /width:\s*7px;[\s\S]*height:\s*7px;/);
+  assert.match(cssBlock(".queue-capsule-dot.active"), /background:\s*#2563eb;/);
+  assert.match(cssBlock(".queue-capsule-dot.done"), /background:\s*#a8a29e;/);
   assert.match(cssBlock(".queue-popover"), /position:\s*absolute;[\s\S]*top:\s*44px;[\s\S]*right:\s*0;[\s\S]*pointer-events:\s*auto;/);
   assert.match(appSource, /const QUEUE_POPOVER_DEFAULT_WIDTH = 366;/);
   assert.match(appSource, /const QUEUE_POPOVER_DEFAULT_HEIGHT = 310;/);
@@ -102,18 +101,18 @@ test("queue entry floats as a glass capsule without pushing conversation layout"
   assert.match(appSource, /const \[queuePopoverSize, setQueuePopoverSize\]/);
   assert.match(appSource, /const queuePopoverStyle: CSSProperties = \{[\s\S]*"--queue-popover-width": `\$\{queuePopoverSize\.width\}px`,[\s\S]*"--queue-popover-height": `\$\{queuePopoverSize\.height\}px`,/);
   assert.match(cssBlock(".queue-popover"), /grid-template-rows:\s*auto minmax\(0, 1fr\);[\s\S]*width:\s*min\(var\(--queue-popover-width, 366px\), calc\(100vw - 52px\)\);[\s\S]*height:\s*min\(var\(--queue-popover-height, 310px\), calc\(100vh - 240px\)\);[\s\S]*overflow:\s*hidden;/);
-  assert.match(cssBlock(".queue-popover"), /background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 0\.96\), rgba\(248, 250, 252, 0\.92\)\);[\s\S]*backdrop-filter:\s*blur\(22px\) saturate\(1\.18\);/);
-  assert.match(cssBlock(".queue-popover::before"), /content:\s*"";[\s\S]*height:\s*58px;[\s\S]*background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 0\.68\), rgba\(255, 255, 255, 0\)\);/);
+  assert.match(cssBlock(".queue-popover"), /background:\s*#fff;/);
+  assert.doesNotMatch(css, /\.queue-popover::before\s*\{/);
   assert.match(cssBlock(".queue-popover-head"), /position:\s*relative;[\s\S]*z-index:\s*1;[\s\S]*padding:\s*2px 2px 10px;/);
   assert.match(cssBlock(".queue-popover-head h3"), /font-size:\s*18px;/);
   assert.match(cssBlock(".queue-job-icon"), /border-radius:\s*999px;/);
   assert.match(cssBlock(".queue-job-thumb"), /width:\s*44px;[\s\S]*height:\s*44px;/);
   assert.match(cssBlock(".queue-list"), /gap:\s*8px;[\s\S]*align-content:\s*start;[\s\S]*grid-auto-rows:\s*max-content;[\s\S]*min-height:\s*0;[\s\S]*padding:\s*10px 2px 14px;[\s\S]*overflow:\s*auto;[\s\S]*border-top:\s*1px solid rgba\(148, 163, 184, 0\.16\);/);
-  assert.match(css, /\.queue-job\s*\{[\s\S]*position:\s*relative;[\s\S]*padding:\s*9px 10px 9px 12px;[\s\S]*border:\s*1px solid rgba\(148, 163, 184, 0\.18\);[\s\S]*border-radius:\s*14px;[\s\S]*background:\s*rgba\(255, 255, 255, 0\.66\);/);
+  assert.match(css, /\.queue-job\s*\{[\s\S]*position:\s*relative;[\s\S]*padding:\s*9px 10px;[\s\S]*border:\s*1px solid var\(--line\);[\s\S]*border-radius:\s*12px;[\s\S]*background:\s*#fff;/);
   assert.match(cssBlock(".queue-job-main-button strong,\n.queue-job-main-button span"), /display:\s*block;[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;/);
-  assert.match(cssBlock(".queue-job::before"), /content:\s*"";[\s\S]*left:\s*0;[\s\S]*width:\s*3px;[\s\S]*background:\s*rgba\(148, 163, 184, 0\.45\);/);
-  assert.match(cssBlock(".queue-job.running::before"), /background:\s*#2563eb;/);
-  assert.match(cssBlock(".queue-job.error::before"), /background:\s*#ef4444;/);
+  assert.doesNotMatch(css, /\.queue-job::before\s*\{/);
+  assert.match(cssBlock(".queue-job.running"), /border-color:\s*rgba\(37, 99, 235, 0\.28\);/);
+  assert.match(cssBlock(".queue-job.error"), /border-color:\s*rgba\(220, 38, 38, 0\.24\);/);
   assert.match(appSource, /className="queue-popover-resize-handle"/);
   assert.match(appSource, /onPointerDown=\{startQueuePopoverResize\}/);
   assert.match(appSource, /onPointerMove=\{dragQueuePopoverResize\}/);
@@ -128,18 +127,13 @@ test("queue entry floats as a glass capsule without pushing conversation layout"
   assert.ok(appSource.includes('<span>{job.status === "queued" ? `${jobMeta} · ${t("queue.queued")}` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>'));
   assert.match(appSource, /t\("queue\.waiting"\)/);
   assert.match(appSource, /compactInlineText\(job\.prompt, 24\) \|\| fallback/);
-  assert.doesNotMatch(appSource, /<strong>生成图片<\/strong>/);
-  assert.doesNotMatch(appSource, /job\.status === "running" \? "生成中"/);
-  assert.doesNotMatch(appSource, /job\.status === "error" \? "失败"/);
-  assert.doesNotMatch(appSource, /<small>\{Math\.round\(job\.elapsedSeconds\)\} 秒<\/small>/);
   assert.match(appSource, /className=\{jobImages\.length > 1 \? "queue-job-thumb multi" : "queue-job-thumb"\}/);
   assert.match(appSource, /className="queue-job-main-button"/);
   assert.match(appSource, /onClick=\{\(\) => jumpToQueueJob\(job\)\}/);
-  assert.match(appSource, /className="queue-capsule-label">\{t\("queue\.label"\)\}/);
-  assert.match(appSource, /className="queue-capsule-count">\{queueJobs\.length\}/);
+  assert.match(appSource, /className="queue-capsule-label">\{activeQueueCount \? t\("queue\.label"\) : t\("queue\.recent"\)\}/);
+  assert.match(appSource, /className="queue-capsule-count">\{activeQueueCount \|\| queueJobs\.length\}/);
   assert.match(appSource, /className=\{`queue-capsule \$\{activeQueueCount \? "active" : ""\}`\.trim\(\)\}/);
-  assert.match(appSource, /className=\{runningQueueCount \? "queue-capsule-dot running" : "queue-capsule-dot done"\}/);
-  assert.doesNotMatch(appSource.slice(appSource.indexOf('className="queue-capsule"'), appSource.indexOf("</button>", appSource.indexOf('className="queue-capsule"'))), /ChevronDown|queue-capsule-state|Loader2/);
+  assert.match(appSource, /className=\{activeQueueCount \? "queue-capsule-dot active" : "queue-capsule-dot done"\}/);
 });
 
 test("queue rows expose cancel retry apply and remove controls", () => {
@@ -371,9 +365,10 @@ test("multi-image count is prominent and asks for confirmation", () => {
   assert.match(appSource, /t\("multiImage\.confirm", \{ count: pendingMultiImageConfirm\.count \}\)/);
   assert.match(appSource, /t\("multiImage\.reset"\)/);
   assert.match(appSource, /t\("multiImage\.skipThisSession"\)/);
-  assert.match(appSource, /className=\{`count-trigger \$\{generationCountFor\(activeEngine, gptForm, bananaForm\) > 1 \? "count-trigger-alert" : ""\} \$\{composerPopover === "count" \? "active" : ""\}`\.trim\(\)\}/);
-  assert.match(cssBlock(".composer-toolbar button.count-trigger"), /gap:\s*6px;/);
-  assert.match(cssBlock(".composer-toolbar button.count-trigger-alert"), /background:\s*#111;[\s\S]*color:\s*#fff;/);
+  assert.match(appSource, /className="generation-settings-trigger"/);
+  assert.match(appSource, /className="generation-count-alert"/);
+  assert.match(cssBlock(".generation-count-alert"), /background:\s*var\(--warning-bg\);[\s\S]*color:\s*var\(--warning\);/);
+  assert.doesNotMatch(css, /count-trigger-alert/);
   assert.match(css, /\.multi-image-confirm-drawer\s*\{[\s\S]*max-width:\s*420px;/);
 });
 
@@ -473,38 +468,90 @@ test("save-like actions are visually primary and clear", () => {
   assert.match(appSource, /t\("sessionPrompt\.clearGpt"\)/);
 });
 
-test("results actions expose stable tooltips and output dimensions", () => {
+test("results actions expose clear labels and output dimensions", () => {
   assert.match(appSource, /function imageDimensionsLabel\(image\?: GeneratedImage \| null\)/);
   assert.match(appSource, /function requestedSizeLabel\(entry: HistoryEntry\)/);
   assert.match(appSource, /function dimensionMismatchLabel\(entry: HistoryEntry, image\?: GeneratedImage \| null\)/);
-  assert.match(appSource, /tooltipProps\(t\("image\.copyPrompt"\)\)/);
-  assert.match(appSource, /tooltipProps\(t\("image\.applyPrompt"\)\)/);
-  assert.match(appSource, /tooltipProps\(t\("image\.continueEdit"\)\)/);
-  assert.match(appSource, /tooltipProps\(t\("reference\.addAsReference"\)\)/);
-  assert.match(appSource, /tooltipProps\(t\("image\.download"\)\)/);
-  assert.match(appSource, /tooltipProps\(t\("image\.open"\)\)/);
+  assert.match(appSource, /<span>\{t\("image\.continueEdit"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("preview\.editMask"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("image\.download"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("image\.copyPrompt"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("image\.applyPrompt"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("reference\.addAsReference"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("image\.open"\)\}<\/span>/);
   assert.match(appSource, /className="image-dimensions"/);
   assert.match(appSource, /className="preview-title-meta"/);
-  assert.match(cssBlock(".image-actions"), /overflow:\s*visible;/);
-  assert.match(cssBlock(".image-card"), /overflow:\s*visible;/);
+  assert.match(css, /(?:^|\n)\.image-actions\s*\{[^}]*overflow:\s*visible;/);
+  assert.match(css, /(?:^|\n)\.image-card\s*\{[^}]*overflow:\s*visible;/);
 });
 
-test("result image actions use a persistent floating toolbar below the image", () => {
+test("result image actions use three visible actions plus a keyboard-accessible more menu", () => {
   assert.match(appSource, /className="image-preview-wrap"/);
-  assert.doesNotMatch(appSource, /className="image-more-menu"/);
+  assert.match(appSource, /<details className="image-more-actions">/);
+  assert.match(appSource, /className="image-more-menu"/);
+  assert.match(appSource, /<Ellipsis size=\{15\} \/>/);
   assert.doesNotMatch(appSource, /MoreHorizontal/);
-  assert.match(cssBlock(".image-card"), /border:\s*0;[\s\S]*background:\s*transparent;[\s\S]*box-shadow:\s*none;/);
-  assert.match(css, /(?:^|\n)\.image-preview\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*border:\s*1px solid var\(--line\);[\s\S]*border-radius:\s*18px;/);
-  assert.match(css, /(?:^|\n)\.image-card figcaption\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*padding:\s*48px 10px 10px;/);
+  assert.match(css, /(?:^|\n)\.image-card\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/);
+  assert.match(css, /(?:^|\n)\.image-preview\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*border:\s*1px solid var\(--line\);[\s\S]*border-radius:\s*var\(--radius-md\);/);
+  assert.match(css, /(?:^|\n)\.image-card figcaption\s*\{[\s\S]*padding:\s*7px 2px 0;/);
   assert.match(cssBlock(".image-preview-wrap"), /position:\s*relative;[\s\S]*overflow:\s*visible;/);
-  assert.match(cssBlock(".image-actions"), /position:\s*absolute;[\s\S]*top:\s*calc\(100% \+ 6px\);[\s\S]*width:\s*min\(180px, calc\(100% - 8px\)\);[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\);[\s\S]*opacity:\s*1;[\s\S]*pointer-events:\s*auto;/);
-  assert.doesNotMatch(cssBlock(".image-actions"), /bottom:/);
-  assert.doesNotMatch(cssBlock(".image-actions"), /pointer-events:\s*none;/);
-  assert.doesNotMatch(css, /\.image-card:hover \.image-actions,\s*\.image-card:focus-within \.image-actions\s*\{/);
-  assert.match(css, /\.image-actions button,\s*\.image-actions a\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*height:\s*26px;/);
-  assert.match(cssBlock(".turn-images.collapsed .image-card figcaption"), /padding:\s*40px 7px 8px;/);
-  assert.match(cssBlock(".turn-images.collapsed .image-actions"), /width:\s*min\(142px, calc\(100% - 6px\)\);[\s\S]*top:\s*calc\(100% \+ 6px\);/);
-  assert.doesNotMatch(cssBlock(".turn-images.collapsed .image-actions"), /bottom:/);
+  assert.match(css, /(?:^|\n)\.image-actions\s*\{[^}]*position:\s*relative;[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*overflow:\s*visible;/);
+  assert.match(cssBlock(".image-more-menu"), /position:\s*absolute;[\s\S]*bottom:\s*calc\(100% \+ 6px\);[\s\S]*display:\s*grid;/);
+  assert.match(cssBlock(".turn-images.collapsed .image-actions"), /display:\s*none;/);
+});
+
+test("single results open at their truthful aspect ratio without a redundant toggle", () => {
+  assert.match(appSource, /function resultImageStyle\(image\?: GeneratedImage\): CSSProperties/);
+  assert.match(appSource, /"--result-aspect": `\$\{width\} \/ \$\{height\}`/);
+  assert.match(appSource, /function resultImageOrientation\(image\?: GeneratedImage\)/);
+  assert.match(appSource, /if \(turn\.images\.length === 1\) return true;/);
+  assert.match(appSource, /style=\{resultImageStyle\(image\)\}/);
+  assert.match(appSource, /turn\.images\.length > 1 && \(\s*<button type="button" className="image-toggle"/);
+  assert.match(css, /(?:^|\n)\.image-preview\s*\{[^}]*aspect-ratio:\s*var\(--result-aspect, 1 \/ 1\);/);
+  assert.match(cssBlock(".turn-images.expanded .image-preview img"), /object-fit:\s*contain;/);
+  assert.match(cssBlock(".image-grid.single .image-card.result-portrait"), /width:\s*min\(320px, 100%\);/);
+  assert.match(cssBlock(".image-grid.single .image-card.result-landscape"), /width:\s*min\(520px, 100%\);/);
+});
+
+test("sidebar, conversation, composer and header use the simplified hierarchy", () => {
+  assert.match(appSource, /className="sidebar-list-section"/);
+  assert.match(cssBlock(".sidebar-list-section"), /grid-template-rows:\s*auto minmax\(0, 1fr\);[\s\S]*min-height:\s*0;/);
+  const sidebarStart = appSource.indexOf('<div className="sidebar-actions">');
+  const sidebarEnd = appSource.indexOf('</div>', sidebarStart);
+  assert.notEqual(sidebarStart, -1);
+  assert.doesNotMatch(appSource.slice(sidebarStart, sidebarEnd), /app\.newChat/);
+  assert.match(appSource, /className="conversation-flow"/);
+  assert.match(cssBlock(".conversation-flow"), /width:\s*min\(980px, 100%\);[\s\S]*margin-inline:\s*auto;/);
+  assert.match(appSource, /className="composer-inner"/);
+  assert.match(appSource, /<details className="header-more-menu">/);
+  assert.match(appSource, /t\("app\.clearCurrentConversation"\)/);
+  assert.doesNotMatch(appSource.slice(appSource.indexOf('<div className="header-actions">'), appSource.indexOf('</header>')), /onClick=\{\(\) => void saveConfig\(\)\}/);
+  assert.match(cssBlock(".header-more-panel .danger-action"), /color:\s*var\(--danger\);/);
+});
+
+test("composer exposes one generation settings entry and keeps all existing controls inside it", () => {
+  assert.match(appSource, /useState<"settings" \| null>/);
+  assert.match(appSource, /openComposerPopover\("settings"\)/);
+  assert.match(appSource, /className="generation-settings-trigger"/);
+  assert.match(appSource, /className="composer-popover generation-settings-popover"/);
+  assert.match(appSource, /className="generation-settings-section size-settings-section"/);
+  assert.match(appSource, /className="generation-settings-section quality-settings-section"/);
+  assert.match(appSource, /className="generation-settings-section count-settings-section"/);
+  assert.doesNotMatch(appSource, /openComposerPopover\("size"\)|openComposerPopover\("quality"\)|openComposerPopover\("count"\)/);
+  assert.match(i18nSource, /"composer\.generationSettings": "生成设置"/);
+  assert.match(i18nSource, /"composer\.generationSettings": "Generation settings"/);
+});
+
+test("shape hierarchy keeps pills for switches and regular controls compact", () => {
+  assert.match(cssBlock(":root"), /--radius-xl:\s*22px;[\s\S]*--radius-lg:\s*18px;[\s\S]*--radius-md:\s*14px;[\s\S]*--radius-sm:\s*10px;/);
+  assert.match(css, /\.icon-button,\s*\.new-session-button,[\s\S]*\.panel-title button\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
+  assert.match(cssBlock(".sidebar-tabs"), /border-radius:\s*999px;/);
+  assert.match(cssBlock(".mode-tabs"), /border-radius:\s*999px;/);
+  assert.match(cssBlock(".submit-mode-switch"), /border-radius:\s*999px;/);
+  assert.match(cssBlock(".submit-mode-switch button.active"), /background:\s*#fff;[\s\S]*color:\s*var\(--ink\);/);
+  assert.match(css, /\.floating-tooltip,\s*\.inline-tooltip\s*\{[^}]*max-width:\s*min\(280px, calc\(100vw - 40px\)\);/);
+  assert.match(i18nSource, /"composer\.advancedTooltip": "种子、风格、超时等较少使用的设置。"/);
+  assert.match(i18nSource, /"composer\.advancedTooltip": "Less common settings such as seed, style, and timeout\."/);
 });
 
 test("composer labels clarify custom size apply and keep expand copy short", () => {
@@ -597,7 +644,7 @@ test("banana history exposes requested image size and aspect ratio", () => {
 
 test("history sidebar actions read as a compact tool group", () => {
   assert.match(cssBlock(".sidebar-actions"), /display:\s*flex;[\s\S]*gap:\s*6px;/);
-  assert.match(cssBlock(".sidebar-actions button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*34px;[\s\S]*border-radius:\s*999px;/);
+  assert.match(cssBlock(".sidebar-actions button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*34px;[\s\S]*border-radius:\s*var\(--radius-sm\);/);
   assert.doesNotMatch(css, /\.sidebar-action-output\s*\{/);
 });
 
@@ -655,7 +702,7 @@ test("composer hides unsupported controls and keeps chat reference behavior trut
   assert.match(chatBranch, /reference_count:\s*0/);
   assert.match(chatBranch, /setNotice\(t\("status\.chatReplied"\)\)/);
 
-  assert.match(appSource, /useState<"size" \| "quality" \| "count" \| null>/);
+  assert.match(appSource, /useState<"settings" \| null>/);
   assert.doesNotMatch(appSource, /openComposerPopover\("edit"\)/);
   assert.doesNotMatch(appSource, /openComposerPopover\("strength"\)/);
   assert.doesNotMatch(appSource, /t\("composer\.editMode"\)/);
@@ -692,8 +739,8 @@ test("async reference reuse checks the latest mode and disables every reference 
   assert.match(appSource, /const referenceActionsDisabled = !referenceState\.canAdd;/);
   assert.match(appSource, /title=\{t\("history\.useReference"\)\} disabled=\{!src \|\| referenceActionsDisabled\}/);
   assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !turn\.referenceSnapshots\?\.some/);
-  assert.match(appSource, /aria-label=\{t\("image\.continueEdit"\)\}[\s\S]*disabled=\{referenceActionsDisabled\}/);
-  assert.match(appSource, /aria-label=\{t\("reference\.addAsReference"\)\}[\s\S]*disabled=\{referenceActionsDisabled\}/);
+  assert.match(appSource, /onClick=\{\(\) => void continueFromTurn\(turn, image, index\)\} disabled=\{referenceActionsDisabled\}/);
+  assert.match(appSource, /onClick=\{\(\) => void addOutputAsReference\(src, name\)\} disabled=\{referenceActionsDisabled\}/);
   assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !imageSrc\(historyDetail\.images\?\.\[0\]\)\}/);
   assert.match(appSource, /title=\{t\("preview\.useReference"\)\} disabled=\{referenceActionsDisabled\}/);
 });

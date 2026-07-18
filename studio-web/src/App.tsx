@@ -8,6 +8,7 @@ import {
   Clock3,
   Copy,
   Download,
+  Ellipsis,
   Eye,
   EyeOff,
   ExternalLink,
@@ -24,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Trash2,
@@ -478,6 +480,23 @@ function imageDimensionsLabel(image?: GeneratedImage | null) {
   const width = Number(image?.dimensions?.width || 0);
   const height = Number(image?.dimensions?.height || 0);
   return width > 0 && height > 0 ? `${width} x ${height}` : "";
+}
+
+function resultImageStyle(image?: GeneratedImage): CSSProperties {
+  const width = Number(image?.dimensions?.width || 0);
+  const height = Number(image?.dimensions?.height || 0);
+  if (width <= 0 || height <= 0) return {};
+  return { "--result-aspect": `${width} / ${height}` } as CSSProperties;
+}
+
+function resultImageOrientation(image?: GeneratedImage) {
+  const width = Number(image?.dimensions?.width || 0);
+  const height = Number(image?.dimensions?.height || 0);
+  if (width <= 0 || height <= 0) return "result-square";
+  const ratio = width / height;
+  if (ratio < 0.82) return "result-portrait";
+  if (ratio > 1.22) return "result-landscape";
+  return "result-square";
 }
 
 function requestedSizeLabel(entry: HistoryEntry) {
@@ -1111,7 +1130,7 @@ function App() {
   const [composerPromptHeight, setComposerPromptHeight] = useState(COMPOSER_PROMPT_DEFAULT_HEIGHT);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-  const [composerPopover, setComposerPopover] = useState<"size" | "quality" | "count" | null>(null);
+  const [composerPopover, setComposerPopover] = useState<"settings" | null>(null);
   const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [previewMaskLoading, setPreviewMaskLoading] = useState(false);
@@ -1199,7 +1218,6 @@ function App() {
   const hasCompleteConfig = activeConfigIssues.length === 0;
   const configButtonLabel = hasCompleteConfig ? `${t("config.label")} · ${activeProfileName}` : t("config.check");
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
-  const runningQueueCount = queueJobs.filter((job) => job.status === "running").length;
   const activeQueueCount = queueJobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts, t);
   const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
@@ -1456,7 +1474,7 @@ function App() {
   }, [connectionOpen]);
 
   useEffect(() => {
-    if (composerPopover === "size") return;
+    if (composerPopover === "settings") return;
     const parsed = parseCustomImageSize(gptForm.custom_size);
     const nextDraft = { width: String(parsed.width), height: String(parsed.height) };
     customSizeDraftRef.current = nextDraft;
@@ -3388,6 +3406,14 @@ function App() {
     return t("composer.count", { count: generationCountFor(activeEngine, gptForm, bananaForm) });
   }
 
+  function currentGenerationSettingsSummary() {
+    return [
+      currentSizeLabel(),
+      activeEngine === "gpt-image-2" ? currentQualityLabel() : "",
+      currentCountLabel(),
+    ].filter(Boolean).join(" · ");
+  }
+
   function setGenerationCount(engine: Engine, count: number) {
     const nextCount = Math.max(1, Math.round(Number(count) || 1));
     if (engine === "banana") {
@@ -3414,7 +3440,7 @@ function App() {
   }
 
   function imageExpandLabel(count: number) {
-    return count === 1 ? t("image.expandOne", { count }) : t("image.expand", { count });
+    return t("image.expand", { count });
   }
 
   function applyGptComposerSize(tier: GptComposerSizeTier, aspect: GptComposerAspect = "1:1") {
@@ -3433,6 +3459,7 @@ function App() {
   }
 
   function isTurnExpanded(turn: ConversationTurn) {
+    if (turn.images.length === 1) return true;
     return expandedTurns[turn.id] ?? false;
   }
 
@@ -3479,7 +3506,7 @@ function App() {
   }
 
   function closeComposerPopover() {
-    if (composerPopover === "size" && activeEngine === "gpt-image-2") {
+    if (composerPopover === "settings" && activeEngine === "gpt-image-2") {
       normalizeCustomSize(false);
     }
     setComposerPopover(null);
@@ -3614,7 +3641,7 @@ function App() {
               </button>
             </div>
             <div className="sidebar-actions">
-              {sidebarMode === "history" ? (
+              {sidebarMode === "history" && (
                 <>
                   <button type="button" onClick={() => void loadHistory()} title={t("app.refresh")}>
                     <RefreshCw size={15} /> {t("app.refresh")}
@@ -3623,82 +3650,80 @@ function App() {
                     <ExternalLink size={15} /> {t("history.browser")}
                   </button>
                 </>
-              ) : (
-                <button type="button" onClick={startFreshSession}>
-                  <MessageSquarePlus size={15} /> {t("app.newChat")}
-                </button>
               )}
               <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}>
                 <FolderOpen size={15} /> {t("app.outputFolder")}
               </button>
             </div>
-            <div className="history-count">
-              {sidebarMode === "sessions"
-                ? t("app.chats", { count: sessions.length })
-                : historyLoading ? t("app.loading") : t("app.historyCount", { count: history.length })}
-            </div>
-            {sidebarMode === "sessions" ? (
-              <div className="session-list">
-                {sortedSessions.map((session) => (
-                  <article className={session.id === activeSessionId ? "session-card active" : "session-card"} key={session.id}>
-                    <button type="button" className="session-open" onClick={() => requestSessionSwitch(session.id)}>
-                      <span>{localizeSessionTitle(session.title, t)}</span>
-                      <small>{formatTime(session.updatedAt, language)} · {t("app.turns", { count: session.turns.length })}</small>
-                    </button>
-                    <button type="button" title={t("session.delete")} aria-label={t("session.delete")} onClick={() => deleteSession(session.id)}>
-                      <Trash2 size={14} />
-                    </button>
-                  </article>
-                ))}
+            <div className="sidebar-list-section">
+              <div className="history-count">
+                {sidebarMode === "sessions"
+                  ? t("app.chats", { count: sessions.length })
+                  : historyLoading ? t("app.loading") : t("app.historyCount", { count: history.length })}
               </div>
-            ) : (
-              <div className="history-list">
-                {history.length === 0 ? (
-                  <div className="empty-history">{t("app.emptyHistory")}</div>
-                ) : (
-                  history.map((entry) => {
-                    const firstImage = entry.images?.[0];
-                    const src = imageSrc(firstImage);
-                    return (
-                      <article className="history-card" key={entry.id}>
-                        <button className="history-open" type="button" onClick={() => setHistoryDetail(entry)}>
-                          <span className="history-thumb" aria-hidden="true">
-                            {src ? <img src={src} alt="" loading="lazy" /> : <span>{t("app.noImage")}</span>}
-                          </span>
-                          <span className="history-main">
-                            <span className="history-row">
-                              <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
-                              <span>{formatTime(entry.created_at, language)}</span>
+              {sidebarMode === "sessions" ? (
+                <div className="session-list">
+                  {sortedSessions.map((session) => (
+                    <article className={session.id === activeSessionId ? "session-card active" : "session-card"} key={session.id}>
+                      <button type="button" className="session-open" onClick={() => requestSessionSwitch(session.id)}>
+                        <span>{localizeSessionTitle(session.title, t)}</span>
+                        <small>{formatTime(session.updatedAt, language)} · {t("app.turns", { count: session.turns.length })}</small>
+                      </button>
+                      <button type="button" title={t("session.delete")} aria-label={t("session.delete")} onClick={() => deleteSession(session.id)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="history-list">
+                  {history.length === 0 ? (
+                    <div className="empty-history">{t("app.emptyHistory")}</div>
+                  ) : (
+                    history.map((entry) => {
+                      const firstImage = entry.images?.[0];
+                      const src = imageSrc(firstImage);
+                      return (
+                        <article className="history-card" key={entry.id}>
+                          <button className="history-open" type="button" onClick={() => setHistoryDetail(entry)}>
+                            <span className="history-thumb" aria-hidden="true">
+                              {src ? <img src={src} alt="" loading="lazy" /> : <span>{t("app.noImage")}</span>}
                             </span>
-                            <span className="history-prompt">{entry.prompt || t("history.noPrompt")}</span>
-                          </span>
-                        </button>
-                        <div className="history-tools">
-                          <button type="button" onClick={() => openHistoryPreview(entry)} title={t("history.previewImage")} disabled={!src}>
-                            <ExternalLink size={14} />
+                            <span className="history-main">
+                              <span className="history-row">
+                                <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
+                                <span>{formatTime(entry.created_at, language)}</span>
+                              </span>
+                              <span className="history-prompt">{entry.prompt || t("history.noPrompt")}</span>
+                            </span>
                           </button>
-                          <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
-                            <RotateCcw size={14} />
-                          </button>
-                          <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}>
-                            {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
-                          </button>
-                          <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
-                            <ImagePlus size={14} />
-                          </button>
-                          <button className="history-tool-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}>
-                            <ListX size={14} />
-                          </button>
-                          <button className="history-tool-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            )}
+                          <div className="history-tools">
+                            <button type="button" onClick={() => openHistoryPreview(entry)} title={t("history.previewImage")} disabled={!src}>
+                              <ExternalLink size={14} />
+                            </button>
+                            <button type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
+                              <RotateCcw size={14} />
+                            </button>
+                            <button type="button" onClick={() => void toggleFavorite(entry)} title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}>
+                              {entry.favorite ? <Star size={14} fill="currentColor" /> : <Heart size={14} />}
+                            </button>
+                            <button type="button" onClick={() => src && void addOutputAsReference(src, imageName(firstImage))} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
+                              <ImagePlus size={14} />
+                            </button>
+                            <button className="history-tool-remove" type="button" onClick={() => void deleteHistory(entry, false)} title={t("history.removeRecord")} disabled={entry.legacy}>
+                              <ListX size={14} />
+                            </button>
+                            <button className="history-tool-danger" type="button" onClick={() => void deleteHistory(entry, true)} title={t("history.deleteFiles")} disabled={!src}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
           </>
         )}
       </aside>
@@ -3744,8 +3769,24 @@ function App() {
                 <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
                 <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
               </div>
-              <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.save")}</button>
-              <button type="button" onClick={clearCurrentSession} disabled={turns.length === 0 && references.length === 0}>{t("app.clear")}</button>
+              <details className="header-more-menu">
+                <summary aria-label={t("app.moreActions")} title={t("app.moreActions")}>
+                  <Ellipsis size={18} />
+                </summary>
+                <div className="header-more-panel">
+                  <button
+                    type="button"
+                    className="danger-action"
+                    onClick={(event) => {
+                      clearCurrentSession();
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                    disabled={turns.length === 0 && references.length === 0}
+                  >
+                    <Trash2 size={15} /> {t("app.clearCurrentConversation")}
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
         </header>
@@ -3832,32 +3873,33 @@ function App() {
                 </div>
               )}
               <button type="button" className={`queue-capsule ${activeQueueCount ? "active" : ""}`.trim()} onClick={() => setQueueOpen((value) => !value)} aria-expanded={queueOpen}>
-                <span className={runningQueueCount ? "queue-capsule-dot running" : "queue-capsule-dot done"} aria-hidden="true" />
-                <span className="queue-capsule-label">{t("queue.label")}</span>
-                <span className="queue-capsule-count">{queueJobs.length}</span>
+                <span className={activeQueueCount ? "queue-capsule-dot active" : "queue-capsule-dot done"} aria-hidden="true" />
+                <span className="queue-capsule-label">{activeQueueCount ? t("queue.label") : t("queue.recent")}</span>
+                <span className="queue-capsule-count">{activeQueueCount || queueJobs.length}</span>
               </button>
             </div>
           )}
-          {turns.length === 0 ? (
-            <div className="empty-state">
-              <Sparkles size={32} />
-              <h2>{t("app.readyToCreate")}</h2>
-              <p>{t("app.empty")}</p>
-              <div className="prompt-examples">
-                {inspirationPromptKeys.map((key) => {
-                  const title = t(`inspiration.${key}.title`);
-                  const prompt = t(`inspiration.${key}.prompt`);
-                  return (
-                  <button type="button" key={key} onClick={() => applyPrompt(prompt)}>
-                    <strong>{title}</strong>
-                    <span>{prompt.slice(0, 56)}...</span>
-                  </button>
-                );
-                })}
+          <div className="conversation-flow">
+            {turns.length === 0 ? (
+              <div className="empty-state">
+                <Sparkles size={32} />
+                <h2>{t("app.readyToCreate")}</h2>
+                <p>{t("app.empty")}</p>
+                <div className="prompt-examples">
+                  {inspirationPromptKeys.map((key) => {
+                    const title = t(`inspiration.${key}.title`);
+                    const prompt = t(`inspiration.${key}.prompt`);
+                    return (
+                    <button type="button" key={key} onClick={() => applyPrompt(prompt)}>
+                      <strong>{title}</strong>
+                      <span>{prompt.slice(0, 56)}...</span>
+                    </button>
+                  );
+                  })}
+                </div>
               </div>
-            </div>
-          ) : (
-            turns.map((turn, turnIndex) => (
+            ) : (
+              turns.map((turn, turnIndex) => (
               <article className="turn" id={`turn-${turn.id}`} key={turn.id}>
                 <div className="user-bubble">
                   <div className="bubble-meta">
@@ -3962,39 +4004,64 @@ function App() {
                           const name = imageName(image, index);
                           const dimensions = imageDimensionsLabel(image);
                           return (
-                            <figure className="image-card" key={`${turn.id}-${index}`}>
+                            <figure className={`image-card ${resultImageOrientation(image)}`} key={`${turn.id}-${index}`}>
                               <div className="image-preview-wrap">
-                                <button type="button" className="image-preview" onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })}>
+                                <button type="button" className="image-preview" style={resultImageStyle(image)} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions })}>
                                   <img src={src} alt={name} loading="lazy" />
                                 </button>
-                                <div className="image-actions">
-                                  <button type="button" aria-label={t("image.copyPrompt")} onClick={() => copyPrompt(turn.prompt)} {...tooltipProps(t("image.copyPrompt"))}><Copy size={14} /></button>
-                                  <button type="button" aria-label={t("image.applyPrompt")} onClick={() => applyPrompt(turn.prompt)} {...tooltipProps(t("image.applyPrompt"))}><RotateCcw size={14} /></button>
-                                  <button type="button" aria-label={t("image.continueEdit")} onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled} {...tooltipProps(t("image.continueEdit"))}><MessageSquarePlus size={14} /></button>
-                                  <button type="button" aria-label={t("reference.addAsReference")} onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled} {...tooltipProps(t("reference.addAsReference"))}><ImagePlus size={14} /></button>
-                                  <a href={src} download={name} aria-label={t("image.download")} {...tooltipProps(t("image.download"))}><Download size={14} /></a>
-                                  <a href={src} target="_blank" rel="noreferrer" aria-label={t("image.open")} {...tooltipProps(t("image.open"))}><ExternalLink size={14} /></a>
-                                </div>
                               </div>
                               <figcaption>
                                 <span>{name}</span>
                                 {dimensions && <small className="image-dimensions">{dimensions}</small>}
                               </figcaption>
+                              <div className="image-actions">
+                                <button type="button" onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled}>
+                                  <MessageSquarePlus size={14} /> <span>{t("image.continueEdit")}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="image-mask-action"
+                                  onClick={() => void editPreviewMask({ src, name, dimensions: image.dimensions })}
+                                  title={isSameOriginOutput(src) ? t("preview.editMask") : t("status.outputOnly")}
+                                  aria-busy={previewMaskLoading}
+                                  disabled={previewMaskLoading || !isSameOriginOutput(src)}
+                                >
+                                  {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
+                                  <span>{t("preview.editMask")}</span>
+                                </button>
+                                <a href={src} download={name}>
+                                  <Download size={14} /> <span>{t("image.download")}</span>
+                                </a>
+                                <details className="image-more-actions">
+                                  <summary aria-label={t("image.moreActions")} title={t("image.moreActions")}>
+                                    <Ellipsis size={15} /> <span>{t("image.more")}</span>
+                                  </summary>
+                                  <div className="image-more-menu">
+                                    <button type="button" onClick={() => copyPrompt(turn.prompt)}><Copy size={14} /> <span>{t("image.copyPrompt")}</span></button>
+                                    <button type="button" onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /> <span>{t("image.applyPrompt")}</span></button>
+                                    <button type="button" onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled}><ImagePlus size={14} /> <span>{t("reference.addAsReference")}</span></button>
+                                    <a href={src} target="_blank" rel="noreferrer"><ExternalLink size={14} /> <span>{t("image.open")}</span></a>
+                                  </div>
+                                </details>
+                              </div>
                             </figure>
                           );
                         })}
                         </div>
-                        <button type="button" className="image-toggle" onClick={() => toggleTurnExpanded(turn.id)}>
-                          {isTurnExpanded(turn) ? t("image.collapse") : imageExpandLabel(turn.images.length)}
-                        </button>
+                        {turn.images.length > 1 && (
+                          <button type="button" className="image-toggle" onClick={() => toggleTurnExpanded(turn.id)}>
+                            {isTurnExpanded(turn) ? t("image.collapse") : imageExpandLabel(turn.images.length)}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
                 </div>
               </article>
-            ))
-          )}
-          <div ref={conversationEndRef} className="conversation-end-anchor" aria-hidden="true" />
+              ))
+            )}
+            <div ref={conversationEndRef} className="conversation-end-anchor" aria-hidden="true" />
+          </div>
         </section>
 
         <form
@@ -4002,7 +4069,8 @@ function App() {
           style={composerPromptStyle}
           onSubmit={(event) => void submit(event)}
         >
-          <div className="composer-top">
+          <div className="composer-inner">
+            <div className="composer-top">
             {references.length > 0 && (
               <div className="reference-strip">
                 {references.map((file, index) => {
@@ -4095,128 +4163,131 @@ function App() {
               <ImagePlus size={16} /> {references.length > 0 ? t("reference.count", { count: references.length }) : t("reference.button")}
             </button>
             <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={onReferenceChange} />
-            <div className="composer-popover-wrap">
+            <div className="composer-popover-wrap generation-settings-wrap">
               <button
                 type="button"
-                className={composerPopover === "size" ? "active" : ""}
-                onClick={() => openComposerPopover("size")}
-                aria-expanded={composerPopover === "size"}
-                {...tooltipProps(t("composer.sizeTooltip", { max: GPT_CUSTOM_SIZE_MAX, ratio: GPT_CUSTOM_SIZE_MAX_RATIO }))}
+                className="generation-settings-trigger"
+                onClick={() => openComposerPopover("settings")}
+                aria-expanded={composerPopover === "settings"}
+                {...tooltipProps(t("composer.generationSettingsTooltip"))}
               >
-                {t("composer.size")} {currentSizeLabel()}
+                <SlidersHorizontal size={15} />
+                <span className="generation-settings-label">{t("composer.generationSettings")}</span>
+                <span className="generation-settings-summary">{currentGenerationSettingsSummary()}</span>
+                {generationCountFor(activeEngine, gptForm, bananaForm) > 1 && (
+                  <span className="generation-count-alert" title={t("composer.countTooltip")}>
+                    {generationCountFor(activeEngine, gptForm, bananaForm)}
+                  </span>
+                )}
               </button>
-              {composerPopover === "size" && (
-                <div className="composer-popover" role="dialog" aria-label={t("composer.sizeDialog")}>
-                  {activeEngine === "banana" ? (
-                    <>
-                      <Field label={t("composer.aspect")}>
-                        <select value={bananaForm.aspect_ratio} onChange={(event) => setBananaForm({ ...bananaForm, aspect_ratio: event.target.value })}>
-                          {bananaAspectOptions.map((item) => <option key={item}>{item}</option>)}
-                        </select>
-                      </Field>
-                      <div className="choice-grid">
-                        {bananaAspectOptions.slice(0, 8).map((item) => (
-                          <button type="button" key={item} className={bananaForm.aspect_ratio === item ? "selected" : ""} onClick={() => setBananaForm({ ...bananaForm, aspect_ratio: item })}>
-                            {item}
+              {composerPopover === "settings" && (
+                <div className="composer-popover generation-settings-popover" role="dialog" aria-label={t("composer.generationSettingsDialog")}>
+                  <section className="generation-settings-section size-settings-section">
+                    <div className="generation-settings-heading">
+                      <strong>{t("composer.size")}</strong>
+                      <span>{currentSizeLabel()}</span>
+                    </div>
+                    {activeEngine === "banana" ? (
+                      <>
+                        <Field label={t("composer.aspect")}>
+                          <select value={bananaForm.aspect_ratio} onChange={(event) => setBananaForm({ ...bananaForm, aspect_ratio: event.target.value })}>
+                            {bananaAspectOptions.map((item) => <option key={item}>{item}</option>)}
+                          </select>
+                        </Field>
+                        <div className="choice-grid">
+                          {bananaAspectOptions.slice(0, 8).map((item) => (
+                            <button type="button" key={item} className={bananaForm.aspect_ratio === item ? "selected" : ""} onClick={() => setBananaForm({ ...bananaForm, aspect_ratio: item })}>
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                        <Field label={t("composer.resolution")}>
+                          <select value={bananaForm.image_size} onChange={(event) => setBananaForm({ ...bananaForm, image_size: event.target.value })}>
+                            {bananaImageSizeOptions.map((item) => <option key={item} value={item}>{bananaImageSizeLabel(item)}</option>)}
+                          </select>
+                        </Field>
+                      </>
+                    ) : (
+                      <>
+                        <div className="size-preset-section">
+                          <div className="preset-row size-tier-row" role="group" aria-label={t("composer.clarity")}>
+                            {gptComposerSizeTiers.map((tier) => (
+                              <button
+                                type="button"
+                                key={tier}
+                                className={gptSizeSelection.tier === tier ? "selected" : ""}
+                                onClick={() => applyGptComposerSize(tier)}
+                              >
+                                {tier === "auto" ? t("option.auto") : tier}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="preset-row aspect-row" role="group" aria-label={t("composer.aspect")}>
+                            {gptComposerAspectOptions.map((aspect) => (
+                              <button
+                                type="button"
+                                key={aspect}
+                                className={gptSizeSelection.aspect === aspect ? "selected" : ""}
+                                onClick={() => applyGptComposerSize(gptSizeSelection.tier === "auto" || !gptSizeSelection.tier ? "1K" : gptSizeSelection.tier, aspect)}
+                              >
+                                {aspect}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="preset-summary">
+                            {gptSizeSelection.summary}
+                          </div>
+                        </div>
+                        <div className="custom-size-row">
+                          <label>
+                            <span>{t("composer.width")}</span>
+                            <input
+                              inputMode="numeric"
+                              min={GPT_CUSTOM_SIZE_MIN}
+                              max={GPT_CUSTOM_SIZE_MAX}
+                              value={customSizeDraft.width}
+                              onChange={(event) => setCustomSizeDimension("width", event.target.value)}
+                              onBlur={handleCustomSizeBlur}
+                            />
+                          </label>
+                          <span className="size-separator">x</span>
+                          <label>
+                            <span>{t("composer.height")}</span>
+                            <input
+                              inputMode="numeric"
+                              min={GPT_CUSTOM_SIZE_MIN}
+                              max={GPT_CUSTOM_SIZE_MAX}
+                              value={customSizeDraft.height}
+                              onChange={(event) => setCustomSizeDimension("height", event.target.value)}
+                              onBlur={handleCustomSizeBlur}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className={`${gptSizeSelection.mode === "custom" ? "selected " : ""}primary-action`}
+                            onClick={() => normalizeCustomSize()}
+                          >
+                            {t("composer.applyCustomSize")}
                           </button>
-                        ))}
-                      </div>
-                      <Field label={t("composer.resolution")}>
-                        <select value={bananaForm.image_size} onChange={(event) => setBananaForm({ ...bananaForm, image_size: event.target.value })}>
-                          {bananaImageSizeOptions.map((item) => <option key={item} value={item}>{bananaImageSizeLabel(item)}</option>)}
-                        </select>
-                      </Field>
-                    </>
-                  ) : (
-                    <>
-                      <div className="size-preset-section">
-                        <div className="preset-row size-tier-row" role="group" aria-label={t("composer.clarity")}>
-                          {gptComposerSizeTiers.map((tier) => (
-                            <button
-                              type="button"
-                              key={tier}
-                              className={gptSizeSelection.tier === tier ? "selected" : ""}
-                              onClick={() => applyGptComposerSize(tier)}
-                            >
-                              {tier === "auto" ? t("option.auto") : tier}
-                            </button>
-                          ))}
                         </div>
-                        <div className="preset-row aspect-row" role="group" aria-label={t("composer.aspect")}>
-                          {gptComposerAspectOptions.map((aspect) => (
-                            <button
-                              type="button"
-                              key={aspect}
-                              className={gptSizeSelection.aspect === aspect ? "selected" : ""}
-                              onClick={() => applyGptComposerSize(gptSizeSelection.tier === "auto" || !gptSizeSelection.tier ? "1K" : gptSizeSelection.tier, aspect)}
-                            >
-                              {aspect}
-                            </button>
-                          ))}
+                        <div className={sizeAdjustmentNotice ? "size-adjustment-note active" : "size-adjustment-note"} role="status">
+                          {sizeAdjustmentNotice || t("composer.customSizeHelp", {
+                            min: GPT_CUSTOM_SIZE_MIN,
+                            max: GPT_CUSTOM_SIZE_MAX,
+                            ratio: GPT_CUSTOM_SIZE_MAX_RATIO,
+                            minPixels: GPT_CUSTOM_SIZE_MIN_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
+                            maxPixels: GPT_CUSTOM_SIZE_MAX_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
+                          })}
                         </div>
-                        <div className="preset-summary">
-                          {gptSizeSelection.summary}
-                        </div>
+                      </>
+                    )}
+                  </section>
+                  {activeEngine !== "banana" && (
+                    <section className="generation-settings-section quality-settings-section">
+                      <div className="generation-settings-heading">
+                        <strong>{t("composer.quality")}</strong>
+                        <span>{currentQualityLabel()}</span>
                       </div>
-                      <div className="custom-size-row">
-                        <label>
-                          <span>{t("composer.width")}</span>
-                          <input
-                            inputMode="numeric"
-                            min={GPT_CUSTOM_SIZE_MIN}
-                            max={GPT_CUSTOM_SIZE_MAX}
-                            value={customSizeDraft.width}
-                            onChange={(event) => setCustomSizeDimension("width", event.target.value)}
-                            onBlur={handleCustomSizeBlur}
-                          />
-                        </label>
-                        <span className="size-separator">x</span>
-                        <label>
-                          <span>{t("composer.height")}</span>
-                          <input
-                            inputMode="numeric"
-                            min={GPT_CUSTOM_SIZE_MIN}
-                            max={GPT_CUSTOM_SIZE_MAX}
-                            value={customSizeDraft.height}
-                            onChange={(event) => setCustomSizeDimension("height", event.target.value)}
-                            onBlur={handleCustomSizeBlur}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className={`${gptSizeSelection.mode === "custom" ? "selected " : ""}primary-action`}
-                          onClick={() => normalizeCustomSize()}
-                        >
-                          {t("composer.applyCustomSize")}
-                        </button>
-                      </div>
-                      <div className={sizeAdjustmentNotice ? "size-adjustment-note active" : "size-adjustment-note"} role="status">
-                        {sizeAdjustmentNotice || t("composer.customSizeHelp", {
-                          min: GPT_CUSTOM_SIZE_MIN,
-                          max: GPT_CUSTOM_SIZE_MAX,
-                          ratio: GPT_CUSTOM_SIZE_MAX_RATIO,
-                          minPixels: GPT_CUSTOM_SIZE_MIN_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
-                          maxPixels: GPT_CUSTOM_SIZE_MAX_PIXELS.toLocaleString(language === "en" ? "en-US" : "zh-CN"),
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            {activeEngine !== "banana" && (
-              <div className="composer-popover-wrap">
-                <button
-                  type="button"
-                  className={composerPopover === "quality" ? "active" : ""}
-                  onClick={() => openComposerPopover("quality")}
-                  aria-expanded={composerPopover === "quality"}
-                  {...tooltipProps(t("composer.qualityTooltip"))}
-                >
-                  {t("composer.quality")} {currentQualityLabel()}
-                </button>
-                {composerPopover === "quality" && (
-                  <div className="composer-popover compact" role="dialog" aria-label={t("composer.qualityDialog")}>
                     <div className="choice-grid quality">
                       {gptQualityOptions.map((item) => (
                         <button
@@ -4229,29 +4300,18 @@ function App() {
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="composer-popover-wrap">
-              <button
-                type="button"
-                className={`count-trigger ${generationCountFor(activeEngine, gptForm, bananaForm) > 1 ? "count-trigger-alert" : ""} ${composerPopover === "count" ? "active" : ""}`.trim()}
-                onClick={() => openComposerPopover("count")}
-                aria-expanded={composerPopover === "count"}
-                {...tooltipProps(t("composer.countTooltip"))}
-              >
-                {currentCountLabel()}
-              </button>
-              {composerPopover === "count" && (
-                <div className="composer-popover compact" role="dialog" aria-label={t("composer.countDialog")}>
-                  <Field label={t("composer.countField")}>
-                    {activeEngine === "banana" ? (
-                      <input type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setGenerationCount("banana", Number(event.target.value))} />
-                    ) : (
-                      <input type="number" min={1} max={10} value={gptForm.n} onChange={(event) => setGenerationCount("gpt-image-2", Number(event.target.value))} />
-                    )}
-                  </Field>
+                    </section>
+                  )}
+                  <section className="generation-settings-section count-settings-section">
+                    <div className="generation-settings-heading">
+                      <strong>{t("composer.countField")}</strong>
+                      <span>{currentCountLabel()}</span>
+                    </div>
+                  {activeEngine === "banana" ? (
+                    <input className="generation-count-input" aria-label={t("composer.countField")} type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setGenerationCount("banana", Number(event.target.value))} />
+                  ) : (
+                    <input className="generation-count-input" aria-label={t("composer.countField")} type="number" min={1} max={10} value={gptForm.n} onChange={(event) => setGenerationCount("gpt-image-2", Number(event.target.value))} />
+                  )}
                   <div className="choice-grid counts">
                     {(activeEngine === "banana" ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4, 6, 8, 10]).map((item) => {
                       const selected = activeEngine === "banana" ? bananaForm.batch_size === item : gptForm.n === item;
@@ -4267,6 +4327,12 @@ function App() {
                       );
                     })}
                   </div>
+                    {generationCountFor(activeEngine, gptForm, bananaForm) > 1 && (
+                      <div className="generation-count-note" role="status">
+                        <AlertCircle size={14} /> {t("composer.multiImageNotice")}
+                      </div>
+                    )}
+                  </section>
                 </div>
               )}
             </div>
@@ -4296,7 +4362,7 @@ function App() {
           >
             <FoldVertical size={15} />
           </button>
-          <div className="composer-input">
+            <div className="composer-input">
             <div className="composer-textarea-wrap" ref={promptWrapRef}>
               <textarea
                 ref={promptRef}
@@ -4344,6 +4410,7 @@ function App() {
             >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
             </button>
+            </div>
           </div>
         </form>
       </section>
