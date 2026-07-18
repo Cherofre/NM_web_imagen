@@ -2,15 +2,16 @@
 
 ## Now
 - [x] Create `codex/studio-ui-polish-v1.0.7`, record the Chinese design/plan, and pass the 124/124 Node plus production-build baseline.
-- [ ] Add RED tests for result integrity, action hierarchy, sidebar structure, header cleanup and consolidated generation settings.
-- [ ] Implement result-first layout and common conversation/composer alignment.
-- [ ] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
-- [ ] Run the full Node/build/size/release matrix and refresh `http://127.0.0.1:14260/` for manual acceptance; do not package, sync G:, push, merge, or publish first.
+- [x] Add RED tests for result integrity, action hierarchy, sidebar structure, header cleanup and consolidated generation settings.
+- [x] Implement result-first layout and common conversation/composer alignment.
+- [x] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
+- [x] Run the full Node/build/size/release and HTTP-static matrix without a paid upstream request.
+- [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: `docs/superpowers/plans/2026-07-18-studio-ui-polish-v1.0.7.md` Task 1, then `studio-web/src/uiPolish.test.mjs` and `maskEditorUi.test.mjs`.
-- Do not redo: the mask backend/editor implementation or its 238/238 Python matrix unless this UI-only branch changes backend code.
-- Verify next: observe RED for the five UI critique contracts, then implement the result/layout slice before control consolidation.
+- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `4d22573`, especially a portrait single result, expanded multi-results, image more-actions, direct mask editing, header more-menu and generation settings.
+- Do not redo: the five UI implementation slices, 128/128 Node suite, size/build, 33/33 release gate or HTTP static smoke unless product code changes.
+- Verify next: confirm real hover/press/focus feedback, menu placement, no result cropping, sidebar list placement, and usable layout at desktop plus a narrow window. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
