@@ -1,16 +1,16 @@
 # Next Actions
 
 ## Now
-- [x] Create `codex/mask-editor-v1.0.7`, stop the old v1.0.6 temporary service, record the Chinese design/plan, and pass the focused baseline.
-- [x] Add backend RED tests for mask PNG/Alpha/dimensions/endpoint/multipart behavior, then implement GREEN; combined regression passed 131/131.
-- [x] Add frontend RED tests for mask state, queue snapshot and submission protocol, then implement the Canvas editor at `b72a6f8`.
-- [x] Run the full Python/Node/build/size/compile matrix and a no-paid-API mock edits smoke.
-- [ ] User refreshes and manually re-accepts `http://127.0.0.1:14260/` after `c16881c`; check preview `编辑遮罩`, the brush/eraser footprint ring, compact guidance and shortcut hint, then recheck the remaining preview controls. Do not package, sync G:, push, merge, or publish first.
+- [x] Create `codex/studio-ui-polish-v1.0.7`, record the Chinese design/plan, and pass the 124/124 Node plus production-build baseline.
+- [ ] Add RED tests for result integrity, action hierarchy, sidebar structure, header cleanup and consolidated generation settings.
+- [ ] Implement result-first layout and common conversation/composer alignment.
+- [ ] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
+- [ ] Run the full Node/build/size/release matrix and refresh `http://127.0.0.1:14260/` for manual acceptance; do not package, sync G:, push, merge, or publish first.
 
 ## Handoff Notes
-- Start here: refresh the already-open `http://127.0.0.1:14260/` page so it loads `index-veN3aNhZ.js` / `index-LnFPJluk.css`, then open a generated-image preview and click `编辑遮罩`.
-- Do not redo: backend/frontend RED-GREEN work, Python 238/238, Node 124/124, release gates 33/33, size/build/compile, local edits multipart smoke, or HTTP static smoke unless code changes.
-- Verify next: confirm the preview closes, GPT 生图 becomes active, the displayed image is reference position one, existing references follow it, and the mask editor opens immediately. If the previewed file was already the first masked reference, its mask should reopen instead of being discarded. Then recheck the brush footprint, compact guidance and preview zoom/drag controls.
+- Start here: `docs/superpowers/plans/2026-07-18-studio-ui-polish-v1.0.7.md` Task 1, then `studio-web/src/uiPolish.test.mjs` and `maskEditorUi.test.mjs`.
+- Do not redo: the mask backend/editor implementation or its 238/238 Python matrix unless this UI-only branch changes backend code.
+- Verify next: observe RED for the five UI critique contracts, then implement the result/layout slice before control consolidation.
 - Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
