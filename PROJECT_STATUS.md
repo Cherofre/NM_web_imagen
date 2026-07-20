@@ -1,15 +1,15 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-18 +08:00
-- Phase: v1.0.7 Studio UI follow-up manual acceptance
+- Last Updated: 2026-07-20 +08:00
+- Phase: v1.0.7 integration approved, history window refactor planning
 - Superpowers Phase: screenshot critique -> approved full scope -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
 - Superpowers Spec: `docs/superpowers/specs/2026-07-18-studio-ui-polish-v1.0.7-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-18-studio-ui-polish-v1.0.7.md`
-- Branch: `codex/studio-ui-polish-v1.0.7`
+- Branch: `codex/studio-ui-polish-v1.0.7` (ready to fast-forward `main`)
 - Goal: Preserve the current Studio architecture and tone while making results dominant, reducing simultaneous controls, clarifying actions, restoring semantic shape hierarchy, and aligning sidebar/conversation/composer layouts.
-- Current Focus: ask the user to refresh `http://127.0.0.1:14260/` and manually accept the final result/history hierarchy plus the corrected 180ms image-drag guard. Separately confirm whether to build the proposed composer-adjacent image tray for current-session, recent-history and favorite images. Do not package, write G:, call paid upstream APIs, push, merge or publish before acceptance.
-- Latest Verification: product commit `16b960c` replaces the over-broad image-drag block with a deliberate-hold guard. Seventeen Node modules pass 133/133; `npm run test:size`, TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, `app.py` compile and `git diff --check` pass. Current assets are `index-DVmZ99xD.js` and `index-BmiGLwyN.css`; port `14260` returns 200 for Studio, both current assets, `/classic` and `/api/health`. Automatic real-browser interaction remains blocked by enterprise loopback policy, so rendered/clicked drag behavior is intentionally not claimed. Temporary manual service PID `56600` remains available. No package or G: sync is authorized. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: the user explicitly authorized integrating this verified UI branch into `main`, then trying the history-window refactor on a fresh branch. Manual browser acceptance remains pending and must not be claimed; no package, G: sync, paid upstream request, push or release is authorized.
+- Latest Verification: product commit `16b960c` replaces the over-broad image-drag block with a deliberate-hold guard. Fresh verification on 2026-07-20 passed all 133 Node tests, `npm run test:size`, TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, four-module `py_compile`, and `git diff --check`. Current assets are `index-DVmZ99xD.js` and `index-BmiGLwyN.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy, so rendered/clicked drag behavior is intentionally not claimed. Temporary manual service PID `56600` remains available. No package or G: sync is authorized. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
 
 ## v1.0.7 Screenshot Feedback Follow-up
 - Results: single images stay compact at their truthful aspect ratio and open the existing lightbox on click; mask and download live on the image, while `继续编辑` and `更多` form one stable footer row. Internal filenames are hidden. A shared output size appears once beside model/time; mixed multi-image sizes remain per-image.

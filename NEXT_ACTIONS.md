@@ -7,13 +7,16 @@
 - [x] Apply screenshot follow-ups for compact results, image-corner actions, stable menus, neutral favorites, history cards, metadata placement and accidental image-drag protection.
 - [x] Replace the over-broad internal-image drag ban with a 180ms deliberate-hold guard while preserving native drag-to-reference behavior.
 - [x] Run the full Node/build/size/release and HTTP-static matrix without a paid upstream request.
-- [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI; do not package, sync G:, push, merge, or publish first.
+- [x] Run the fresh automated verification matrix before integration; all 133 Node tests, build/size checks, 33 release-cache tests, Python compile checks and diff check passed.
+- [ ] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
+- [ ] Refactor history into one shared surface with compact recent-batch preview, full browser and in-window detail; preserve existing APIs and schemas.
+- [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI before packaging or syncing G:.
 
 ## Handoff Notes
-- Start here: refresh `http://127.0.0.1:14260/` and manually inspect product commit `16b960c`, especially quick image movement versus press-then-drag, a portrait single result, neutral empty/filled favorites, history grid/list cards, menus, direct mask editing and narrow layout.
+- Start here: fast-forward `main` to product commit `16b960c`, then branch `codex/history-window-refactor-v1.0.8`; begin with the history surface state and existing `HistoryEntry` selectors.
 - Do not redo: the screenshot-driven UI implementation, drag-intent tests, 133/133 Node suite, size/build, 33/33 release gate, compile/diff check or HTTP static smoke unless product code changes.
 - Verify next: confirm quick image movement stays a click, holding about 180ms then dragging still adds a reference, the result image has no filename or thin edge, shared dimensions sit in the completion row, menus dismiss reliably, and history actions do not overlap. Automatic browser automation cannot perform this loopback gate.
-- Do not claim: branch merge, push, tag, pull request, GitHub Release, or deletion/cleanup of the worktree/branch has occurred.
+- Do not claim: browser manual acceptance, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion. The user has authorized the local merge only.
 - Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
 - Current Studio assets: `index-DVmZ99xD.js` and `index-BmiGLwyN.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
