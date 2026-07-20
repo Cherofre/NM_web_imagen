@@ -328,6 +328,7 @@ const gptStorageKey = "image-generate-web-tool:studio-gpt-form";
 const bananaStorageKey = "image-generate-web-tool:studio-banana-form";
 const engineStorageKey = "image-generate-web-tool:studio-active-engine";
 const queueStorageKey = "image-generate-web-tool:studio-queue";
+const composerPromptHeightStorageKey = "image-generate-web-tool:studio-composer-prompt-height";
 const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
@@ -629,10 +630,52 @@ function queueJobTitle(job: QueueJob, fallback: string) {
   return compactInlineText(job.prompt, 24) || fallback;
 }
 
-function clampComposerPromptHeight(value: number) {
-  const viewportMax = typeof window === "undefined" ? COMPOSER_PROMPT_MAX_HEIGHT : Math.floor(window.innerHeight * 0.44);
-  const max = Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.min(COMPOSER_PROMPT_MAX_HEIGHT, viewportMax));
-  return Math.min(max, Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.round(value)));
+function normalizeComposerPromptHeight(value: number) {
+  return Math.min(COMPOSER_PROMPT_MAX_HEIGHT, Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.round(value)));
+}
+
+function composerPromptMaxHeight(viewportHeight?: number) {
+  const resolvedViewportHeight = typeof viewportHeight === "number" && Number.isFinite(viewportHeight) && viewportHeight > 0
+    ? viewportHeight
+    : typeof window === "undefined"
+    ? 0
+    : window.innerHeight;
+  const viewportMax = resolvedViewportHeight > 0 ? Math.floor(resolvedViewportHeight * 0.44) : COMPOSER_PROMPT_MAX_HEIGHT;
+  return Math.max(COMPOSER_PROMPT_MIN_HEIGHT, Math.min(COMPOSER_PROMPT_MAX_HEIGHT, viewportMax));
+}
+
+function clampComposerPromptHeight(value: number, viewportHeight?: number) {
+  return Math.min(composerPromptMaxHeight(viewportHeight), normalizeComposerPromptHeight(value));
+}
+
+function readStoredComposerPromptHeight() {
+  if (typeof localStorage === "undefined") return COMPOSER_PROMPT_DEFAULT_HEIGHT;
+  try {
+    const raw = localStorage.getItem(composerPromptHeightStorageKey);
+    if (!raw) return COMPOSER_PROMPT_DEFAULT_HEIGHT;
+    const value = Number(raw);
+    return Number.isFinite(value) ? normalizeComposerPromptHeight(value) : COMPOSER_PROMPT_DEFAULT_HEIGHT;
+  } catch {
+    return COMPOSER_PROMPT_DEFAULT_HEIGHT;
+  }
+}
+
+function saveStoredComposerPromptHeight(value: number) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(composerPromptHeightStorageKey, String(Math.round(value)));
+  } catch {
+    // Layout preferences should never block the composer when browser storage is unavailable.
+  }
+}
+
+function clearStoredComposerPromptHeight() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(composerPromptHeightStorageKey);
+  } catch {
+    // Reset still applies in memory when browser storage is unavailable.
+  }
 }
 
 function clampQueuePopoverSize(width: number, height: number) {
@@ -1127,6 +1170,7 @@ function isPreviewControlTarget(target: EventTarget | null) {
 function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
+  const initialComposerPromptHeight = useRef(readStoredComposerPromptHeight());
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
@@ -1164,7 +1208,8 @@ function App() {
   const [promptEditorDraft, setPromptEditorDraft] = useState("");
   const [sessionPromptOpen, setSessionPromptOpen] = useState(false);
   const [sessionPromptDraft, setSessionPromptDraft] = useState<SessionPromptEditorDraft>(() => createSessionPromptEditorDraft(initialSessionState.current.sessions[0]?.drafts || emptySessionDrafts()));
-  const [composerPromptHeight, setComposerPromptHeight] = useState(COMPOSER_PROMPT_DEFAULT_HEIGHT);
+  const [composerPromptHeightPreference, setComposerPromptHeightPreference] = useState(() => initialComposerPromptHeight.current);
+  const [composerViewportHeight, setComposerViewportHeight] = useState(() => typeof window === "undefined" ? 0 : window.innerHeight);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [composerPopover, setComposerPopover] = useState<"size" | "settings" | null>(null);
@@ -1200,6 +1245,7 @@ function App() {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const promptWrapRef = useRef<HTMLDivElement | null>(null);
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
+  const composerPromptHeightPreferenceRef = useRef(initialComposerPromptHeight.current);
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
   const previewMaskRequestRef = useRef(0);
@@ -1237,6 +1283,7 @@ function App() {
   submitModeRef.current = submitMode;
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
+  composerPromptHeightPreferenceRef.current = composerPromptHeightPreference;
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || createEmptySession(t("session.new"));
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
@@ -1272,6 +1319,9 @@ function App() {
   const hasRunningTurn = turns.some((turn) => turn.status === "running");
   const activeQueueCount = queueJobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts, t);
+  const composerPromptHeight = clampComposerPromptHeight(composerPromptHeightPreference, composerViewportHeight);
+  const composerPromptHeightMax = composerPromptMaxHeight(composerViewportHeight);
+  const hasCustomComposerPromptHeight = Math.round(composerPromptHeightPreference) !== COMPOSER_PROMPT_DEFAULT_HEIGHT;
   const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
   const queuePopoverStyle: CSSProperties = {
     "--queue-popover-width": `${queuePopoverSize.width}px`,
@@ -1473,6 +1523,13 @@ function App() {
     document.documentElement.lang = language;
     document.title = t("app.title");
   }, [language]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateComposerViewportHeight = () => setComposerViewportHeight(window.innerHeight);
+    window.addEventListener("resize", updateComposerViewportHeight);
+    return () => window.removeEventListener("resize", updateComposerViewportHeight);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -2314,7 +2371,9 @@ function App() {
 
   function resetPromptHeight() {
     composerResizeRef.current = null;
-    setComposerPromptHeight(COMPOSER_PROMPT_DEFAULT_HEIGHT);
+    composerPromptHeightPreferenceRef.current = COMPOSER_PROMPT_DEFAULT_HEIGHT;
+    setComposerPromptHeightPreference(COMPOSER_PROMPT_DEFAULT_HEIGHT);
+    clearStoredComposerPromptHeight();
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
@@ -2333,7 +2392,9 @@ function App() {
     const drag = composerResizeRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    setComposerPromptHeight(clampComposerPromptHeight(drag.startHeight + drag.startY - event.clientY));
+    const nextHeight = clampComposerPromptHeight(drag.startHeight + drag.startY - event.clientY, composerViewportHeight);
+    composerPromptHeightPreferenceRef.current = nextHeight;
+    setComposerPromptHeightPreference(nextHeight);
   }
 
   function endComposerResize(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -2343,6 +2404,20 @@ function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    saveStoredComposerPromptHeight(composerPromptHeightPreferenceRef.current);
+  }
+
+  function resizeComposerFromKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 32 : 16;
+    const nextHeight = clampComposerPromptHeight(
+      composerPromptHeight + (event.key === "ArrowUp" ? step : -step),
+      composerViewportHeight,
+    );
+    composerPromptHeightPreferenceRef.current = nextHeight;
+    setComposerPromptHeightPreference(nextHeight);
+    saveStoredComposerPromptHeight(nextHeight);
   }
 
   function startQueuePopoverResize(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -4648,24 +4723,32 @@ function App() {
             <button
               type="button"
               className="composer-resize-handle"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-valuemin={COMPOSER_PROMPT_MIN_HEIGHT}
+              aria-valuemax={composerPromptHeightMax}
+              aria-valuenow={composerPromptHeight}
               onPointerDown={startComposerResize}
               onPointerMove={dragComposerResize}
               onPointerUp={endComposerResize}
               onPointerCancel={endComposerResize}
+              onKeyDown={resizeComposerFromKeyboard}
               title={t("composer.resize")}
               aria-label={t("composer.resize")}
             >
               <span />
             </button>
-            <button
-              type="button"
-              className="composer-reset-button"
-              onClick={resetPromptHeight}
-              title={t("composer.resetHeight")}
-              aria-label={t("composer.resetHeight")}
-            >
-              <FoldVertical size={15} />
-            </button>
+            {hasCustomComposerPromptHeight && (
+              <button
+                type="button"
+                className="composer-reset-button"
+                onClick={resetPromptHeight}
+                title={t("composer.resetHeight")}
+                aria-label={t("composer.resetHeight")}
+              >
+                <FoldVertical size={14} />
+              </button>
+            )}
             <div className="composer-textarea-wrap" ref={promptWrapRef}>
               <textarea
                 ref={promptRef}

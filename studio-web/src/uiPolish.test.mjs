@@ -41,7 +41,10 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.match(appSource, /<div className="composer-inner">\s*<div className="composer-top">\s*\{references\.length > 0 && \(/);
   assert.match(appSource, /<div className="composer-input">\s*<button\s+type="button"\s+className="composer-resize-handle"/);
   assert.match(cssBlock(".composer-input"), /align-items:\s*stretch;[\s\S]*min-height:\s*0;/);
-  assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-9px;[\s\S]*left:\s*0;[\s\S]*right:\s*62px;[\s\S]*cursor:\s*ns-resize;/);
+  assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-9px;[\s\S]*left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*18px;[\s\S]*cursor:\s*ns-resize;/);
+  assert.match(cssBlock(".composer-resize-handle::before"), /left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*1px;[\s\S]*background:\s*transparent;/);
+  assert.match(cssBlock(".composer-resize-handle span"), /width:\s*52px;[\s\S]*height:\s*4px;/);
+  assert.match(css, /\.composer-resize-handle:hover::before,[\s\S]*\.composer-resize-handle:focus-visible::before,[\s\S]*\.composer-resize-handle:active::before\s*\{[^}]*background:\s*rgba\(28, 25, 23, 0\.12\);/);
   assert.match(cssBlock(".composer-textarea-wrap"), /height:\s*100%;[\s\S]*min-height:\s*118px;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /max-height:/);
   assert.match(cssBlock(".composer-prompt-actions"), /position:\s*absolute;[\s\S]*bottom:\s*12px;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
@@ -50,7 +53,8 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /resize:\s*vertical;/);
   assert.match(cssBlock(".composer-input textarea"), /width:\s*100%;/);
   assert.match(cssBlock(".composer-input textarea"), /height:\s*100%;/);
-  assert.match(cssBlock(".composer-reset-button"), /position:\s*absolute;[\s\S]*top:\s*12px;[\s\S]*right:\s*80px;[\s\S]*width:\s*30px;[\s\S]*height:\s*30px;/);
+  assert.match(appSource, /\{hasCustomComposerPromptHeight && \(\s*<button[\s\S]*className="composer-reset-button"/);
+  assert.match(cssBlock(".composer-reset-button"), /position:\s*absolute;[\s\S]*top:\s*-12px;[\s\S]*left:\s*calc\(50% \+ 38px\);[\s\S]*width:\s*24px;[\s\S]*height:\s*24px;/);
   assert.match(cssBlock(".submit-button"), /grid-row:\s*1;[\s\S]*align-self:\s*end;/);
   assert.match(cssBlock(".drawer-actions"), /justify-content:\s*flex-end;/);
   assert.match(cssBlock(".session-prompt-drawer"), /grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;/);
@@ -134,6 +138,20 @@ test("queue entry stays compact and uses neutral status styling", () => {
   assert.match(appSource, /className="queue-capsule-count">\{activeQueueCount \|\| queueJobs\.length\}/);
   assert.match(appSource, /className=\{`queue-capsule \$\{activeQueueCount \? "active" : ""\}`\.trim\(\)\}/);
   assert.match(appSource, /className=\{activeQueueCount \? "queue-capsule-dot active" : "queue-capsule-dot done"\}/);
+});
+
+test("composer height persists as a browser layout preference", () => {
+  assert.match(appSource, /const composerPromptHeightStorageKey = "image-generate-web-tool:studio-composer-prompt-height";/);
+  assert.match(appSource, /function readStoredComposerPromptHeight\(\)[\s\S]*localStorage\.getItem\(composerPromptHeightStorageKey\)/);
+  assert.match(appSource, /const initialComposerPromptHeight = useRef\(readStoredComposerPromptHeight\(\)\);/);
+  assert.match(appSource, /const \[composerPromptHeightPreference, setComposerPromptHeightPreference\] = useState\(\(\) => initialComposerPromptHeight\.current\);/);
+  assert.match(appSource, /const \[composerViewportHeight, setComposerViewportHeight\] = useState/);
+  assert.match(appSource, /window\.addEventListener\("resize", updateComposerViewportHeight\);/);
+  assert.match(appSource, /localStorage\.setItem\(composerPromptHeightStorageKey, String\(Math\.round\(value\)\)\)/);
+  assert.match(appSource, /localStorage\.removeItem\(composerPromptHeightStorageKey\)/);
+  assert.match(appSource, /function endComposerResize[\s\S]*saveStoredComposerPromptHeight\(composerPromptHeightPreferenceRef\.current\)/);
+  assert.match(appSource, /onKeyDown=\{resizeComposerFromKeyboard\}/);
+  assert.match(appSource, /role="separator"[\s\S]*aria-valuenow=\{composerPromptHeight\}/);
 });
 
 test("queue rows expose cancel retry apply and remove controls", () => {
@@ -805,7 +823,6 @@ test("history sidebar actions read as a compact tool group", () => {
 test("narrow layout keeps sessions as a left drawer and pins composer to the bottom", () => {
   const tablet = mediaBlock("max-width: 920px");
   const phone = mediaBlock("max-width: 560px");
-  const compact = mediaBlock("max-width: 380px");
   assert.match(appSource, /const SIDEBAR_NARROW_QUERY = "\(max-width: 920px\)";/);
   assert.match(appSource, /function shouldStartHistoryCollapsed\(\)[\s\S]*window\.matchMedia\(SIDEBAR_NARROW_QUERY\)\.matches/);
   assert.match(appSource, /const \[historyCollapsed, setHistoryCollapsed\] = useState\(\(\) => shouldStartHistoryCollapsed\(\)\);/);
@@ -816,7 +833,9 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlock(".history-sidebar-backdrop"), /display:\s*none;/);
   assert.match(cssBlockIn(tablet, ".history-sidebar-backdrop"), /position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*40;[\s\S]*display:\s*block;[\s\S]*background:\s*rgba\(28, 25, 23, 0\.14\);/);
   assert.match(cssBlockIn(tablet, ".history-sidebar"), /position:\s*fixed;[\s\S]*left:\s*10px;[\s\S]*bottom:\s*10px;[\s\S]*width:\s*min\(300px, calc\(100vw - 56px\)\);/);
-  assert.match(cssBlockIn(tablet, ".workspace-controls"), /display:\s*grid;[\s\S]*grid-template-columns:\s*max-content minmax\(190px, 246px\);[\s\S]*grid-template-areas:\s*"mode connection"\s*"\. utilities";[\s\S]*justify-content:\s*space-between;/);
+  assert.match(cssBlockIn(tablet, ".workspace-header"), /display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(190px, 246px\);[\s\S]*grid-template-areas:\s*"title utilities"\s*"mode connection";/);
+  assert.match(cssBlockIn(tablet, ".workspace-title"), /grid-area:\s*title;/);
+  assert.match(cssBlockIn(tablet, ".workspace-controls"), /display:\s*contents;/);
   assert.match(cssBlockIn(tablet, ".mode-tabs"), /grid-area:\s*mode;[\s\S]*width:\s*fit-content;[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*visible;/);
   assert.match(cssBlockIn(tablet, ".connection-button"), /grid-area:\s*connection;[\s\S]*justify-self:\s*end;[\s\S]*width:\s*100%;/);
   assert.match(cssBlockIn(tablet, ".header-actions"), /grid-area:\s*utilities;[\s\S]*justify-self:\s*end;[\s\S]*width:\s*auto;/);
@@ -824,8 +843,10 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlockIn(tablet, ".composer-toolbar"), /flex-wrap:\s*wrap;[\s\S]*overflow-y:\s*visible;/);
   assert.doesNotMatch(cssBlockIn(tablet, ".composer-toolbar"), /overflow-y:\s*auto;/);
   assert.match(cssBlockIn(phone, ".history-sidebar"), /width:\s*min\(284px, calc\(100vw - 54px\)\);/);
-  assert.match(cssBlockIn(phone, ".workspace-controls"), /grid-template-columns:\s*minmax\(190px, 1fr\) auto;[\s\S]*grid-template-areas:\s*"mode mode"\s*"connection utilities";/);
-  assert.match(cssBlockIn(compact, ".workspace-controls"), /grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*grid-template-areas:\s*"mode"\s*"connection"\s*"utilities";/);
+  assert.match(cssBlockIn(phone, ".workspace-header"), /grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*grid-template-areas:\s*"title utilities"\s*"mode mode"\s*"connection connection";/);
+  assert.match(cssBlockIn(phone, ".mode-tabs"), /width:\s*100%;/);
+  assert.match(cssBlockIn(phone, ".mode-tabs button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;/);
+  assert.match(cssBlockIn(phone, ".connection-button"), /justify-self:\s*stretch;[\s\S]*max-width:\s*none;/);
   assert.doesNotMatch(phone, /\.history-tools\s*\{[^}]*grid-template-columns:\s*1fr;/);
   assert.match(cssBlockIn(phone, ".composer-input textarea"), /padding-bottom:\s*98px;/);
   assert.match(cssBlockIn(phone, ".composer-prompt-actions"), /grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*gap:\s*6px;[\s\S]*align-items:\s*stretch;/);
