@@ -4,16 +4,16 @@
 - [x] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
 - [x] Refactor history into one shared surface with compact recent-batch preview, grid-only full browser and in-window detail while preserving existing APIs and schemas.
 - [x] Verify 136/136 Node tests, size rules, warning-free production build, 33/33 release-cache tests, four-module compile and diff check.
-- [ ] Manually inspect `http://127.0.0.1:14261/`: compact popover should show 12 different recent records rather than one batch, multi-image tiles should show count badges, and full history/detail/Esc/narrow behavior should remain correct.
+- [ ] Manually inspect `http://127.0.0.1:14261/`: compact popover should show 12 different records; the persistent left history list should show two/four-cell batch collages and count badges; full history/detail/Esc/narrow behavior should remain correct.
 - [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
 - Start here: open the branch service on port `14261` and perform the manual checks listed above. Product code and automated verification are complete.
 - Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 136/136 Node suite, size/build, 33/33 release gate, compile or diff check unless product code changes.
-- Verify next: refresh the page and confirm the header reads `最近 12 条 · 共 101 条`, the grid contains different history records, multi-image records have count badges, and opening one still previews its own batch. Automatic browser automation cannot perform this loopback gate.
+- Verify next: refresh the page and confirm the first four-image test record is a four-cell mini collage with a `4` badge in the left history list; the compact window should still read `最近 12 条 · 共 101 条`. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
 - Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Branch service PID `47152` uses port `14261`; the existing `14260` service is separate.
-- Current Studio assets: `index-uqoX-THb.js` and `index-CYJQo652.css`.
+- Current Studio assets: `index-CJ5lOg6j.js` and `index-DP3qVA6F.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context

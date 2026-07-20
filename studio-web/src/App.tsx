@@ -3935,13 +3935,20 @@ function App() {
                     <div className="empty-history">{t("app.emptyHistory")}</div>
                   ) : (
                     history.map((entry) => {
-                      const firstImage = entry.images?.[0];
+                      const images = entry.images || [];
+                      const firstImage = images[0];
                       const src = imageSrc(firstImage);
+                      const imageCount = images.length;
                       return (
                         <article className="history-card" key={entry.id}>
                           <button className="history-open" type="button" onClick={() => openHistoryContext(entry)}>
-                            <span className="history-thumb" aria-hidden="true">
-                              {src ? <img src={src} alt="" loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                            <span className="history-thumb" data-image-count={Math.min(imageCount, 4)} aria-hidden="true">
+                              {images.slice(0, 4).map((image, index) => {
+                                const src = imageSrc(image);
+                                return src ? <img key={`${entry.id}-${index}`} src={src} alt="" loading="lazy" /> : null;
+                              })}
+                              {!firstImage && <span>{t("app.noImage")}</span>}
+                              {imageCount > 1 && <span className="history-thumb-count">{imageCount}</span>}
                             </span>
                             <span className="history-main">
                               <span className="history-row">

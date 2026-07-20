@@ -699,6 +699,16 @@ test("history browser keeps heavy lists responsive and closes from Escape", () =
   assert.match(i18nSource, /"history\.loadMore": "Load more"/);
 });
 
+test("history sidebar previews multi-image records as compact batches", () => {
+  assert.match(appSource, /const imageCount = images\.length;/);
+  assert.match(appSource, /className="history-thumb" data-image-count=\{Math\.min\(imageCount, 4\)\}/);
+  assert.match(appSource, /images\.slice\(0, 4\)\.map\(\(image, index\) =>/);
+  assert.match(appSource, /className="history-thumb-count"/);
+  assert.match(cssBlock('.history-thumb[data-image-count="2"]'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(css, /\.history-thumb\[data-image-count="3"\],\s*\.history-thumb\[data-image-count="4"\]\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*grid-template-rows:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(cssBlock(".history-thumb-count"), /position:\s*absolute;[\s\S]*border-radius:\s*999px;/);
+});
+
 test("modal shells share direct center placement", () => {
   assert.match(css, /\.drawer-shell,\s*\.history-detail-shell,\s*\.lightbox\s*\{[\s\S]*display:\s*grid;[\s\S]*place-items:\s*center;/);
   assert.doesNotMatch(cssBlock(".drawer-shell"), /place-items:\s*center;/);
