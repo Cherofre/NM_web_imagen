@@ -15,6 +15,7 @@ import {
   FolderOpen,
   FoldVertical,
   Heart,
+  Images,
   ImagePlus,
   ListX,
   Loader2,
@@ -102,6 +103,13 @@ import {
   resolveMaskEndpoint,
   type MaskAttachment,
 } from "./maskEditorModel";
+import {
+  historySurfaceAfterEscape,
+  latestHistoryEntryWithImages,
+  positionHistoryQuickPopover,
+  type HistoryQuickPosition,
+  type HistorySurfaceState,
+} from "./historySurface";
 import {
   advanceSessionServerBaseline,
   applyCanonicalReferenceUpdates,
@@ -340,7 +348,6 @@ type PreviewImage = {
   galleryIndex?: number;
 };
 
-type HistoryViewMode = "list" | "grid";
 type HistoryFavoriteFilter = "all" | "favorite";
 type HistoryDateFilter = "all" | "today" | "7d" | "30d";
 type HistoryEngineFilter = "all" | Engine;
@@ -375,6 +382,7 @@ const QUEUE_POPOVER_MIN_HEIGHT = 220;
 const QUEUE_POPOVER_MAX_HEIGHT = 520;
 const SIDEBAR_NARROW_QUERY = "(max-width: 920px)";
 const HISTORY_BROWSER_PAGE_SIZE = 80;
+const HISTORY_QUICK_POPOVER_SIZE = { width: 320, height: 260 };
 const ACTION_MENU_SELECTOR = "details.header-more-menu, details.image-more-actions";
 const OPEN_ACTION_MENU_SELECTOR = "details.header-more-menu[open], details.image-more-actions[open]";
 
@@ -1131,8 +1139,8 @@ function App() {
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "history">("sessions");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyBrowserOpen, setHistoryBrowserOpen] = useState(false);
-  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>("grid");
+  const [historySurface, setHistorySurface] = useState<HistorySurfaceState>({ mode: "closed" });
+  const [historyQuickPosition, setHistoryQuickPosition] = useState<HistoryQuickPosition | null>(null);
   const [historyFavoriteFilter, setHistoryFavoriteFilter] = useState<HistoryFavoriteFilter>("all");
   const [historyDateFilter, setHistoryDateFilter] = useState<HistoryDateFilter>("all");
   const [historyEngineFilter, setHistoryEngineFilter] = useState<HistoryEngineFilter>("all");
@@ -1159,7 +1167,6 @@ function App() {
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [composerPopover, setComposerPopover] = useState<"size" | "settings" | null>(null);
-  const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(null);
   const [historyActionMenu, setHistoryActionMenu] = useState<HistoryActionMenuState | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [previewMaskLoading, setPreviewMaskLoading] = useState(false);
@@ -1204,6 +1211,10 @@ function App() {
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
+  const historyQuickTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const historyBrowserScrollRef = useRef<HTMLDivElement | null>(null);
+  const historyBrowserScrollTopRef = useRef(0);
+  const historyRestoreScrollRef = useRef(false);
   const dragDepthRef = useRef(0);
   const internalImageDragIntentRef = useRef<(InternalImageDragIntent & { pointerId: number }) | null>(null);
   const customSizeDraftRef = useRef(customSizeDraft);
@@ -1244,6 +1255,10 @@ function App() {
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
   const visibleHistory = filteredHistory.slice(0, historyBrowserLimit);
+  const latestHistoryEntry = latestHistoryEntryWithImages(history);
+  const historyDetail = historySurface.mode === "browser" && historySurface.detailId
+    ? history.find((entry) => entry.id === historySurface.detailId) || null
+    : null;
   const historyActionEntry = historyActionMenu ? history.find((entry) => entry.id === historyActionMenu.entryId) || null : null;
   const historyActionImage = historyActionEntry?.images?.[0];
   const historyActionSrc = imageSrc(historyActionImage);
@@ -1258,6 +1273,9 @@ function App() {
     "--queue-popover-width": `${queuePopoverSize.width}px`,
     "--queue-popover-height": `${queuePopoverSize.height}px`,
   } as CSSProperties;
+  const historyQuickStyle: CSSProperties | undefined = historyQuickPosition
+    ? { left: historyQuickPosition.left, top: historyQuickPosition.top, width: historyQuickPosition.width }
+    : undefined;
   const gptSizeSelection = deriveGptSizeSelection({
     size: gptForm.size,
     custom_size: normalizeCustomImageSize(gptForm.custom_size).value,
@@ -1684,8 +1702,44 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (historyBrowserOpen) setHistoryBrowserLimit(HISTORY_BROWSER_PAGE_SIZE);
-  }, [historyBrowserOpen, historyFavoriteFilter, historyDateFilter, historyEngineFilter, historyViewMode]);
+    if (historySurface.mode === "browser") setHistoryBrowserLimit(HISTORY_BROWSER_PAGE_SIZE);
+  }, [historySurface.mode, historyFavoriteFilter, historyDateFilter, historyEngineFilter]);
+
+  useEffect(() => {
+    if (historySurface.mode !== "browser" || historySurface.detailId || !historyRestoreScrollRef.current) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (historyBrowserScrollRef.current) {
+        historyBrowserScrollRef.current.scrollTop = historyBrowserScrollTopRef.current;
+      }
+      historyRestoreScrollRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [historySurface]);
+
+  useEffect(() => {
+    if (historySurface.mode !== "quick") return undefined;
+
+    function closeForOutsidePointer(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (target instanceof Element && (target.closest(".history-quick-popover") || target.closest(".history-quick-trigger"))) return;
+      setHistorySurface({ mode: "closed" });
+      setHistoryQuickPosition(null);
+    }
+
+    function closeForViewportChange() {
+      setHistorySurface({ mode: "closed" });
+      setHistoryQuickPosition(null);
+    }
+
+    document.addEventListener("pointerdown", closeForOutsidePointer);
+    window.addEventListener("resize", closeForViewportChange);
+    window.addEventListener("scroll", closeForViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeForOutsidePointer);
+      window.removeEventListener("resize", closeForViewportChange);
+      window.removeEventListener("scroll", closeForViewportChange, true);
+    };
+  }, [historySurface.mode]);
 
   useEffect(() => {
     if (!historyActionMenu) return undefined;
@@ -1732,14 +1786,17 @@ function App() {
       setRenameOpen(false);
       setSessionPromptOpen(false);
       setPendingMultiImageConfirm(null);
-      setHistoryDetail(null);
-      setHistoryBrowserOpen(false);
+      if (historySurface.mode === "quick" || (historySurface.mode === "browser" && !historySurface.detailId)) {
+        window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+      }
+      setHistorySurface((current) => historySurfaceAfterEscape(current));
+      setHistoryQuickPosition(null);
       closePreviewImage();
       setComposerPopover(null);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previewImage, historyActionMenu]);
+  }, [previewImage, historyActionMenu, historySurface]);
 
   useEffect(() => {
     setComposerPopover(null);
@@ -2149,11 +2206,40 @@ function App() {
     }
   }
 
-  async function openHistoryBrowser() {
-    setHistoryBrowserOpen(true);
+  function closeHistorySurface(restoreFocus = true) {
+    setHistoryActionMenu(null);
+    historyRestoreScrollRef.current = false;
+    setHistorySurface({ mode: "closed" });
+    setHistoryQuickPosition(null);
+    if (restoreFocus) window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+  }
+
+  async function toggleHistoryQuick() {
+    if (historySurface.mode === "quick") {
+      closeHistorySurface();
+      return;
+    }
+
+    const trigger = historyQuickTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setHistoryQuickPosition(positionHistoryQuickPopover(
+      rect,
+      { width: window.innerWidth, height: window.innerHeight },
+      HISTORY_QUICK_POPOVER_SIZE,
+    ));
+    setHistorySurface({ mode: "quick" });
     if (history.length === 0) {
       await loadHistory();
     }
+  }
+
+  async function openHistoryBrowser() {
+    setHistoryActionMenu(null);
+    historyRestoreScrollRef.current = false;
+    setHistoryQuickPosition(null);
+    setHistorySurface({ mode: "browser" });
+    if (history.length === 0) await loadHistory();
   }
 
   async function deleteHistory(entry: HistoryEntry, deleteFiles = false) {
@@ -2170,7 +2256,9 @@ function App() {
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : history.filter((item) => item.id !== entry.id));
-      if (historyDetail?.id === entry.id) setHistoryDetail(null);
+      if (historySurface.mode === "browser" && historySurface.detailId === entry.id) {
+        setHistorySurface({ mode: "browser" });
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("history.deleteFailed"));
     }
@@ -2711,11 +2799,17 @@ function App() {
 
   function closeOnEscape(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
     setAdvancedOpen(false);
     closeConnectionDrawer();
     setRenameOpen(false);
     setPromptEditorOpen(false);
-    setHistoryDetail(null);
+    if (historySurface.mode === "quick" || (historySurface.mode === "browser" && !historySurface.detailId)) {
+      window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+    }
+    setHistorySurface((current) => historySurfaceAfterEscape(current));
+    setHistoryQuickPosition(null);
     setPendingMultiImageConfirm(null);
     closePreviewImage();
     setComposerPopover(null);
@@ -3696,10 +3790,16 @@ function App() {
     }
   }
 
-  function openHistoryContext(entry: HistoryEntry, closeBrowser = false) {
+  function openHistoryContext(entry: HistoryEntry) {
     setHistoryActionMenu(null);
-    if (closeBrowser) setHistoryBrowserOpen(false);
-    setHistoryDetail(entry);
+    historyBrowserScrollTopRef.current = historyBrowserScrollRef.current?.scrollTop || 0;
+    historyRestoreScrollRef.current = true;
+    setHistoryQuickPosition(null);
+    setHistorySurface({ mode: "browser", detailId: entry.id });
+  }
+
+  function backToHistoryBrowser() {
+    setHistorySurface({ mode: "browser" });
   }
 
   function openHistoryActionMenu(event: ReactMouseEvent<HTMLButtonElement>, entry: HistoryEntry, source: HistoryActionMenuSource) {
@@ -3786,25 +3886,33 @@ function App() {
               </button>
             </div>
             <div className="sidebar-actions">
-              {sidebarMode === "history" && (
-                <>
-                  <button type="button" onClick={() => void loadHistory()} title={t("app.refresh")}>
-                    <RefreshCw size={15} /> {t("app.refresh")}
-                  </button>
-                  <button type="button" onClick={() => void openHistoryBrowser()} title={t("history.browser")}>
-                    <ExternalLink size={15} /> {t("history.browser")}
-                  </button>
-                </>
-              )}
               <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}>
                 <FolderOpen size={15} /> {t("app.outputFolder")}
               </button>
+              <button
+                ref={historyQuickTriggerRef}
+                className="history-quick-trigger"
+                type="button"
+                onClick={() => void toggleHistoryQuick()}
+                title={t("history.browser")}
+                aria-haspopup="dialog"
+                aria-expanded={historySurface.mode !== "closed"}
+              >
+                <Images size={15} /> {t("history.browser")}
+              </button>
             </div>
             <div className="sidebar-list-section">
-              <div className="history-count">
-                {sidebarMode === "sessions"
-                  ? t("app.chats", { count: sessions.length })
-                  : historyLoading ? t("app.loading") : t("app.historyCount", { count: history.length })}
+              <div className="history-list-head">
+                <div className="history-count">
+                  {sidebarMode === "sessions"
+                    ? t("app.chats", { count: sessions.length })
+                    : historyLoading ? t("app.loading") : t("app.historyCount", { count: history.length })}
+                </div>
+                {sidebarMode === "history" && (
+                  <button className="history-refresh-button" type="button" onClick={() => void loadHistory()} title={t("app.refresh")} aria-label={t("app.refresh")}>
+                    <RefreshCw size={14} />
+                  </button>
+                )}
               </div>
               {sidebarMode === "sessions" ? (
                 <div className="session-list">
@@ -4909,6 +5017,57 @@ function App() {
         </div>
       )}
 
+      {historySurface.mode === "quick" && historyQuickPosition && (
+        <section
+          className="history-quick-popover"
+          style={historyQuickStyle}
+          role="dialog"
+          aria-label={t("history.quickTitle")}
+        >
+          <div className="history-quick-head">
+            <div>
+              <strong>{t("history.quickTitle")}</strong>
+              {latestHistoryEntry && (
+                <span>
+                  {formatTime(latestHistoryEntry.created_at, language)} · {engineLabel(latestHistoryEntry.engine || "gpt-image-2")} · {t("history.imageCount", { count: latestHistoryEntry.images?.length || 0 })}
+                </span>
+              )}
+            </div>
+            <div className="history-quick-head-actions">
+              <button className="history-quick-expand" type="button" onClick={() => void openHistoryBrowser()} title={t("history.expandBrowser")}>
+                <Maximize2 size={15} /> <span>{t("history.expandBrowser")}</span>
+              </button>
+              <button type="button" onClick={() => closeHistorySurface()} aria-label={t("history.closeBrowser")} title={t("common.close")}>
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+          {historyLoading ? (
+            <div className="history-quick-empty">{t("app.loading")}</div>
+          ) : latestHistoryEntry ? (
+            <div className="history-quick-grid">
+              {latestHistoryEntry.images?.map((image, index) => {
+                const src = imageSrc(image);
+                const name = imageName(image, index);
+                return (
+                  <button
+                    type="button"
+                    key={`${latestHistoryEntry.id}-${index}`}
+                    onClick={() => openPreviewImages(latestHistoryEntry.images || [], index)}
+                    disabled={!src}
+                    title={t("history.previewImage")}
+                  >
+                    {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="history-quick-empty">{t("app.emptyHistory")}</div>
+          )}
+        </section>
+      )}
+
       {historyActionMenu && historyActionEntry && (
         <div
           className={`history-action-popover ${historyActionMenu.placement}`}
@@ -4985,190 +5144,201 @@ function App() {
         </div>
       )}
 
-      {historyDetail && (
+      {historySurface.mode === "browser" && (
         <div className="history-detail-shell">
-          <button className="history-detail-backdrop" type="button" aria-label={t("history.context")} onClick={() => setHistoryDetail(null)} />
-          <section className="history-detail" role="dialog" aria-modal="true" aria-label={t("history.context")} tabIndex={-1} onKeyDown={closeOnEscape}>
-            <div className="history-detail-head">
-              <div>
-                <p>{formatTime(historyDetail.created_at, language)} · {engineLabel(historyDetail.engine || "gpt-image-2")}</p>
-                <h2>{t("history.context")}</h2>
-              </div>
-              <button type="button" onClick={() => setHistoryDetail(null)} aria-label={t("history.context")} title={t("common.close")}><X size={18} /></button>
-            </div>
-            <div className="history-detail-body">
-              <section className="detail-section">
-                <h3>{t("history.prompt")}</h3>
-                <p className="detail-prompt">{historyDetail.prompt || t("history.noPrompt")}</p>
-                {String(historyDetail.form_state?.context_prompt || "") && (
-                  <>
-                    <h3>{t("history.fixedPrompt")}</h3>
-                    <p className="detail-prompt muted">{String(historyDetail.form_state?.context_prompt || "")}</p>
-                  </>
-                )}
-                {historyDetail.negative_prompt && (
-                  <>
-                    <h3>{t("history.negativePrompt")}</h3>
-                    <p className="detail-prompt muted">{historyDetail.negative_prompt}</p>
-                  </>
-                )}
-              </section>
-              {historyDetail.images?.length ? (
-                <section className="detail-section">
-                  <h3>{t("history.resultImages")}</h3>
-                  <div className="detail-images">
-                    {historyDetail.images.map((image, index) => {
-                      const src = imageSrc(image);
-                      const name = imageName(image, index);
-                      const dimensions = imageDimensionsLabel(image);
-                      return (
-                        <button type="button" key={`${historyDetail.id}-${index}`} onClick={() => openPreviewImage({ src, name, dimensions: image.dimensions, requestedSize: requestedSizeLabel(historyDetail) })}>
-                          <img src={src} alt={name} loading="lazy" />
-                          <span>{name}</span>
-                          {dimensions && <small>{dimensions}</small>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              ) : null}
-              <section className="detail-section">
-                <h3>{t("history.params")}</h3>
-                <KeyValueGrid value={historyDetail.form_state || {}} emptyLabel={t("history.emptyParams")} />
-              </section>
-              {historyDetail.meta && Object.keys(historyDetail.meta).length > 0 && (
-                <section className="detail-section">
-                  <h3>{t("history.response")}</h3>
-                  <KeyValueGrid value={historyDetail.meta} emptyLabel={t("history.emptyParams")} />
-                </section>
-              )}
-            </div>
-            <div className="history-detail-actions">
-              <button type="button" onClick={() => applyHistory(historyDetail)}>
-                <RotateCcw size={15} /> {t("history.apply")}
-              </button>
-              <button type="button" onClick={() => copyPrompt(historyDetail.prompt || "")} disabled={!historyDetail.prompt}>
-                <Copy size={15} /> {t("history.copyPrompt")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const firstImage = historyDetail.images?.[0];
-                  const src = imageSrc(firstImage);
-                  if (src) void addOutputAsReference(src, imageName(firstImage));
-                }}
-                disabled={referenceActionsDisabled || !imageSrc(historyDetail.images?.[0])}
-              >
-                <ImagePlus size={15} /> {t("history.useReference")}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {historyBrowserOpen && (
-        <div className="history-detail-shell">
-          <button className="history-detail-backdrop" type="button" aria-label={t("history.closeBrowser")} onClick={() => setHistoryBrowserOpen(false)} />
-          <section className="history-browser" role="dialog" aria-modal="true" aria-label={t("history.browser")} tabIndex={-1} onKeyDown={closeOnEscape}>
-            <div className="history-detail-head">
-              <div>
-                <p>{t("app.historyCount", { count: filteredHistory.length })}</p>
-                <h2>{t("history.browser")}</h2>
-              </div>
-              <button type="button" onClick={() => setHistoryBrowserOpen(false)} aria-label={t("history.closeBrowser")} title={t("common.close")}><X size={18} /></button>
-            </div>
-            <div className="history-browser-toolbar">
-              <div className="segmented-control" role="group" aria-label={t("history.viewMode")}>
-                <button type="button" className={historyViewMode === "list" ? "active" : ""} onClick={() => setHistoryViewMode("list")}>{t("history.listMode")}</button>
-                <button type="button" className={historyViewMode === "grid" ? "active" : ""} onClick={() => setHistoryViewMode("grid")}>{t("history.gridMode")}</button>
-              </div>
-              <select value={historyFavoriteFilter} onChange={(event) => setHistoryFavoriteFilter(event.target.value as HistoryFavoriteFilter)} aria-label={t("history.favoriteFilter")}>
-                <option value="all">{t("history.allItems")}</option>
-                <option value="favorite">{t("history.onlyFavorites")}</option>
-              </select>
-              <select value={historyDateFilter} onChange={(event) => setHistoryDateFilter(event.target.value as HistoryDateFilter)} aria-label={t("history.dateFilter")}>
-                <option value="all">{t("history.allDates")}</option>
-                <option value="today">{t("history.today")}</option>
-                <option value="7d">{t("history.last7Days")}</option>
-                <option value="30d">{t("history.last30Days")}</option>
-              </select>
-              <select value={historyEngineFilter} onChange={(event) => setHistoryEngineFilter(event.target.value as HistoryEngineFilter)} aria-label={t("history.engineFilter")}>
-                <option value="all">{t("history.allEngines")}</option>
-                <option value="gpt-image-2">GPT Image 2</option>
-                <option value="banana">Banana Gemini</option>
-              </select>
-              <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}><FolderOpen size={15} /> {t("app.outputFolder")}</button>
-            </div>
-            <div className={historyViewMode === "grid" ? "history-browser-grid" : "history-browser-list"}>
-              {filteredHistory.length === 0 ? (
-                <div className="empty-history">{t("history.noFilteredItems")}</div>
-              ) : visibleHistory.map((entry) => {
-                const firstImage = entry.images?.[0];
-                const src = imageSrc(firstImage);
-                const name = imageName(firstImage);
-                const actualDimensions = imageDimensionsLabel(firstImage);
-                const requestedSize = requestedSizeLabel(entry);
-                const mismatch = dimensionMismatchLabel(entry, firstImage);
-                return (
-                  <article className="history-browser-card" key={entry.id}>
-                    <div className="history-browser-preview-wrap">
-                      <button type="button" className="history-browser-preview" onClick={() => src && openPreviewImage({ src, name, dimensions: firstImage?.dimensions, requestedSize })} disabled={!src} title={t("history.previewImage")}>
-                        {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
-                      </button>
-                      <button
-                        className={entry.favorite ? "history-browser-favorite active" : "history-browser-favorite"}
-                        type="button"
-                        onClick={() => void toggleFavorite(entry)}
-                        title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
-                        aria-label={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
-                        aria-pressed={Boolean(entry.favorite)}
-                        disabled={entry.legacy}
-                      >
-                        <Heart size={15} fill={entry.favorite ? "currentColor" : "none"} />
-                      </button>
-                    </div>
-                    <button type="button" className="history-browser-card-main" onClick={() => openHistoryContext(entry, true)} title={t("history.openContext")}>
-                      <div className="history-browser-meta">
-                        <span>{formatTime(entry.created_at, language)}</span>
-                        <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
-                      </div>
-                      <strong>{entry.prompt || t("history.noPrompt")}</strong>
-                      <div className="history-browser-dimensions">
-                        {actualDimensions && <span>{actualDimensions}</span>}
-                        {mismatch ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : requestedSize && !actualDimensions ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : null}
-                      </div>
+          <button className="history-detail-backdrop" type="button" aria-label={t("history.closeBrowser")} onClick={() => closeHistorySurface()} />
+          <section className={historyDetail ? "history-browser is-detail" : "history-browser"} role="dialog" aria-modal="true" aria-label={t("history.browser")} tabIndex={-1} onKeyDown={closeOnEscape}>
+            {historySurface.mode === "browser" && historyDetail ? (
+              <>
+                <div className="history-detail-head history-browser-detail-head">
+                  <div className="history-detail-heading">
+                    <button className="history-back-button" type="button" onClick={backToHistoryBrowser}>
+                      <ChevronLeft size={16} /> <span>{t("history.backToBrowser")}</span>
                     </button>
-                    <div className="history-browser-actions">
-                      <button className="history-browser-quick-action" type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
-                        <RotateCcw size={14} /> <span>{t("history.applyShort")}</span>
-                      </button>
-                      <button className="history-browser-quick-action" type="button" onClick={() => src && void addOutputAsReference(src, name)} title={t("history.useReference")} disabled={!src || referenceActionsDisabled}>
-                        <ImagePlus size={14} /> <span>{t("history.useReferenceShort")}</span>
-                      </button>
-                      <button
-                        className="history-more-trigger"
-                        type="button"
-                        onClick={(event) => openHistoryActionMenu(event, entry, "browser")}
-                        aria-haspopup="menu"
-                        aria-expanded={historyActionMenu?.entryId === entry.id && historyActionMenu.source === "browser"}
-                        title={t("history.moreActions")}
-                      >
-                        <Ellipsis size={14} /> <span>{t("history.more")}</span>
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-              {visibleHistory.length < filteredHistory.length && (
-                <button
-                  type="button"
-                  className="history-browser-more"
-                  onClick={() => setHistoryBrowserLimit((limit) => Math.min(limit + HISTORY_BROWSER_PAGE_SIZE, filteredHistory.length))}
-                >
-                  {t("history.loadMore")}
-                </button>
-              )}
-            </div>
+                    <p>{formatTime(historyDetail.created_at, language)} · {engineLabel(historyDetail.engine || "gpt-image-2")}</p>
+                    <h2>{t("history.context")}</h2>
+                  </div>
+                  <button type="button" onClick={() => closeHistorySurface()} aria-label={t("history.closeBrowser")} title={t("common.close")}><X size={18} /></button>
+                </div>
+                <div className="history-detail-body">
+                  <section className="detail-section">
+                    <h3>{t("history.prompt")}</h3>
+                    <p className="detail-prompt">{historyDetail.prompt || t("history.noPrompt")}</p>
+                    {String(historyDetail.form_state?.context_prompt || "") && (
+                      <>
+                        <h3>{t("history.fixedPrompt")}</h3>
+                        <p className="detail-prompt muted">{String(historyDetail.form_state?.context_prompt || "")}</p>
+                      </>
+                    )}
+                    {historyDetail.negative_prompt && (
+                      <>
+                        <h3>{t("history.negativePrompt")}</h3>
+                        <p className="detail-prompt muted">{historyDetail.negative_prompt}</p>
+                      </>
+                    )}
+                  </section>
+                  {historyDetail.images?.length ? (
+                    <section className="detail-section">
+                      <h3>{t("history.resultImages")}</h3>
+                      <div className="detail-images">
+                        {historyDetail.images.map((image, index) => {
+                          const src = imageSrc(image);
+                          const name = imageName(image, index);
+                          const dimensions = imageDimensionsLabel(image);
+                          return (
+                            <button type="button" key={`${historyDetail.id}-${index}`} onClick={() => openPreviewImages(historyDetail.images || [], index)} disabled={!src}>
+                              {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                              {dimensions && <small>{dimensions}</small>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ) : null}
+                  <section className="detail-section">
+                    <h3>{t("history.params")}</h3>
+                    <KeyValueGrid value={historyDetail.form_state || {}} emptyLabel={t("history.emptyParams")} />
+                  </section>
+                  {historyDetail.meta && Object.keys(historyDetail.meta).length > 0 && (
+                    <section className="detail-section">
+                      <h3>{t("history.response")}</h3>
+                      <KeyValueGrid value={historyDetail.meta} emptyLabel={t("history.emptyParams")} />
+                    </section>
+                  )}
+                </div>
+                <div className="history-detail-actions">
+                  <button type="button" onClick={() => applyHistory(historyDetail)}>
+                    <RotateCcw size={15} /> {t("history.apply")}
+                  </button>
+                  <button type="button" onClick={() => copyPrompt(historyDetail.prompt || "")} disabled={!historyDetail.prompt}>
+                    <Copy size={15} /> {t("history.copyPrompt")}
+                  </button>
+                  {historyDetail.images?.length === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const firstImage = historyDetail.images?.[0];
+                        const src = imageSrc(firstImage);
+                        if (src) void addOutputAsReference(src, imageName(firstImage));
+                      }}
+                      disabled={referenceActionsDisabled || !imageSrc(historyDetail.images?.[0])}
+                    >
+                      <ImagePlus size={15} /> {t("history.useReference")}
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="history-detail-head">
+                  <div>
+                    <p>{t("app.historyCount", { count: filteredHistory.length })}</p>
+                    <h2>{t("history.browser")}</h2>
+                  </div>
+                  <button type="button" onClick={() => closeHistorySurface()} aria-label={t("history.closeBrowser")} title={t("common.close")}><X size={18} /></button>
+                </div>
+                <div className="history-browser-toolbar">
+                  <select value={historyFavoriteFilter} onChange={(event) => setHistoryFavoriteFilter(event.target.value as HistoryFavoriteFilter)} aria-label={t("history.favoriteFilter")}>
+                    <option value="all">{t("history.allItems")}</option>
+                    <option value="favorite">{t("history.onlyFavorites")}</option>
+                  </select>
+                  <select value={historyDateFilter} onChange={(event) => setHistoryDateFilter(event.target.value as HistoryDateFilter)} aria-label={t("history.dateFilter")}>
+                    <option value="all">{t("history.allDates")}</option>
+                    <option value="today">{t("history.today")}</option>
+                    <option value="7d">{t("history.last7Days")}</option>
+                    <option value="30d">{t("history.last30Days")}</option>
+                  </select>
+                  <select value={historyEngineFilter} onChange={(event) => setHistoryEngineFilter(event.target.value as HistoryEngineFilter)} aria-label={t("history.engineFilter")}>
+                    <option value="all">{t("history.allEngines")}</option>
+                    <option value="gpt-image-2">GPT Image 2</option>
+                    <option value="banana">Banana Gemini</option>
+                  </select>
+                  <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}><FolderOpen size={15} /> {t("app.outputFolder")}</button>
+                </div>
+                <div className="history-browser-grid" ref={historyBrowserScrollRef}>
+                  {filteredHistory.length === 0 ? (
+                    <div className="empty-history">{t("history.noFilteredItems")}</div>
+                  ) : visibleHistory.map((entry) => {
+                    const firstImage = entry.images?.[0];
+                    const actualDimensions = imageDimensionsLabel(firstImage);
+                    const requestedSize = requestedSizeLabel(entry);
+                    const mismatch = dimensionMismatchLabel(entry, firstImage);
+                    return (
+                      <article className="history-browser-card" key={entry.id}>
+                        <div className="history-browser-batch-preview" data-image-count={Math.min(entry.images?.length || 0, 4)}>
+                          {entry.images?.slice(0, 4).map((image, index) => {
+                            const src = imageSrc(image);
+                            const name = imageName(image, index);
+                            const remaining = (entry.images?.length || 0) - 4;
+                            return (
+                              <button
+                                type="button"
+                                className="history-browser-batch-image"
+                                key={`${entry.id}-${index}`}
+                                onClick={() => openPreviewImages(entry.images || [], index)}
+                                disabled={!src}
+                                title={t("history.previewImage")}
+                              >
+                                {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                                {index === 3 && remaining > 0 && <span className="history-browser-batch-more">+{remaining}</span>}
+                              </button>
+                            );
+                          })}
+                          {!entry.images?.length && <span className="history-browser-batch-empty">{t("app.noImage")}</span>}
+                          <button
+                            className={entry.favorite ? "history-browser-favorite active" : "history-browser-favorite"}
+                            type="button"
+                            onClick={() => void toggleFavorite(entry)}
+                            title={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                            aria-label={entry.favorite ? t("history.unfavorite") : t("history.favorite")}
+                            aria-pressed={Boolean(entry.favorite)}
+                            disabled={entry.legacy}
+                          >
+                            <Heart size={15} fill={entry.favorite ? "currentColor" : "none"} />
+                          </button>
+                        </div>
+                        <button type="button" className="history-browser-card-main" onClick={() => openHistoryContext(entry)} title={t("history.openContext")}>
+                          <div className="history-browser-meta">
+                            <span>{formatTime(entry.created_at, language)}</span>
+                            <span>{engineLabel(entry.engine || "gpt-image-2")}</span>
+                            {(entry.images?.length || 0) > 1 && <span>{t("history.imageCount", { count: entry.images?.length || 0 })}</span>}
+                          </div>
+                          <strong>{entry.prompt || t("history.noPrompt")}</strong>
+                          <div className="history-browser-dimensions">
+                            {actualDimensions && <span>{actualDimensions}</span>}
+                            {mismatch ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : requestedSize && !actualDimensions ? <span>{t("history.requestedSize", { value: requestedSize })}</span> : null}
+                          </div>
+                        </button>
+                        <div className="history-browser-actions">
+                          <button className="history-browser-quick-action" type="button" onClick={() => applyHistory(entry)} title={t("history.apply")}>
+                            <RotateCcw size={14} /> <span>{t("history.applyShort")}</span>
+                          </button>
+                          <button
+                            className="history-more-trigger"
+                            type="button"
+                            onClick={(event) => openHistoryActionMenu(event, entry, "browser")}
+                            aria-haspopup="menu"
+                            aria-expanded={historyActionMenu?.entryId === entry.id && historyActionMenu.source === "browser"}
+                            title={t("history.moreActions")}
+                          >
+                            <Ellipsis size={14} /> <span>{t("history.more")}</span>
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {visibleHistory.length < filteredHistory.length && (
+                    <button
+                      type="button"
+                      className="history-browser-more"
+                      onClick={() => setHistoryBrowserLimit((limit) => Math.min(limit + HISTORY_BROWSER_PAGE_SIZE, filteredHistory.length))}
+                    >
+                      {t("history.loadMore")}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </section>
         </div>
       )}

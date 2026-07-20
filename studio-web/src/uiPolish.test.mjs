@@ -625,40 +625,48 @@ test("composer labels clarify custom size apply and keep expand copy short", () 
   assert.doesNotMatch(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPrompt"\)\}/);
 });
 
-test("history browser supports list grid filters and destructive delete copy", () => {
-  assert.match(appSource, /const \[historyBrowserOpen, setHistoryBrowserOpen\]/);
-  assert.match(appSource, /const \[historyViewMode, setHistoryViewMode\]/);
+test("history uses one compact and full surface with an in-window detail", () => {
+  assert.match(appSource, /const \[historySurface, setHistorySurface\] = useState<HistorySurfaceState>/);
+  assert.doesNotMatch(appSource, /const \[historyBrowserOpen, setHistoryBrowserOpen\]/);
+  assert.doesNotMatch(appSource, /const \[historyViewMode, setHistoryViewMode\]/);
   assert.match(appSource, /const \[historyFavoriteFilter, setHistoryFavoriteFilter\]/);
   assert.match(appSource, /const \[historyDateFilter, setHistoryDateFilter\]/);
   assert.match(appSource, /const \[historyEngineFilter, setHistoryEngineFilter\]/);
   assert.match(appSource, /function filteredHistoryEntries\(/);
-  assert.match(appSource, /className=\{historyViewMode === "grid" \? "history-browser-grid" : "history-browser-list"\}/);
+  assert.match(appSource, /const latestHistoryEntry = latestHistoryEntryWithImages\(history\);/);
+  assert.match(appSource, /className="history-quick-popover"/);
+  assert.match(appSource, /latestHistoryEntry\.images\?\.map\(\(image, index\) =>/);
+  assert.match(appSource, /className="history-quick-expand"/);
+  assert.match(appSource, /className="history-browser-grid"/);
+  assert.doesNotMatch(appSource, /history-browser-list/);
   assert.match(appSource, /t\("history\.browser"\)/);
-  assert.match(appSource, /t\("history\.listMode"\)/);
-  assert.match(appSource, /t\("history\.gridMode"\)/);
+  assert.match(appSource, /t\("history\.quickTitle"\)/);
+  assert.match(appSource, /t\("history\.expandBrowser"\)/);
+  assert.match(appSource, /t\("history\.backToBrowser"\)/);
   assert.match(appSource, /t\("history\.removeRecord"\)/);
   assert.match(appSource, /t\("history\.deleteFiles"\)/);
   assert.match(appSource, /query\.set\("delete_files", "true"\)/);
-  assert.match(appSource, /function openHistoryContext\(entry: HistoryEntry, closeBrowser = false\) \{[\s\S]*if \(closeBrowser\) setHistoryBrowserOpen\(false\);[\s\S]*setHistoryDetail\(entry\);/);
-  assert.match(appSource, /className="history-browser-card-main"[\s\S]*onClick=\{\(\) => openHistoryContext\(entry, true\)\}/);
+  assert.match(appSource, /function openHistoryContext\(entry: HistoryEntry\) \{[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id \}\);/);
+  assert.match(appSource, /historyRestoreScrollRef\.current = true;[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id \}\);/);
+  assert.match(appSource, /if \(historyBrowserScrollRef\.current\) \{[\s\S]*historyBrowserScrollRef\.current\.scrollTop = historyBrowserScrollTopRef\.current;/);
+  assert.match(appSource, /className="history-browser-card-main"[\s\S]*onClick=\{\(\) => openHistoryContext\(entry\)\}/);
+  assert.match(appSource, /historySurface\.mode === "browser" && historyDetail/);
+  assert.doesNotMatch(appSource, /\{historyDetail && \(\s*<div className="history-detail-shell">/);
   assert.match(appSource, /className="history-more-trigger"[\s\S]*openHistoryActionMenu\(event, entry, "browser"\)/);
   assert.match(appSource, /className=\{`history-action-popover \$\{historyActionMenu\.placement\}`\}/);
   assert.match(appSource, /className=\{entry\.favorite \? "history-browser-favorite active" : "history-browser-favorite"\}/);
   assert.match(appSource, /<Heart size=\{15\} fill=\{entry\.favorite \? "currentColor" : "none"\} \/>/);
-  assert.match(appSource, /className="history-browser-preview-wrap"[\s\S]*className="history-browser-preview"[\s\S]*className=\{entry\.favorite \? "history-browser-favorite active"/);
+  assert.match(appSource, /className="history-browser-batch-preview"[\s\S]*entry\.images\?\.slice\(0, 4\)\.map/);
   assert.doesNotMatch(appSource, /history-browser-context-hint/);
   assert.match(cssBlock(".history-browser"), /width:\s*min\(1120px, calc\(100vw - 32px\)\);/);
   assert.match(cssBlock(".history-browser-grid"), /grid-template-columns:\s*repeat\(auto-fill, minmax\(230px, 1fr\)\);/);
-  assert.match(cssBlock(".history-browser-preview-wrap"), /position:\s*relative;[\s\S]*width:\s*76px;/);
-  assert.match(cssBlock(".history-browser-grid .history-browser-preview-wrap"), /width:\s*100%;/);
+  assert.match(cssBlock(".history-browser-batch-preview"), /display:\s*grid;[\s\S]*aspect-ratio:\s*4 \/ 3;/);
   assert.match(cssBlock(".history-browser-favorite"), /position:\s*absolute;[\s\S]*top:\s*6px;[\s\S]*right:\s*6px;/);
-  assert.match(cssBlock(".history-browser-preview img"), /object-fit:\s*contain;/);
+  assert.match(cssBlock(".history-browser-batch-image img"), /object-fit:\s*contain;/);
   assert.match(cssBlock(".history-browser-card-main strong"), /white-space:\s*normal;[\s\S]*-webkit-line-clamp:\s*2;/);
   assert.match(cssBlock(".history-browser-actions"), /display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/);
-  const phone = mediaBlock("max-width: 560px");
-  assert.match(phone, /\.history-browser-list \.history-browser-card\s*\{[\s\S]*grid-template-columns:\s*64px minmax\(0, 1fr\);/);
-  assert.match(phone, /\.history-browser-list \.history-browser-preview-wrap\s*\{[\s\S]*width:\s*64px;/);
-  assert.match(phone, /\.history-browser-list \.history-browser-actions\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*justify-content:\s*flex-start;/);
+  assert.match(cssBlock(".history-quick-popover"), /position:\s*fixed;[\s\S]*z-index:\s*58;/);
+  assert.match(css, /(?:^|\n)\.lightbox\s*\{\s*z-index:\s*60;\s*\}/);
 });
 
 test("history browser keeps heavy lists responsive and closes from Escape", () => {
@@ -667,11 +675,12 @@ test("history browser keeps heavy lists responsive and closes from Escape", () =
   assert.notEqual(keyHandlerStart, -1, "Missing global Escape handler");
   assert.notEqual(keyHandlerEnd, -1, "Missing global Escape registration");
   assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /if \(previewImage\) \{[\s\S]*closePreviewImage\(\);[\s\S]*return;/);
-  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /setHistoryBrowserOpen\(false\);/);
+  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /historyQuickTriggerRef\.current\?\.focus\(\)/);
+  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /setHistorySurface\(\(current\) => historySurfaceAfterEscape\(current\)\);/);
   assert.match(appSource, /const HISTORY_BROWSER_PAGE_SIZE = 80;/);
   assert.match(appSource, /const \[historyBrowserLimit, setHistoryBrowserLimit\] = useState\(HISTORY_BROWSER_PAGE_SIZE\);/);
   assert.match(appSource, /const visibleHistory = filteredHistory\.slice\(0, historyBrowserLimit\);/);
-  assert.match(appSource, /if \(historyBrowserOpen\) setHistoryBrowserLimit\(HISTORY_BROWSER_PAGE_SIZE\);/);
+  assert.match(appSource, /if \(historySurface\.mode === "browser"\) setHistoryBrowserLimit\(HISTORY_BROWSER_PAGE_SIZE\);/);
   assert.match(appSource, /visibleHistory\.map\(\(entry\) =>/);
   assert.doesNotMatch(appSource, /filteredHistory\.map\(\(entry\) =>/);
   assert.match(appSource, /className="history-browser-more"/);
@@ -725,6 +734,9 @@ test("banana history exposes requested image size and aspect ratio", () => {
 test("history sidebar actions read as a compact tool group", () => {
   assert.match(cssBlock(".sidebar-actions"), /display:\s*flex;[\s\S]*gap:\s*6px;/);
   assert.match(cssBlock(".sidebar-actions button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;[\s\S]*min-height:\s*34px;[\s\S]*border-radius:\s*var\(--radius-sm\);/);
+  assert.match(appSource, /className="history-quick-trigger"/);
+  assert.match(appSource, /<FolderOpen size=\{15\} \/> \{t\("app\.outputFolder"\)\}[\s\S]*className="history-quick-trigger"/);
+  assert.match(appSource, /className="history-list-head"[\s\S]*className="history-refresh-button"/);
   assert.match(appSource, /className="history-quick-action"[\s\S]*t\("history\.applyShort"\)/);
   assert.match(appSource, /className="history-quick-action"[\s\S]*t\("history\.useReferenceShort"\)/);
   assert.match(appSource, /className="history-more-trigger"[\s\S]*openHistoryActionMenu\(event, entry, "sidebar"\)/);
@@ -741,8 +753,9 @@ test("history sidebar actions read as a compact tool group", () => {
   assert.doesNotMatch(css, /\.history-favorite-button\.active,\s*\.history-browser-favorite\.active\s*\{[^}]*#dc2626/);
   assert.doesNotMatch(css, /\.history-more-actions\[open\][\s\S]*flex-basis:\s*100%;/);
   const historyMenuStart = appSource.indexOf("{historyActionMenu && historyActionEntry && (");
-  const historyDetailStart = appSource.indexOf("{historyDetail && (", historyMenuStart);
-  assert.doesNotMatch(appSource.slice(historyMenuStart, historyDetailStart), /toggleFavorite/);
+  const historySurfaceStart = appSource.indexOf('{historySurface.mode === "browser" && (', historyMenuStart);
+  assert.notEqual(historySurfaceStart, -1, "Missing unified history browser surface");
+  assert.doesNotMatch(appSource.slice(historyMenuStart, historySurfaceStart), /toggleFavorite/);
   assert.match(i18nSource, /"history\.applyShort": "套用"/);
   assert.match(i18nSource, /"history\.useReferenceShort": "参考图"/);
   assert.match(i18nSource, /"history\.applyShort": "Apply"/);

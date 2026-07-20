@@ -2,14 +2,22 @@
 
 ## Current Snapshot
 - Last Updated: 2026-07-20 +08:00
-- Phase: v1.0.7 integration approved, history window refactor planning
-- Superpowers Phase: screenshot critique -> approved full scope -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
-- Superpowers Spec: `docs/superpowers/specs/2026-07-18-studio-ui-polish-v1.0.7-design.md`
-- Superpowers Plan: `docs/superpowers/plans/2026-07-18-studio-ui-polish-v1.0.7.md`
-- Branch: `codex/studio-ui-polish-v1.0.7` (ready to fast-forward `main`)
-- Goal: Preserve the current Studio architecture and tone while making results dominant, reducing simultaneous controls, clarifying actions, restoring semantic shape hierarchy, and aligning sidebar/conversation/composer layouts.
-- Current Focus: the user explicitly authorized integrating this verified UI branch into `main`, then trying the history-window refactor on a fresh branch. Manual browser acceptance remains pending and must not be claimed; no package, G: sync, paid upstream request, push or release is authorized.
-- Latest Verification: product commit `16b960c` replaces the over-broad image-drag block with a deliberate-hold guard. Fresh verification on 2026-07-20 passed all 133 Node tests, `npm run test:size`, TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, four-module `py_compile`, and `git diff --check`. Current assets are `index-DVmZ99xD.js` and `index-BmiGLwyN.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy, so rendered/clicked drag behavior is intentionally not claimed. Temporary manual service PID `56600` remains available. No package or G: sync is authorized. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Phase: v1.0.8 history window refactor locally verified, awaiting manual browser acceptance
+- Superpowers Phase: approved direction -> local main integration -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
+- Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
+- Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
+- Branch: `codex/history-window-refactor-v1.0.8`
+- Goal: Reuse the existing history data and APIs while turning the left history trigger, compact recent-batch preview, full image browser and history context into one coherent history surface.
+- Current Focus: product implementation and automated verification are complete. The user should manually inspect the branch service at `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed. No package, G: sync, paid upstream request, push, merge of v1.0.8, tag or release is authorized.
+- Latest Verification: fresh verification on 2026-07-20 passed all 136 Node tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, four-module `py_compile`, and `git diff --check`. Current assets are `index-C7ABjb7N.js` and `index-DGWGQ2vX.css`. The release gate now recognizes 18 frontend test modules, including `historySurface.test.mjs`. Automatic real-browser interaction remains blocked by enterprise loopback policy, so rendered/clicked behavior is intentionally not claimed. Temporary branch service PID `47152` is listening on port `14261`; the existing main UI service on `14260` is separate. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+
+## v1.0.8 History Window Refactor
+- Main integration: local `main` was fast-forwarded to verified UI commit `af4afc0`; it remains 68 commits ahead of `origin/main` and was not pushed.
+- Stable entry: `存图夹` and `历史窗` remain side by side in both sidebar modes. History refresh moved to the history-count row.
+- Compact state: clicking `历史窗` opens a viewport-clamped fixed popover for the newest batch that actually contains images. It shows all images in that batch and opens the existing preview lightbox without adding another persistence model.
+- Full state: the complete history window is now grid-only, retains favorite/date/engine filters and incremental loading, and represents multi-image records with a maximum four-cell batch collage plus remaining count.
+- Detail state: history context opens inside the same full window. Returning by button or Esc restores the prior grid scroll position; closing returns keyboard focus to the stable sidebar trigger.
+- Compatibility: no FastAPI route, `/api/history` payload, `outputs/history.json`, favorite granularity, delete semantics, session schema, queue behavior or Classic route changed.
 
 ## v1.0.7 Screenshot Feedback Follow-up
 - Results: single images stay compact at their truthful aspect ratio and open the existing lightbox on click; mask and download live on the image, while `继续编辑` and `更多` form one stable footer row. Internal filenames are hidden. A shared output size appears once beside model/time; mixed multi-image sizes remain per-image.

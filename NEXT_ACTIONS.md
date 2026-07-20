@@ -1,24 +1,19 @@
 # Next Actions
 
 ## Now
-- [x] Create `codex/studio-ui-polish-v1.0.7`, record the Chinese design/plan, add RED coverage, and pass the Node plus production-build baseline.
-- [x] Implement result-first layout and common conversation/composer alignment.
-- [x] Implement control consolidation, copy clarification, semantic radii and restrained emphasis.
-- [x] Apply screenshot follow-ups for compact results, image-corner actions, stable menus, neutral favorites, history cards, metadata placement and accidental image-drag protection.
-- [x] Replace the over-broad internal-image drag ban with a 180ms deliberate-hold guard while preserving native drag-to-reference behavior.
-- [x] Run the full Node/build/size/release and HTTP-static matrix without a paid upstream request.
-- [x] Run the fresh automated verification matrix before integration; all 133 Node tests, build/size checks, 33 release-cache tests, Python compile checks and diff check passed.
-- [ ] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
-- [ ] Refactor history into one shared surface with compact recent-batch preview, full browser and in-window detail; preserve existing APIs and schemas.
-- [ ] Refresh `http://127.0.0.1:14260/` and manually accept the real rendered/clicked UI before packaging or syncing G:.
+- [x] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
+- [x] Refactor history into one shared surface with compact recent-batch preview, grid-only full browser and in-window detail while preserving existing APIs and schemas.
+- [x] Verify 136/136 Node tests, size rules, warning-free production build, 33/33 release-cache tests, four-module compile and diff check.
+- [ ] Manually inspect `http://127.0.0.1:14261/`: stable left entry, recent-batch popover, multi-image grid, same-window context, Esc/back scroll restoration and 320px/narrow behavior.
+- [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
-- Start here: fast-forward `main` to product commit `16b960c`, then branch `codex/history-window-refactor-v1.0.8`; begin with the history surface state and existing `HistoryEntry` selectors.
-- Do not redo: the screenshot-driven UI implementation, drag-intent tests, 133/133 Node suite, size/build, 33/33 release gate, compile/diff check or HTTP static smoke unless product code changes.
-- Verify next: confirm quick image movement stays a click, holding about 180ms then dragging still adds a reference, the result image has no filename or thin edge, shared dimensions sit in the completion row, menus dismiss reliably, and history actions do not overlap. Automatic browser automation cannot perform this loopback gate.
-- Do not claim: browser manual acceptance, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion. The user has authorized the local merge only.
-- Release boundary: no v1.0.7 ZIP or synchronized folder exists. G: remains unchanged. The temporary manual service is PID `56600` on port `14260`; stop only that exact process after acceptance.
-- Current Studio assets: `index-DVmZ99xD.js` and `index-BmiGLwyN.css`.
+- Start here: open the branch service on port `14261` and perform the manual checks listed above. Product code and automated verification are complete.
+- Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 136/136 Node suite, size/build, 33/33 release gate, compile or diff check unless product code changes.
+- Verify next: focus on actual visual density, popover placement, thumbnail click behavior, detail return position, menu dismissal and narrow-screen overflow. Automatic browser automation cannot perform this loopback gate.
+- Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
+- Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Branch service PID `47152` uses port `14261`; the existing `14260` service is separate.
+- Current Studio assets: `index-C7ABjb7N.js` and `index-DGWGQ2vX.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
