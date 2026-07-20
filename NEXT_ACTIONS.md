@@ -2,19 +2,19 @@
 
 ## Now
 - [x] Integrate the verified v1.0.7 branch locally, create `codex/history-window-refactor-v1.0.8`, and refactor history into compact, full-browser and in-window-detail states without schema changes.
-- [x] Complete the responsive/model follow-ups: explicit GPT-5.6 Sol/Terra/Luna presets, stable title/utilities then engine/configuration header rows, browser-persisted composer height, and a full-width top-edge drag rail.
-- [x] Verify 139/139 Node tests, 238/238 prior Python tests, size rules, warning-free production build, 33/33 release-cache tests, `app.py` compile, diff check and HTTP static smoke.
-- [ ] Manually inspect `http://127.0.0.1:14261/`: check the header around 589px/560px, then drag/reload/window-clamp/reset the composer height.
+- [x] Complete the responsive/interaction follow-ups: explicit GPT-5.6 Sol/Terra/Luna presets, stable narrow header rows, browser-persisted composer height, a boundary drag rail without a floating reset control, and non-selectable full-surface session-card switching.
+- [x] Verify 140/140 Node tests, 238/238 prior Python tests, size rules, warning-free production build, 33/33 release-cache tests, `app.py` compile, diff check and HTTP static smoke.
+- [ ] Manually inspect `http://127.0.0.1:14261/`: check the header around 589px/560px, confirm the grip sits on the composer/canvas boundary, then drag/reload/window-clamp it and reset by double-click or `Home`; repeatedly click session titles, metadata and card padding to confirm no text cursor or swallowed switch.
 - [ ] Recheck the chat-model selector alias/Sol/Terra/Luna choices and history batch/detail/Esc behavior.
 - [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
 - Start here: refresh the branch service on port `14261` and perform the header/composer/history manual checks listed above. Product code and automated verification are complete.
-- Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 139/139 Node suite, 238/238 prior Python suite, size/build, 33/33 release gate, compile or diff check unless product code changes.
-- Verify next: resize around 589px and 560px, then test drag/reload/window-clamp/reset for the composer height. Confirm the four GPT-5.6-family choices, the first four-image test record's four-cell mini collage with a `4` badge, and the compact history count. Automatic browser automation cannot perform this loopback gate.
+- Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 140/140 Node suite, 238/238 prior Python suite, size/build, 33/33 release gate, compile or diff check unless product code changes.
+- Verify next: resize around 589px and 560px, confirm no reset button floats on the divider, then test drag/reload/window-clamp plus double-click/`Home` reset. Repeatedly switch sessions from text and surrounding padding while slightly moving the pointer; confirm no selection caret and ensure delete still deletes rather than switches. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
 - Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Branch service PID `50968` uses port `14261`; the existing `14260` service is separate.
-- Current Studio assets: `index-fAwC0DFA.js` and `index-BcVX-XKX.css`.
+- Current Studio assets: `index-LGy_W0H4.js` and `index-BGgboWHF.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
