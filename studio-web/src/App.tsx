@@ -4008,7 +4008,12 @@ function App() {
                 <div className="session-list">
                   {sortedSessions.map((session) => (
                     <article className={session.id === activeSessionId ? "session-card active" : "session-card"} key={session.id}>
-                      <button type="button" className="session-open" onClick={() => requestSessionSwitch(session.id)}>
+                      <button
+                        type="button"
+                        className="session-open"
+                        aria-current={session.id === activeSessionId ? "page" : undefined}
+                        onClick={() => requestSessionSwitch(session.id)}
+                      >
                         <span>{localizeSessionTitle(session.title, t)}</span>
                         <small>{formatTime(session.updatedAt, language)} · {t("app.turns", { count: session.turns.length })}</small>
                       </button>

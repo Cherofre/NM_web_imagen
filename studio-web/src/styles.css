@@ -342,6 +342,7 @@ button.primary-action:focus-visible,
 }
 
 .session-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px;
   gap: 7px;
@@ -365,6 +366,8 @@ button.primary-action:focus-visible,
 }
 
 .session-open {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -374,13 +377,30 @@ button.primary-action:focus-visible,
   border-radius: 12px;
   background: transparent;
   color: var(--ink);
+  cursor: pointer;
   text-align: left;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.session-open::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  bottom: -6px;
+  left: -6px;
+}
+
+.session-open:active {
+  background: #f5f5f4;
 }
 
 .session-open span,
 .session-open small {
   min-width: 0;
   overflow: hidden;
+  pointer-events: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -397,6 +417,8 @@ button.primary-action:focus-visible,
 }
 
 .session-card > button:last-child {
+  position: relative;
+  z-index: 2;
   display: grid;
   place-items: center;
   width: 32px;

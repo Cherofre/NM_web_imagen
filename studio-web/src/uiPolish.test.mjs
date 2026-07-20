@@ -82,6 +82,16 @@ test("floating tooltip uses stronger readable styling", () => {
   assert.match(cssBlock(".inline-tooltip.top"), /transform:\s*translate\(-50%, calc\(-100% \+ 4px\)\);/);
 });
 
+test("session cards keep text selection and dead padding from swallowing clicks", () => {
+  assert.match(appSource, /className="session-open"[\s\S]*aria-current=\{session\.id === activeSessionId \? "page" : undefined\}[\s\S]*onClick=\{\(\) => requestSessionSwitch\(session\.id\)\}/);
+  assert.match(cssBlock(".session-card"), /position:\s*relative;/);
+  assert.match(cssBlock(".session-open"), /position:\s*relative;[\s\S]*cursor:\s*pointer;[\s\S]*user-select:\s*none;/);
+  assert.match(cssBlock(".session-open::before"), /content:\s*"";[\s\S]*top:\s*-6px;[\s\S]*right:\s*-7px;[\s\S]*bottom:\s*-6px;[\s\S]*left:\s*-6px;/);
+  assert.match(cssBlock(".session-open span,\n.session-open small"), /pointer-events:\s*none;/);
+  assert.match(cssBlock(".session-open:active"), /background:\s*#f5f5f4;/);
+  assert.match(cssBlock(".session-card > button:last-child"), /position:\s*relative;[\s\S]*z-index:\s*2;/);
+});
+
 test("advanced parameter toggles align to input height without stretching", () => {
   assert.match(cssBlock(".settings-grid"), /align-items:\s*start;/);
   assert.match(css, /\.toggle\s*\{[\s\S]*align-self:\s*end;[\s\S]*height:\s*42px;[\s\S]*min-height:\s*42px;/);
