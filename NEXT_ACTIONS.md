@@ -4,18 +4,18 @@
 - [x] Integrate the verified v1.0.7 branch locally, create `codex/history-window-refactor-v1.0.8`, and refactor history into compact, full-browser and in-window-detail states without schema changes.
 - [x] Complete the responsive/interaction follow-ups: explicit GPT-5.6 Sol/Terra/Luna presets, stable narrow header rows, browser-persisted composer height, a boundary drag rail without a floating reset control, and non-selectable full-surface session-card switching.
 - [x] Add persisted lightweight mask-review snapshots, source-aware history detail return paths, preview-first Escape handling and a preview `查看详情` action at product commit `41f0b2d`.
-- [x] Verify 145/145 Node tests, 239/239 Python tests, size rules, warning-free production build, `app.py` compile, diff check and HTTP static smoke for `index-BEa1g2Xd.js` / `index-CEN8B5E_.css`.
-- [x] Restart the branch Uvicorn service on `14261`: old PID `50968` stopped, current-branch PID `48232` is healthy and serves the new assets.
-- [ ] Manually verify four new paths: a newly submitted mask shows `本次遮罩`; sidebar history detail closes on Esc; full-history image preview Esc returns to the history window; compact-history preview shows `查看详情` and Esc returns one layer at a time. Then recheck the existing 589px/560px header, composer grip/height persistence, session-card hit target, chat-model choices and history batch layout.
+- [x] Fix foreground preview focus and toolbar order, prevent background-history Escape handling, and keep the compact recent-history popover open during its own internal scrolling at product commit `7a6c528`.
+- [x] Verify 147/147 Node tests, 239/239 Python tests, size rules, warning-free production build, 33/33 release-cache tests, `app.py` compile and diff check; branch Uvicorn PID `48232` is healthy on `14261` and serves `index-hlp9jyMM.js` / `index-CEN8B5E_.css`.
+- [ ] Manually verify the current paths: a newly submitted mask shows `本次遮罩`; preview buttons read `查看详情 / 编辑遮罩 / 作为参考图 / 下载 / 关闭`; the first Esc closes only the foreground image preview and the next Esc backs out of the history layer; compact-history preview shows `查看详情`; scrolling inside the narrow recent-history grid does not close it, while outside interaction still does. Then recheck the existing 589px/560px header, composer grip/height persistence, session-card hit target, chat-model choices and history batch layout.
 - [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
-- Start here: refresh `http://127.0.0.1:14261/`, create one new masked generation and perform the four history/preview checks above. Product code, service restart and automated verification are complete.
-- Do not redo: product commit `41f0b2d`, 145/145 Node, 239/239 Python, size/build/compile/diff/HTTP smoke unless product code changes.
-- Verify next: confirm the mask snapshot persists after service restart and page reload, then test Escape in the exact order `preview -> detail/origin -> history surface`. Continue the prior 589px/560px header, composer and session-card checks afterward. Automatic browser automation cannot perform this loopback gate.
+- Start here: refresh `http://127.0.0.1:14261/`, create one new masked generation and perform the history/preview/internal-scroll checks above. Product code, service restart and automated verification are complete.
+- Do not redo: product commits `41f0b2d` and `7a6c528`, 147/147 Node, 239/239 Python, 33/33 release-cache tests, size/build/compile/diff/HTTP smoke unless product code changes.
+- Verify next: confirm the mask snapshot persists after service restart and page reload, then test Escape in the exact order `preview -> detail/origin -> history surface`, and wheel/touchpad-scroll the compact history grid at a narrow width. Continue the prior 589px/560px header, composer and session-card checks afterward. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
 - Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Current branch service PID `48232` runs on `14261`; the existing `14260` service is separate.
-- Current Studio assets: `index-BEa1g2Xd.js` and `index-CEN8B5E_.css`.
+- Current Studio assets: `index-hlp9jyMM.js` and `index-CEN8B5E_.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; old records have no recoverable mask data; new records persist only a review composite, not the editable full mask; mask boundaries remain prompt guidance; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
