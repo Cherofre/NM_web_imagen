@@ -1,16 +1,16 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-20 11:56 +08:00
+- Last Updated: 2026-07-20 13:03 +08:00
 - Phase: v1.0.8 history window plus responsive/model follow-up locally verified, awaiting manual browser acceptance
 - Superpowers Phase: approved direction -> local main integration -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
 - Branch: `codex/history-window-refactor-v1.0.8`
-- Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), and `8a972c4` (responsive header/model controls)
+- Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), `8a972c4` (responsive header/model controls), and `2d8a263` (compact header grid and explicit GPT-5.6 tiers)
 - Goal: Reuse the existing history data and APIs while turning the left history trigger, compact recent-record preview, full image browser and history context into one coherent history surface.
-- Current Focus: the history surface still needs manual acceptance, and the latest follow-up makes the narrow header content-width instead of full-width. The GPT configuration now distinguishes the image model from the chat model, offers GPT-5.6 for new configurations, defaults reasoning to `auto`, and accepts `max` without changing existing saved profiles. The user should refresh and recheck `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed.
-- Latest Verification: 138 Node tests, 238 Python tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, four-module `py_compile`, PowerShell parser check, `git diff --check`, and HTTP health/static smoke on port `14261` all passed. Current assets are `index-CcdSOrrk.js` and `index-CKUr9pvk.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy. Temporary branch service PID `50968` is listening on port `14261`; the existing main UI service on `14260` is separate. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: the history surface still needs manual acceptance. The 649px header feedback is now addressed with a two-row grid: engine and configuration controls share the first control row, while language/more utilities stay compact on the right; narrower phone widths reflow without squeezing. GPT chat presets now explain `gpt-5.6` as the official Sol alias and also list `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Existing saved profiles remain unchanged. The user should refresh and recheck `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed.
+- Latest Verification: the frontend follow-up passed 138 Node tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, `git diff --check`, and HTTP static smoke on port `14261`. The prior backend slice remains verified at 238 Python tests and was not modified by this follow-up. Current assets are `index-0uQczoOG.js` and `index-C9KuJdon.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy. Temporary branch service PID `50968` is listening on port `14261`; the existing main UI service on `14260` is separate. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
 
 ## v1.0.8 History Window Refactor
 - Main integration: local `main` was fast-forwarded to verified UI commit `af4afc0`; it remains 68 commits ahead of `origin/main` and was not pushed.

@@ -4,17 +4,18 @@
 - [x] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
 - [x] Refactor history into one shared surface with compact recent-batch preview, grid-only full browser and in-window detail while preserving existing APIs and schemas.
 - [x] Refine narrow header and GPT model controls: content-width engine tabs; separate image/chat model summary; GPT-5.6 preset; `auto`/`max` reasoning support.
+- [x] Reflow the 649px header into an engine/config grid and add explicit Sol/Terra/Luna chat-model presets while retaining the `gpt-5.6` alias.
 - [x] Verify 138/138 Node tests, 238/238 Python tests, size rules, warning-free production build, 33/33 release-cache tests, four-module compile, PowerShell parser and diff check.
-- [ ] Manually inspect `http://127.0.0.1:14261/`: compact popover should show 12 different records; the persistent left history list should show two/four-cell batch collages and count badges; at a narrow width engine tabs should hug their content; config summary should show `生图 … · 聊天 …`; full history/detail/Esc behavior should remain correct.
+- [ ] Manually inspect `http://127.0.0.1:14261/`: at approximately 649px wide, engine tabs and the configuration button should share one row instead of leaving a large empty right side; language/more utilities should sit compactly below/right; the chat-model selector should explain the alias and expose Sol/Terra/Luna. History batch/detail/Esc behavior should remain correct.
 - [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
 - Start here: refresh the branch service on port `14261` and perform the manual checks listed above. Product code and automated verification are complete.
 - Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 138/138 Node suite, 238/238 Python suite, size/build, 33/33 release gate, compile, parser or diff check unless product code changes.
-- Verify next: confirm the first four-image test record is a four-cell mini collage with a `4` badge in the left history list; the compact window should still read `最近 12 条 · 共 101 条`; resize to the narrow screenshot width and check the tab width and config summary. Automatic browser automation cannot perform this loopback gate.
+- Verify next: refresh, resize to the reported 649px width, and check the header grid plus the four GPT-5.6-family choices. Then confirm the first four-image test record is still a four-cell mini collage with a `4` badge and the compact history window still reads `最近 12 条 · 共 101 条`. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
 - Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Branch service PID `50968` uses port `14261`; the existing `14260` service is separate.
-- Current Studio assets: `index-CcdSOrrk.js` and `index-CKUr9pvk.css`.
+- Current Studio assets: `index-0uQczoOG.js` and `index-C9KuJdon.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
