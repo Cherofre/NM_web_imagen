@@ -1,8 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-20 16:28 +08:00
-- Phase: v1.0.8 mask-review and history-navigation follow-up locally verified, awaiting service restart and manual browser acceptance
+- Last Updated: 2026-07-20 16:49 +08:00
+- Phase: v1.0.8 mask-review and history-navigation follow-up running on 14261, awaiting manual browser acceptance
 - Superpowers Phase: approved direction -> local main integration -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
@@ -10,7 +10,7 @@
 - Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), `8a972c4` (responsive header/model controls), `2d8a263` (compact header grid and explicit GPT-5.6 tiers), `ac3926c` (stable narrow header plus persisted composer height), `41a34a5` (composer-edge resize affordance), `6af8700` (stable session-card hit targets), and `41f0b2d` (mask review snapshots plus source-aware history navigation)
 - Goal: Keep the current Studio layout while making mask use reviewable and making compact/sidebar/full history behave as one predictable layered surface.
 - Current Focus: new masked generation turns now carry a longest-edge 384px composite review snapshot and show a labeled `本次遮罩` thumbnail beside their reference images. The full-resolution editable mask remains queue-only; the lightweight review image is persisted through the existing Studio session-reference storage. History detail records whether it came from the sidebar, compact history or full browser. Escape closes only the top layer, sidebar-opened detail closes instead of inventing a full-browser step, and compact-history previews expose `查看详情`. Old turns cannot recover masks that were never saved. Manual rendering/click acceptance remains pending.
-- Latest Verification: 145/145 Node tests, 239/239 Python tests, `npm run test:size`, warning-free TypeScript/Vite production build, `app.py` compile, `git diff --check`, ledger health and HTTP static smoke passed. Port `14261` serves `index-BEa1g2Xd.js` and `index-CEN8B5E_.css` with 200 responses. Automatic browser access remains blocked by enterprise loopback policy. Host process-control policy also rejected the attempted precise 14261 restart before execution, so PID `50968` still runs the old in-memory backend; static files are current, but the service must be restarted before manually accepting persisted mask snapshots. The separate `14260` service and pre-existing untracked `PRODUCT.md`, `.impeccable/`, and `config.local.json.bak` remain untouched.
+- Latest Verification: 145/145 Node tests, 239/239 Python tests, `npm run test:size`, warning-free TypeScript/Vite production build, `app.py` compile, `git diff --check`, ledger health and HTTP static smoke passed. After explicit user authorization, old PID `50968` was precisely verified and stopped, then current-branch Uvicorn started as PID `48232` on `14261`. Health returns 200/`ok=true`, and `index-BEa1g2Xd.js` plus `index-CEN8B5E_.css` return 200. The current backend code is now loaded; only manual browser interaction remains pending because automatic loopback browser access is policy-blocked. The separate `14260` service and pre-existing untracked `PRODUCT.md`, `.impeccable/`, and `config.local.json.bak` remain untouched.
 
 ## v1.0.8 Mask Review and History Navigation Follow-up
 - Mask review: applying a mask exports the existing full PNG base/mask for submission plus a compact WebP composite with the same red 52% overlay used by the editor. Only the compact composite enters `maskSnapshot`; it is normalized into `outputs/session_refs/`, counted by existing storage budgets and updated to its canonical output URL after save.
