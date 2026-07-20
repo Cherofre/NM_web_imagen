@@ -1258,6 +1258,7 @@ function App() {
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
   const composerPromptHeightPreferenceRef = useRef(initialComposerPromptHeight.current);
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
+  const previewDialogRef = useRef<HTMLDivElement | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
   const previewMaskRequestRef = useRef(0);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
@@ -1730,6 +1731,7 @@ function App() {
 
   useEffect(() => {
     if (!previewImage) return undefined;
+    const focusFrame = window.requestAnimationFrame(() => previewDialogRef.current?.focus());
     function onPreviewKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "ArrowLeft") {
         event.preventDefault();
@@ -1740,7 +1742,10 @@ function App() {
       }
     }
     window.addEventListener("keydown", onPreviewKeyDown);
-    return () => window.removeEventListener("keydown", onPreviewKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onPreviewKeyDown);
+    };
   }, [previewImage]);
 
   useEffect(() => {
@@ -1800,18 +1805,25 @@ function App() {
       setHistoryQuickPosition(null);
     }
 
-    function closeForViewportChange() {
+    function closeForViewportResize() {
+      setHistorySurface({ mode: "closed" });
+      setHistoryQuickPosition(null);
+    }
+
+    function closeForViewportScroll(event: Event) {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".history-quick-popover")) return;
       setHistorySurface({ mode: "closed" });
       setHistoryQuickPosition(null);
     }
 
     document.addEventListener("pointerdown", closeForOutsidePointer);
-    window.addEventListener("resize", closeForViewportChange);
-    window.addEventListener("scroll", closeForViewportChange, true);
+    window.addEventListener("resize", closeForViewportResize);
+    window.addEventListener("scroll", closeForViewportScroll, true);
     return () => {
       document.removeEventListener("pointerdown", closeForOutsidePointer);
-      window.removeEventListener("resize", closeForViewportChange);
-      window.removeEventListener("scroll", closeForViewportChange, true);
+      window.removeEventListener("resize", closeForViewportResize);
+      window.removeEventListener("scroll", closeForViewportScroll, true);
     };
   }, [historySurface.mode]);
 
@@ -2953,6 +2965,12 @@ function App() {
 
   function handleHistorySurfaceKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") return;
+    if (previewImage) {
+      event.preventDefault();
+      event.stopPropagation();
+      closePreviewImage();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     escapeHistorySurface();
@@ -5566,7 +5584,7 @@ function App() {
       {previewImage && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
-          <div className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
+          <div ref={previewDialogRef} className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
             <div>
               <strong>
                 {previewImage.gallery && previewImage.gallery.length > 1 ? `${previewImage.name} · ${(previewImage.galleryIndex || 0) + 1}/${previewImage.gallery.length}` : previewImage.name}
@@ -5578,7 +5596,6 @@ function App() {
                 )}
               </strong>
               <span>
-                <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
                 {previewImage.historyEntryId && (
                   <button
                     type="button"
@@ -5592,22 +5609,23 @@ function App() {
                   </button>
                 )}
                 {!previewImage.isMaskSnapshot && (
-                  <>
-                    <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
-                    <button
-                      type="button"
-                      className="preview-mask-action"
-                      onClick={() => void editPreviewMask(previewImage)}
-                      title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
-                      aria-label={t("preview.editMask")}
-                      aria-busy={previewMaskLoading}
-                      disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
-                    >
-                      {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
-                      <span>{t("preview.editMask")}</span>
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="preview-mask-action"
+                    onClick={() => void editPreviewMask(previewImage)}
+                    title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
+                    aria-label={t("preview.editMask")}
+                    aria-busy={previewMaskLoading}
+                    disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
+                  >
+                    {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
+                    <span>{t("preview.editMask")}</span>
+                  </button>
                 )}
+                {!previewImage.isMaskSnapshot && (
+                  <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
+                )}
+                <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>
