@@ -1,16 +1,16 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-20 13:03 +08:00
+- Last Updated: 2026-07-20 14:27 +08:00
 - Phase: v1.0.8 history window plus responsive/model follow-up locally verified, awaiting manual browser acceptance
 - Superpowers Phase: approved direction -> local main integration -> Chinese design/plan -> RED/GREEN slices -> full verification -> manual browser gate
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
 - Branch: `codex/history-window-refactor-v1.0.8`
-- Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), `8a972c4` (responsive header/model controls), and `2d8a263` (compact header grid and explicit GPT-5.6 tiers)
+- Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), `8a972c4` (responsive header/model controls), `2d8a263` (compact header grid and explicit GPT-5.6 tiers), and `ac3926c` (stable narrow header plus persisted composer height)
 - Goal: Reuse the existing history data and APIs while turning the left history trigger, compact recent-record preview, full image browser and history context into one coherent history surface.
-- Current Focus: the history surface still needs manual acceptance. The 649px header feedback is now addressed with a two-row grid: engine and configuration controls share the first control row, while language/more utilities stay compact on the right; narrower phone widths reflow without squeezing. GPT chat presets now explain `gpt-5.6` as the official Sol alias and also list `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Existing saved profiles remain unchanged. The user should refresh and recheck `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed.
-- Latest Verification: the frontend follow-up passed 138 Node tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, `git diff --check`, and HTTP static smoke on port `14261`. The prior backend slice remains verified at 238 Python tests and was not modified by this follow-up. Current assets are `index-0uQczoOG.js` and `index-C9KuJdon.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy. Temporary branch service PID `50968` is listening on port `14261`; the existing main UI service on `14260` is separate. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
+- Current Focus: the history surface still needs manual acceptance. The reported 589px header now has stable semantic rows: session title plus language/more utilities on top, then engine plus configuration; at phone width, engine and configuration descend in that same order without moving utilities to the bottom. Composer height is stored as a browser/device layout preference, temporarily clamped to the viewport without overwriting the preferred value, and reset by a small control beside the full-width top-edge drag rail. GPT chat presets and saved profiles remain unchanged. The user should refresh and recheck `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed.
+- Latest Verification: the frontend follow-up passed 139 Node tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, `app.py` compile, `git diff --check`, and HTTP static smoke on port `14261`. The served root and both new assets returned 200 and contained the new height key/header grid. The prior backend slice remains verified at 238 Python tests and was not modified by this follow-up. Current assets are `index-fAwC0DFA.js` and `index-BcVX-XKX.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy. Temporary branch service PID `50968` is listening on port `14261`; the existing main UI service on `14260` is separate. The pre-existing untracked `PRODUCT.md`, `.impeccable/`, and `config.local.json.bak` remain outside commits.
 
 ## v1.0.8 History Window Refactor
 - Main integration: local `main` was fast-forwarded to verified UI commit `af4afc0`; it remains 68 commits ahead of `origin/main` and was not pushed.
@@ -20,6 +20,12 @@
 - Full state: the complete history window is now grid-only, retains favorite/date/engine filters and incremental loading, and represents multi-image records with a maximum four-cell batch collage plus remaining count.
 - Detail state: history context opens inside the same full window. Returning by button or Esc restores the prior grid scroll position; closing returns keyboard focus to the stable sidebar trigger.
 - Compatibility: no FastAPI route, `/api/history` payload, `outputs/history.json`, favorite granularity, delete semantics, session schema, queue behavior or Classic route changed.
+
+## v1.0.8 Header and Composer Follow-up
+- Narrow header: below 920px, the title and global utilities own the first row while engine and configuration own the second. Below 560px, engine and configuration become full-width rows without changing their order.
+- Composer preference: the chosen input height is browser-local and independent of sessions. Viewport clamping affects only the displayed height, so reopening a larger window can restore the saved preference.
+- Resize affordance: the complete top edge is the drag target, with a centered visible grip, hover/focus/active feedback, Arrow Up/Down keyboard adjustment, and a reset control shown only for a custom height.
+- Compatibility: no backend route, config/profile schema, session/history/queue payload, generation behavior or Classic page changed.
 
 ## v1.0.7 Screenshot Feedback Follow-up
 - Results: single images stay compact at their truthful aspect ratio and open the existing lightbox on click; mask and download live on the image, while `继续编辑` and `更多` form one stable footer row. Internal filenames are hidden. A shared output size appears once beside model/time; mixed multi-image sizes remain per-image.

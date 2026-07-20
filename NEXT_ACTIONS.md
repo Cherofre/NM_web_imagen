@@ -1,21 +1,20 @@
 # Next Actions
 
 ## Now
-- [x] Fast-forward `main` to this verified UI branch, then create `codex/history-window-refactor-v1.0.8` from the updated `main`.
-- [x] Refactor history into one shared surface with compact recent-batch preview, grid-only full browser and in-window detail while preserving existing APIs and schemas.
-- [x] Refine narrow header and GPT model controls: content-width engine tabs; separate image/chat model summary; GPT-5.6 preset; `auto`/`max` reasoning support.
-- [x] Reflow the 649px header into an engine/config grid and add explicit Sol/Terra/Luna chat-model presets while retaining the `gpt-5.6` alias.
-- [x] Verify 138/138 Node tests, 238/238 Python tests, size rules, warning-free production build, 33/33 release-cache tests, four-module compile, PowerShell parser and diff check.
-- [ ] Manually inspect `http://127.0.0.1:14261/`: at approximately 649px wide, engine tabs and the configuration button should share one row instead of leaving a large empty right side; language/more utilities should sit compactly below/right; the chat-model selector should explain the alias and expose Sol/Terra/Luna. History batch/detail/Esc behavior should remain correct.
+- [x] Integrate the verified v1.0.7 branch locally, create `codex/history-window-refactor-v1.0.8`, and refactor history into compact, full-browser and in-window-detail states without schema changes.
+- [x] Complete the responsive/model follow-ups: explicit GPT-5.6 Sol/Terra/Luna presets, stable title/utilities then engine/configuration header rows, browser-persisted composer height, and a full-width top-edge drag rail.
+- [x] Verify 139/139 Node tests, 238/238 prior Python tests, size rules, warning-free production build, 33/33 release-cache tests, `app.py` compile, diff check and HTTP static smoke.
+- [ ] Manually inspect `http://127.0.0.1:14261/`: check the header around 589px/560px, then drag/reload/window-clamp/reset the composer height.
+- [ ] Recheck the chat-model selector alias/Sol/Terra/Luna choices and history batch/detail/Esc behavior.
 - [ ] After manual acceptance, decide whether to merge `codex/history-window-refactor-v1.0.8` into `main`; do not package, sync G:, push, tag or release without a new explicit instruction.
 
 ## Handoff Notes
-- Start here: refresh the branch service on port `14261` and perform the manual checks listed above. Product code and automated verification are complete.
-- Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 138/138 Node suite, 238/238 Python suite, size/build, 33/33 release gate, compile, parser or diff check unless product code changes.
-- Verify next: refresh, resize to the reported 649px width, and check the header grid plus the four GPT-5.6-family choices. Then confirm the first four-image test record is still a four-cell mini collage with a `4` badge and the compact history window still reads `最近 12 条 · 共 101 条`. Automatic browser automation cannot perform this loopback gate.
+- Start here: refresh the branch service on port `14261` and perform the header/composer/history manual checks listed above. Product code and automated verification are complete.
+- Do not redo: the v1.0.7 UI work, v1.0.8 history implementation, 139/139 Node suite, 238/238 prior Python suite, size/build, 33/33 release gate, compile or diff check unless product code changes.
+- Verify next: resize around 589px and 560px, then test drag/reload/window-clamp/reset for the composer height. Confirm the four GPT-5.6-family choices, the first four-image test record's four-cell mini collage with a `4` badge, and the compact history count. Automatic browser automation cannot perform this loopback gate.
 - Do not claim: browser manual acceptance, v1.0.8 merge, package/G: sync, push, tag, pull request, GitHub Release, or worktree/branch deletion.
 - Release boundary: local `main` contains v1.0.7 through `af4afc0`; v1.0.8 remains isolated on `codex/history-window-refactor-v1.0.8`. G: remains unchanged. Branch service PID `50968` uses port `14261`; the existing `14260` service is separate.
-- Current Studio assets: `index-0uQczoOG.js` and `index-C9KuJdon.css`.
+- Current Studio assets: `index-fAwC0DFA.js` and `index-BcVX-XKX.css`.
 - Known limits: automatic real-browser smoke is blocked by enterprise loopback policy; mask boundaries remain prompt guidance rather than pixel-perfect constraints; mask binaries are not restored after page refresh; custom gateways must support edits multipart `image[]` and `mask`.
 
 ## Prior Release Context
