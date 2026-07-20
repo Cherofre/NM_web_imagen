@@ -332,7 +332,7 @@ const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
 const gptQualityOptions = ["auto", "low", "medium", "high"];
-const gptChatModelOptions = ["gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
+const gptChatModelOptions = ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
@@ -3584,6 +3584,14 @@ function App() {
     return t(`option.${value}`) === `option.${value}` ? value : t(`option.${value}`);
   }
 
+  function chatModelOptionLabel(value: string) {
+    if (value === "gpt-5.6") return t("config.chatModelAlias");
+    if (value === "gpt-5.6-sol") return t("config.chatModelSol");
+    if (value === "gpt-5.6-terra") return t("config.chatModelTerra");
+    if (value === "gpt-5.6-luna") return t("config.chatModelLuna");
+    return value === "custom" ? t("config.custom") : value;
+  }
+
   function bananaImageSizeLabel(value: string) {
     return value === "无" ? t("option.noExtra") : value;
   }
@@ -4024,20 +4032,20 @@ function App() {
                 Banana Gemini
               </button>
             </div>
+            <button
+              type="button"
+              className={hasCompleteConfig ? "connection-button configured" : "connection-button needs-config"}
+              onClick={() => setConnectionOpen(true)}
+              title={hasCompleteConfig ? t("config.editTitle", { name: activeProfileName, model: activeModelSummary || t("config.modelName") }) : t("config.incompleteTitle", { items: listText(activeConfigIssues) })}
+            >
+              <PencilLine size={15} />
+              <span className="connection-button-text">
+                <strong>{configButtonLabel}</strong>
+                {hasCompleteConfig && <small>{activeModelSummary || t("config.modelName")}</small>}
+              </span>
+              <ChevronDown size={14} />
+            </button>
             <div className="header-actions">
-              <button
-                type="button"
-                className={hasCompleteConfig ? "connection-button configured" : "connection-button needs-config"}
-                onClick={() => setConnectionOpen(true)}
-                title={hasCompleteConfig ? t("config.editTitle", { name: activeProfileName, model: activeModelSummary || t("config.modelName") }) : t("config.incompleteTitle", { items: listText(activeConfigIssues) })}
-              >
-                <PencilLine size={15} />
-                <span className="connection-button-text">
-                  <strong>{configButtonLabel}</strong>
-                  {hasCompleteConfig && <small>{activeModelSummary || t("config.modelName")}</small>}
-                </span>
-                <ChevronDown size={14} />
-              </button>
               <div className="language-switcher" role="group" aria-label={t("language.switcher")}>
                 <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
                 <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
@@ -4962,7 +4970,7 @@ function App() {
                           }}
                         >
                           {gptChatModelOptions.map((item) => (
-                            <option key={item} value={item}>{item === "custom" ? t("config.custom") : item}</option>
+                            <option key={item} value={item}>{chatModelOptionLabel(item)}</option>
                           ))}
                         </select>
                         <input placeholder={t("config.customChatModel")} value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />

@@ -620,15 +620,20 @@ test("shape hierarchy keeps pills for switches and regular controls compact", ()
 });
 
 test("header distinguishes image and chat models with current reasoning controls", () => {
-  assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
+  assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6", "gpt-5\.6-sol", "gpt-5\.6-terra", "gpt-5\.6-luna", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
   assert.match(appSource, /const gptReasoningOptions = \["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"\];/);
   assert.match(appSource, /chat_model: "gpt-5\.6",\s*reasoning_effort: "auto",/);
+  assert.match(appSource, /function chatModelOptionLabel\(value: string\)[\s\S]*config\.chatModelAlias[\s\S]*config\.chatModelSol[\s\S]*config\.chatModelTerra[\s\S]*config\.chatModelLuna/);
   assert.match(appSource, /const activeModelSummary = activeEngine === "gpt-image-2"[\s\S]*t\("config\.gptModelSummary", \{ image: gptForm\.model, chat: gptForm\.chat_model \}\)/);
   assert.match(appSource, /<small>\{activeModelSummary \|\| t\("config\.modelName"\)\}<\/small>/);
   assert.match(appSource, /<Field label=\{t\("config\.chatModel"\)\} help=\{t\("config\.chatModelHelp"\)\}>/);
   assert.match(appSource, /<Field label=\{t\("config\.reasoning"\)\} help=\{t\("config\.reasoningHelp"\)\}>/);
   assert.match(i18nSource, /"config\.gptModelSummary": "生图 \{image\} · 聊天 \{chat\}"/);
-  assert.match(i18nSource, /"config\.chatModelHelp": "GPT-5\.6 只用于聊天，不会替换上方的生图模型。"/);
+  assert.match(i18nSource, /"config\.chatModelHelp": "GPT-5\.6 是当前指向 Sol 的官方别名；也可明确选择 Sol、Terra 或 Luna。这里只影响聊天，不会替换生图模型。"/);
+  assert.match(i18nSource, /"config\.chatModelAlias": "gpt-5\.6（官方别名，当前指向 Sol）"/);
+  assert.match(i18nSource, /"config\.chatModelSol": "gpt-5\.6-sol（旗舰）"/);
+  assert.match(i18nSource, /"config\.chatModelTerra": "gpt-5\.6-terra（质量与成本均衡）"/);
+  assert.match(i18nSource, /"config\.chatModelLuna": "gpt-5\.6-luna（速度与成本优先）"/);
   assert.match(i18nSource, /"config\.reasoningHelp": "自动不会发送思考强度，由上游模型采用自己的默认值。不同模型支持范围不同，若接口报参数错误请改为自动。"/);
   assert.match(i18nSource, /"option\.max": "最高"/);
   assert.match(i18nSource, /"option\.max": "Max"/);
@@ -800,6 +805,7 @@ test("history sidebar actions read as a compact tool group", () => {
 test("narrow layout keeps sessions as a left drawer and pins composer to the bottom", () => {
   const tablet = mediaBlock("max-width: 920px");
   const phone = mediaBlock("max-width: 560px");
+  const compact = mediaBlock("max-width: 380px");
   assert.match(appSource, /const SIDEBAR_NARROW_QUERY = "\(max-width: 920px\)";/);
   assert.match(appSource, /function shouldStartHistoryCollapsed\(\)[\s\S]*window\.matchMedia\(SIDEBAR_NARROW_QUERY\)\.matches/);
   assert.match(appSource, /const \[historyCollapsed, setHistoryCollapsed\] = useState\(\(\) => shouldStartHistoryCollapsed\(\)\);/);
@@ -810,11 +816,16 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlock(".history-sidebar-backdrop"), /display:\s*none;/);
   assert.match(cssBlockIn(tablet, ".history-sidebar-backdrop"), /position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*40;[\s\S]*display:\s*block;[\s\S]*background:\s*rgba\(28, 25, 23, 0\.14\);/);
   assert.match(cssBlockIn(tablet, ".history-sidebar"), /position:\s*fixed;[\s\S]*left:\s*10px;[\s\S]*bottom:\s*10px;[\s\S]*width:\s*min\(300px, calc\(100vw - 56px\)\);/);
-  assert.match(cssBlockIn(tablet, ".mode-tabs"), /align-self:\s*flex-start;[\s\S]*width:\s*fit-content;[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*visible;/);
+  assert.match(cssBlockIn(tablet, ".workspace-controls"), /display:\s*grid;[\s\S]*grid-template-columns:\s*max-content minmax\(190px, 246px\);[\s\S]*grid-template-areas:\s*"mode connection"\s*"\. utilities";[\s\S]*justify-content:\s*space-between;/);
+  assert.match(cssBlockIn(tablet, ".mode-tabs"), /grid-area:\s*mode;[\s\S]*width:\s*fit-content;[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*visible;/);
+  assert.match(cssBlockIn(tablet, ".connection-button"), /grid-area:\s*connection;[\s\S]*justify-self:\s*end;[\s\S]*width:\s*100%;/);
+  assert.match(cssBlockIn(tablet, ".header-actions"), /grid-area:\s*utilities;[\s\S]*justify-self:\s*end;[\s\S]*width:\s*auto;/);
   assert.match(cssBlockIn(tablet, ".composer"), /position:\s*sticky;[\s\S]*bottom:\s*0;/);
   assert.match(cssBlockIn(tablet, ".composer-toolbar"), /flex-wrap:\s*wrap;[\s\S]*overflow-y:\s*visible;/);
   assert.doesNotMatch(cssBlockIn(tablet, ".composer-toolbar"), /overflow-y:\s*auto;/);
   assert.match(cssBlockIn(phone, ".history-sidebar"), /width:\s*min\(284px, calc\(100vw - 54px\)\);/);
+  assert.match(cssBlockIn(phone, ".workspace-controls"), /grid-template-columns:\s*minmax\(190px, 1fr\) auto;[\s\S]*grid-template-areas:\s*"mode mode"\s*"connection utilities";/);
+  assert.match(cssBlockIn(compact, ".workspace-controls"), /grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*grid-template-areas:\s*"mode"\s*"connection"\s*"utilities";/);
   assert.doesNotMatch(phone, /\.history-tools\s*\{[^}]*grid-template-columns:\s*1fr;/);
   assert.match(cssBlockIn(phone, ".composer-input textarea"), /padding-bottom:\s*98px;/);
   assert.match(cssBlockIn(phone, ".composer-prompt-actions"), /grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*gap:\s*6px;[\s\S]*align-items:\s*stretch;/);

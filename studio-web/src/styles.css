@@ -145,6 +145,7 @@ img {
 .new-session-button,
 .sidebar-actions button,
 .history-tools button,
+.connection-button,
 .header-actions button,
 .composer-toolbar button,
 .drawer-actions button,
@@ -169,6 +170,7 @@ img {
 .new-session-button:hover,
 .sidebar-actions button:hover,
 .history-tools button:hover,
+.connection-button:hover,
 .header-actions button:hover,
 .composer-toolbar button:hover,
 .drawer-actions button:hover,
@@ -181,6 +183,7 @@ img {
 .icon-button:active:not(:disabled),
 .new-session-button:active:not(:disabled),
 .sidebar-actions button:active:not(:disabled),
+.connection-button:active:not(:disabled),
 .header-actions button:active:not(:disabled),
 .composer-toolbar button:active:not(:disabled),
 .drawer-actions button:active:not(:disabled) {
@@ -799,6 +802,13 @@ button.primary-action:focus-visible,
 .connection-button.configured {
   border-color: var(--line);
   background: #f8f8f7;
+  color: var(--ink);
+}
+
+.connection-button.configured:hover,
+.connection-button.configured:focus-visible {
+  border-color: var(--line-strong);
+  background: #fff;
   color: var(--ink);
 }
 
@@ -4861,34 +4871,41 @@ button.primary-action:focus-visible,
   }
 
   .workspace-controls {
-    align-items: flex-start;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: max-content minmax(190px, 246px);
+    grid-template-areas:
+      "mode connection"
+      ". utilities";
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 10px;
     width: 100%;
   }
 
-  .mode-tabs,
-  .header-actions {
-    min-width: 0;
-  }
-
   .mode-tabs {
-    align-self: flex-start;
+    grid-area: mode;
+    min-width: 0;
     width: fit-content;
     max-width: 100%;
     overflow-x: visible;
   }
 
   .header-actions {
-    width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    grid-area: utilities;
+    min-width: 0;
+    justify-self: end;
+    width: auto;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
     overflow: visible;
     padding-bottom: 2px;
   }
 
   .connection-button {
-    width: 246px;
-    max-width: none;
+    grid-area: connection;
+    justify-self: end;
+    width: 100%;
+    max-width: 246px;
   }
 
   .conversation-canvas {
@@ -4954,13 +4971,16 @@ button.primary-action:focus-visible,
     min-height: 0;
   }
 
+  .workspace-controls {
+    grid-template-columns: minmax(190px, 1fr) auto;
+    grid-template-areas:
+      "mode mode"
+      "connection utilities";
+  }
+
   .mode-tabs button {
     width: auto;
     min-width: 112px;
-  }
-
-  .header-actions {
-    flex-wrap: wrap;
   }
 
   .history-sidebar {
@@ -5127,5 +5147,25 @@ button.primary-action:focus-visible,
 
   .custom-size-row button {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 380px) {
+  .workspace-controls {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "mode"
+      "connection"
+      "utilities";
+    justify-content: start;
+  }
+
+  .connection-button,
+  .header-actions {
+    justify-self: start;
+  }
+
+  .connection-button {
+    width: min(246px, 100%);
   }
 }
