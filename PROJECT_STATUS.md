@@ -7,7 +7,7 @@
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
 - Branch: `codex/history-window-refactor-v1.0.8`
-- Product Commit: `25b2915` (`feat: refactor Studio history window`)
+- Product Commits: `25b2915` (`feat: refactor Studio history window`) and `312a8d9` (`fix: show recent records in history popover`)
 - Goal: Reuse the existing history data and APIs while turning the left history trigger, compact recent-record preview, full image browser and history context into one coherent history surface.
 - Current Focus: manual feedback showed the compact surface was too narrow because it displayed only the newest generation record. It now shows the latest 12 image-bearing records, one representative thumbnail per record, with a count badge for multi-image batches. The user should refresh and recheck `http://127.0.0.1:14261/`; rendered/clicked acceptance remains pending and must not be claimed.
 - Latest Verification: fresh verification after the manual-feedback correction passed all 136 Node tests, `npm run test:size`, warning-free TypeScript/Vite production build, `tests.test_release_cache_busting` 33/33, four-module `py_compile`, and `git diff --check`. Current assets are `index-uqoX-THb.js` and `index-CYJQo652.css`. Automatic real-browser interaction remains blocked by enterprise loopback policy. Temporary branch service PID `47152` is listening on port `14261`; the existing main UI service on `14260` is separate. Only the pre-existing untracked `PRODUCT.md` and `.impeccable/` remain outside commits.
