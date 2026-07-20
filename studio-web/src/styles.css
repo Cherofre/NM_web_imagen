@@ -3603,7 +3603,7 @@ button.primary-action:focus-visible,
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
-  max-height: min(360px, calc(100vh - 16px));
+  max-height: min(340px, calc(100vh - 16px));
   padding: 12px;
   overflow: hidden;
   border: 1px solid var(--line-strong);
@@ -3688,6 +3688,7 @@ button.primary-action:focus-visible,
 }
 
 .history-quick-grid button {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 1;
@@ -3715,6 +3716,22 @@ button.primary-action:focus-visible,
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.history-quick-count {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.78);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .history-quick-empty {

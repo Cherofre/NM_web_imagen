@@ -105,8 +105,8 @@ import {
 } from "./maskEditorModel";
 import {
   historySurfaceAfterEscape,
-  latestHistoryEntryWithImages,
   positionHistoryQuickPopover,
+  recentHistoryEntriesWithImages,
   type HistoryQuickPosition,
   type HistorySurfaceState,
 } from "./historySurface";
@@ -382,7 +382,8 @@ const QUEUE_POPOVER_MIN_HEIGHT = 220;
 const QUEUE_POPOVER_MAX_HEIGHT = 520;
 const SIDEBAR_NARROW_QUERY = "(max-width: 920px)";
 const HISTORY_BROWSER_PAGE_SIZE = 80;
-const HISTORY_QUICK_POPOVER_SIZE = { width: 320, height: 260 };
+const HISTORY_QUICK_ENTRY_LIMIT = 12;
+const HISTORY_QUICK_POPOVER_SIZE = { width: 340, height: 340 };
 const ACTION_MENU_SELECTOR = "details.header-more-menu, details.image-more-actions";
 const OPEN_ACTION_MENU_SELECTOR = "details.header-more-menu[open], details.image-more-actions[open]";
 
@@ -1255,7 +1256,7 @@ function App() {
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
   const visibleHistory = filteredHistory.slice(0, historyBrowserLimit);
-  const latestHistoryEntry = latestHistoryEntryWithImages(history);
+  const recentHistoryEntries = recentHistoryEntriesWithImages(history, HISTORY_QUICK_ENTRY_LIMIT);
   const historyDetail = historySurface.mode === "browser" && historySurface.detailId
     ? history.find((entry) => entry.id === historySurface.detailId) || null
     : null;
@@ -5027,11 +5028,7 @@ function App() {
           <div className="history-quick-head">
             <div>
               <strong>{t("history.quickTitle")}</strong>
-              {latestHistoryEntry && (
-                <span>
-                  {formatTime(latestHistoryEntry.created_at, language)} · {engineLabel(latestHistoryEntry.engine || "gpt-image-2")} · {t("history.imageCount", { count: latestHistoryEntry.images?.length || 0 })}
-                </span>
-              )}
+              <span>{t("history.quickSummary", { shown: recentHistoryEntries.length, total: history.length })}</span>
             </div>
             <div className="history-quick-head-actions">
               <button className="history-quick-expand" type="button" onClick={() => void openHistoryBrowser()} title={t("history.expandBrowser")}>
@@ -5044,20 +5041,23 @@ function App() {
           </div>
           {historyLoading ? (
             <div className="history-quick-empty">{t("app.loading")}</div>
-          ) : latestHistoryEntry ? (
+          ) : recentHistoryEntries.length > 0 ? (
             <div className="history-quick-grid">
-              {latestHistoryEntry.images?.map((image, index) => {
+              {recentHistoryEntries.map((entry) => {
+                const image = entry.images?.[0];
                 const src = imageSrc(image);
-                const name = imageName(image, index);
+                const name = imageName(image);
+                const imageCount = entry.images?.length || 0;
                 return (
                   <button
                     type="button"
-                    key={`${latestHistoryEntry.id}-${index}`}
-                    onClick={() => openPreviewImages(latestHistoryEntry.images || [], index)}
+                    key={entry.id}
+                    onClick={() => openPreviewImages(entry.images || [], 0)}
                     disabled={!src}
-                    title={t("history.previewImage")}
+                    title={`${formatTime(entry.created_at, language)} · ${engineLabel(entry.engine || "gpt-image-2")} · ${entry.prompt || t("history.noPrompt")}`}
                   >
                     {src ? <img src={src} alt={name} loading="lazy" /> : <span>{t("app.noImage")}</span>}
+                    {imageCount > 1 && <span className="history-quick-count">{t("history.imageCount", { count: imageCount })}</span>}
                   </button>
                 );
               })}

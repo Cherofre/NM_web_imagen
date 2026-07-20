@@ -31,8 +31,11 @@ export type HistoryQuickPosition = {
   placement: "above" | "below";
 };
 
-export function latestHistoryEntryWithImages<T extends HistoryEntryLike>(entries: T[]): T | null {
-  return entries.find((entry) => Array.isArray(entry.images) && entry.images.length > 0) || null;
+export function recentHistoryEntriesWithImages<T extends HistoryEntryLike>(entries: T[], limit = 12): T[] {
+  const safeLimit = Math.max(0, Math.floor(limit));
+  return entries
+    .filter((entry) => Array.isArray(entry.images) && entry.images.length > 0)
+    .slice(0, safeLimit);
 }
 
 export function historySurfaceAfterEscape(state: HistorySurfaceState): HistorySurfaceState {

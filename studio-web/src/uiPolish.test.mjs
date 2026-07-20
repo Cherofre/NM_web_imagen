@@ -633,14 +633,20 @@ test("history uses one compact and full surface with an in-window detail", () =>
   assert.match(appSource, /const \[historyDateFilter, setHistoryDateFilter\]/);
   assert.match(appSource, /const \[historyEngineFilter, setHistoryEngineFilter\]/);
   assert.match(appSource, /function filteredHistoryEntries\(/);
-  assert.match(appSource, /const latestHistoryEntry = latestHistoryEntryWithImages\(history\);/);
+  assert.match(appSource, /const HISTORY_QUICK_ENTRY_LIMIT = 12;/);
+  assert.match(appSource, /const recentHistoryEntries = recentHistoryEntriesWithImages\(history, HISTORY_QUICK_ENTRY_LIMIT\);/);
+  assert.doesNotMatch(appSource, /latestHistoryEntryWithImages|const latestHistoryEntry/);
   assert.match(appSource, /className="history-quick-popover"/);
-  assert.match(appSource, /latestHistoryEntry\.images\?\.map\(\(image, index\) =>/);
+  assert.match(appSource, /recentHistoryEntries\.map\(\(entry\) =>/);
+  assert.match(appSource, /const image = entry\.images\?\.\[0\];/);
+  assert.match(appSource, /className="history-quick-count"/);
+  assert.match(appSource, /openPreviewImages\(entry\.images \|\| \[\], 0\)/);
   assert.match(appSource, /className="history-quick-expand"/);
   assert.match(appSource, /className="history-browser-grid"/);
   assert.doesNotMatch(appSource, /history-browser-list/);
   assert.match(appSource, /t\("history\.browser"\)/);
   assert.match(appSource, /t\("history\.quickTitle"\)/);
+  assert.match(appSource, /t\("history\.quickSummary"/);
   assert.match(appSource, /t\("history\.expandBrowser"\)/);
   assert.match(appSource, /t\("history\.backToBrowser"\)/);
   assert.match(appSource, /t\("history\.removeRecord"\)/);
@@ -666,7 +672,10 @@ test("history uses one compact and full surface with an in-window detail", () =>
   assert.match(cssBlock(".history-browser-card-main strong"), /white-space:\s*normal;[\s\S]*-webkit-line-clamp:\s*2;/);
   assert.match(cssBlock(".history-browser-actions"), /display:\s*flex;[\s\S]*flex-wrap:\s*wrap;/);
   assert.match(cssBlock(".history-quick-popover"), /position:\s*fixed;[\s\S]*z-index:\s*58;/);
+  assert.match(cssBlock(".history-quick-count"), /position:\s*absolute;[\s\S]*border-radius:\s*999px;/);
   assert.match(css, /(?:^|\n)\.lightbox\s*\{\s*z-index:\s*60;\s*\}/);
+  assert.match(i18nSource, /"history\.quickTitle": "最近历史"/);
+  assert.match(i18nSource, /"history\.quickSummary": "最近 \{shown\} 条 · 共 \{total\} 条"/);
 });
 
 test("history browser keeps heavy lists responsive and closes from Escape", () => {

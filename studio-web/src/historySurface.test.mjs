@@ -2,19 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   historySurfaceAfterEscape,
-  latestHistoryEntryWithImages,
   positionHistoryQuickPopover,
+  recentHistoryEntriesWithImages,
 } from "./historySurface.ts";
 
-test("latest history preview uses the newest entry that actually has images", () => {
+test("quick history preview shows multiple recent image-bearing records", () => {
   const entries = [
     { id: "empty", images: [] },
-    { id: "latest-images", images: [{ id: "a" }, { id: "b" }] },
-    { id: "older-images", images: [{ id: "c" }] },
+    ...Array.from({ length: 14 }, (_, index) => ({ id: `entry-${index}`, images: [{ id: index }] })),
   ];
 
-  assert.equal(latestHistoryEntryWithImages(entries)?.id, "latest-images");
-  assert.equal(latestHistoryEntryWithImages([{ id: "empty", images: [] }]), null);
+  assert.deepEqual(
+    recentHistoryEntriesWithImages(entries, 12).map((entry) => entry.id),
+    Array.from({ length: 12 }, (_, index) => `entry-${index}`),
+  );
+  assert.deepEqual(recentHistoryEntriesWithImages([{ id: "empty", images: [] }], 12), []);
 });
 
 test("Escape closes quick history, backs out of detail, then closes the browser", () => {
@@ -29,25 +31,25 @@ test("quick history popover stays inside the viewport and flips above when neede
     positionHistoryQuickPopover(
       { left: 250, right: 330, top: 120, bottom: 154 },
       { width: 360, height: 720 },
-      { width: 320, height: 260 },
+      { width: 340, height: 340 },
     ),
-    { left: 10, top: 162, width: 320, placement: "below" },
+    { left: 8, top: 162, width: 340, placement: "below" },
   );
 
   assert.deepEqual(
     positionHistoryQuickPopover(
       { left: 260, right: 340, top: 520, bottom: 554 },
       { width: 360, height: 640 },
-      { width: 320, height: 260 },
+      { width: 340, height: 340 },
     ),
-    { left: 20, top: 252, width: 320, placement: "above" },
+    { left: 8, top: 172, width: 340, placement: "above" },
   );
 
   assert.deepEqual(
     positionHistoryQuickPopover(
       { left: 8, right: 48, top: 72, bottom: 106 },
       { width: 320, height: 568 },
-      { width: 320, height: 260 },
+      { width: 340, height: 340 },
     ),
     { left: 8, top: 114, width: 304, placement: "below" },
   );
