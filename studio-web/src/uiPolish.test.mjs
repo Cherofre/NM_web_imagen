@@ -619,6 +619,21 @@ test("shape hierarchy keeps pills for switches and regular controls compact", ()
   assert.match(i18nSource, /"composer\.advancedTooltip": "Less common settings such as seed, style, and timeout\."/);
 });
 
+test("header distinguishes image and chat models with current reasoning controls", () => {
+  assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
+  assert.match(appSource, /const gptReasoningOptions = \["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"\];/);
+  assert.match(appSource, /chat_model: "gpt-5\.6",\s*reasoning_effort: "auto",/);
+  assert.match(appSource, /const activeModelSummary = activeEngine === "gpt-image-2"[\s\S]*t\("config\.gptModelSummary", \{ image: gptForm\.model, chat: gptForm\.chat_model \}\)/);
+  assert.match(appSource, /<small>\{activeModelSummary \|\| t\("config\.modelName"\)\}<\/small>/);
+  assert.match(appSource, /<Field label=\{t\("config\.chatModel"\)\} help=\{t\("config\.chatModelHelp"\)\}>/);
+  assert.match(appSource, /<Field label=\{t\("config\.reasoning"\)\} help=\{t\("config\.reasoningHelp"\)\}>/);
+  assert.match(i18nSource, /"config\.gptModelSummary": "生图 \{image\} · 聊天 \{chat\}"/);
+  assert.match(i18nSource, /"config\.chatModelHelp": "GPT-5\.6 只用于聊天，不会替换上方的生图模型。"/);
+  assert.match(i18nSource, /"config\.reasoningHelp": "自动不会发送思考强度，由上游模型采用自己的默认值。不同模型支持范围不同，若接口报参数错误请改为自动。"/);
+  assert.match(i18nSource, /"option\.max": "最高"/);
+  assert.match(i18nSource, /"option\.max": "Max"/);
+});
+
 test("composer labels clarify custom size apply and keep expand copy short", () => {
   assert.match(appSource, /\{t\("composer\.applyCustomSize"\)\}/);
   assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPromptShort"\)\}/);
@@ -795,6 +810,7 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlock(".history-sidebar-backdrop"), /display:\s*none;/);
   assert.match(cssBlockIn(tablet, ".history-sidebar-backdrop"), /position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*40;[\s\S]*display:\s*block;[\s\S]*background:\s*rgba\(28, 25, 23, 0\.14\);/);
   assert.match(cssBlockIn(tablet, ".history-sidebar"), /position:\s*fixed;[\s\S]*left:\s*10px;[\s\S]*bottom:\s*10px;[\s\S]*width:\s*min\(300px, calc\(100vw - 56px\)\);/);
+  assert.match(cssBlockIn(tablet, ".mode-tabs"), /align-self:\s*flex-start;[\s\S]*width:\s*fit-content;[\s\S]*max-width:\s*100%;[\s\S]*overflow-x:\s*visible;/);
   assert.match(cssBlockIn(tablet, ".composer"), /position:\s*sticky;[\s\S]*bottom:\s*0;/);
   assert.match(cssBlockIn(tablet, ".composer-toolbar"), /flex-wrap:\s*wrap;[\s\S]*overflow-y:\s*visible;/);
   assert.doesNotMatch(cssBlockIn(tablet, ".composer-toolbar"), /overflow-y:\s*auto;/);

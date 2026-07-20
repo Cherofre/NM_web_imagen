@@ -1331,14 +1331,14 @@ class StudioSessionTests(unittest.TestCase):
                     "api_key": "sk-test",
                     "base_url": "https://example.com/v1",
                     "chat_model": "gpt-5.5",
-                    "reasoning_effort": "high",
+                    "reasoning_effort": "max",
                 },
             )
 
         self.assertEqual(200, response.status_code)
         self.assertEqual("gpt-5.5", captured["json"]["model"])
-        self.assertEqual("high", captured["json"]["reasoning_effort"])
-        self.assertEqual("high", response.json()["meta"]["reasoning_effort"])
+        self.assertEqual("max", captured["json"]["reasoning_effort"])
+        self.assertEqual("max", response.json()["meta"]["reasoning_effort"])
 
     def test_gpt_chat_forwards_conversation_context(self) -> None:
         captured = {}

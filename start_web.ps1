@@ -155,7 +155,7 @@ function Test-RequiredApiRoutes {
       "engine" = "gpt-image-2"
       "api_key" = ""
       "base_url" = "https://example.com/v1"
-      "chat_model" = "gpt-5.5"
+      "chat_model" = "gpt-5.6"
       "checks" = @("chat")
     } | ConvertTo-Json -Depth 4
     $Response = Invoke-WebRequest -Uri $DiagnosticsUrl -Method Post -ContentType "application/json" -Body $Payload -UseBasicParsing -TimeoutSec 2

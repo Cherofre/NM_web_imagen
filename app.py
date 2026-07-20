@@ -90,7 +90,7 @@ DEFAULT_BANANA_BASE_URL = "https://banana-api.example.com"
 DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_GPT_BASE_URL = "https://gpt-image-api.example.com"
 DEFAULT_GPT_MODEL = "gpt-image-2"
-DEFAULT_GPT_CHAT_MODEL = "gpt-5.4"
+DEFAULT_GPT_CHAT_MODEL = "gpt-5.6"
 MAX_CHAT_TIMEOUT = 600
 MAX_GENERATION_TIMEOUT = 1800
 # The reference payload budget is 150 MiB. Multipart headers, form fields, and
@@ -118,7 +118,7 @@ CLIENT_ERROR_DETAILS = {
 }
 UPSTREAM_EXECUTOR = UpstreamExecutor()
 JOB_REGISTRY = JobRegistry()
-GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh"}
+GPT_REASONING_EFFORTS = {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 CONFIG_CONNECTION_FIELDS = {
     "banana-form": {"api_key", "api_base_url", "model_type"},
     "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model", "reasoning_effort"},

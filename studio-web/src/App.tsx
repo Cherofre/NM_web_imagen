@@ -332,8 +332,8 @@ const maxTurns = 80;
 
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
 const gptQualityOptions = ["auto", "low", "medium", "high"];
-const gptChatModelOptions = ["gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
-const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh"];
+const gptChatModelOptions = ["gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
+const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
 
@@ -435,8 +435,8 @@ const defaultGptForm: GptForm = {
   api_key: "",
   base_url: "https://gpt-image-api.example.com",
   model: "gpt-image-2",
-  chat_model: "gpt-5.5",
-  reasoning_effort: "medium",
+  chat_model: "gpt-5.6",
+  reasoning_effort: "auto",
   size: "auto",
   custom_size: "1536x864",
   quality: "auto",
@@ -1241,6 +1241,9 @@ function App() {
   const activeDrafts = activeSession.drafts;
   const activePrompt = getDraftPrompt(activeEngine, activeDrafts);
   const activeModel = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
+  const activeModelSummary = activeEngine === "gpt-image-2"
+    ? t("config.gptModelSummary", { image: gptForm.model, chat: gptForm.chat_model })
+    : activeModel;
   const activeProfile = activeProfileForEngine(profiles, activeProfileIds, activeEngine);
   const activeProfileName = deriveConfigDisplayName(
     activeProfile?.name,
@@ -4026,12 +4029,12 @@ function App() {
                 type="button"
                 className={hasCompleteConfig ? "connection-button configured" : "connection-button needs-config"}
                 onClick={() => setConnectionOpen(true)}
-                title={hasCompleteConfig ? t("config.editTitle", { name: activeProfileName, model: activeModel || t("config.modelName") }) : t("config.incompleteTitle", { items: listText(activeConfigIssues) })}
+                title={hasCompleteConfig ? t("config.editTitle", { name: activeProfileName, model: activeModelSummary || t("config.modelName") }) : t("config.incompleteTitle", { items: listText(activeConfigIssues) })}
               >
                 <PencilLine size={15} />
                 <span className="connection-button-text">
                   <strong>{configButtonLabel}</strong>
-                  {hasCompleteConfig && <small>{activeModel || t("config.modelName")}</small>}
+                  {hasCompleteConfig && <small>{activeModelSummary || t("config.modelName")}</small>}
                 </span>
                 <ChevronDown size={14} />
               </button>
@@ -4949,7 +4952,7 @@ function App() {
                     </Field>
                     <Field label={t("config.baseUrl")}><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => updateGptConnectionForm({ base_url: event.target.value })} /></Field>
                     <Field label={t("config.imageModel")}><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} /></Field>
-                    <Field label={t("config.chatModel")}>
+                    <Field label={t("config.chatModel")} help={t("config.chatModelHelp")}>
                       <div className="stacked-field">
                         <select
                           value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
@@ -4958,15 +4961,14 @@ function App() {
                             updateGptConnectionForm({ chat_model: value === "custom" ? gptForm.chat_model : value });
                           }}
                         >
-                          <option value="gpt-5.5">gpt-5.5</option>
-                          <option value="gpt-5.4">gpt-5.4</option>
-                          <option value="gpt-5.2">gpt-5.2</option>
-                          <option value="custom">{t("config.custom")}</option>
+                          {gptChatModelOptions.map((item) => (
+                            <option key={item} value={item}>{item === "custom" ? t("config.custom") : item}</option>
+                          ))}
                         </select>
                         <input placeholder={t("config.customChatModel")} value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
                       </div>
                     </Field>
-                    <Field label={t("config.reasoning")}>
+                    <Field label={t("config.reasoning")} help={t("config.reasoningHelp")}>
                       <select value={gptForm.reasoning_effort} onChange={(event) => updateGptConnectionForm({ reasoning_effort: event.target.value })}>
                         {gptReasoningOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
                       </select>
