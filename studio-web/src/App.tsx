@@ -13,7 +13,6 @@ import {
   EyeOff,
   ExternalLink,
   FolderOpen,
-  FoldVertical,
   Heart,
   Images,
   ImagePlus,
@@ -1321,7 +1320,6 @@ function App() {
   const sessionPromptSummary = summarizeSessionPromptDrafts(activeDrafts, t);
   const composerPromptHeight = clampComposerPromptHeight(composerPromptHeightPreference, composerViewportHeight);
   const composerPromptHeightMax = composerPromptMaxHeight(composerViewportHeight);
-  const hasCustomComposerPromptHeight = Math.round(composerPromptHeightPreference) !== COMPOSER_PROMPT_DEFAULT_HEIGHT;
   const composerPromptStyle: CSSProperties = { "--composer-prompt-height": `${composerPromptHeight}px` } as CSSProperties;
   const queuePopoverStyle: CSSProperties = {
     "--queue-popover-width": `${queuePopoverSize.width}px`,
@@ -2408,6 +2406,11 @@ function App() {
   }
 
   function resizeComposerFromKeyboard(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Home") {
+      event.preventDefault();
+      resetPromptHeight();
+      return;
+    }
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
     const step = event.shiftKey ? 32 : 16;
@@ -4430,6 +4433,26 @@ function App() {
           style={composerPromptStyle}
           onSubmit={(event) => void submit(event)}
         >
+          <button
+            type="button"
+            className="composer-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuemin={COMPOSER_PROMPT_MIN_HEIGHT}
+            aria-valuemax={composerPromptHeightMax}
+            aria-valuenow={composerPromptHeight}
+            aria-keyshortcuts="Home"
+            onPointerDown={startComposerResize}
+            onPointerMove={dragComposerResize}
+            onPointerUp={endComposerResize}
+            onPointerCancel={endComposerResize}
+            onKeyDown={resizeComposerFromKeyboard}
+            onDoubleClick={resetPromptHeight}
+            title={t("composer.resizeHint")}
+            aria-label={t("composer.resize")}
+          >
+            <span />
+          </button>
           <div className="composer-inner">
             <div className="composer-top">
             {references.length > 0 && (
@@ -4720,35 +4743,6 @@ function App() {
             </div>
           </div>
           <div className="composer-input">
-            <button
-              type="button"
-              className="composer-resize-handle"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-valuemin={COMPOSER_PROMPT_MIN_HEIGHT}
-              aria-valuemax={composerPromptHeightMax}
-              aria-valuenow={composerPromptHeight}
-              onPointerDown={startComposerResize}
-              onPointerMove={dragComposerResize}
-              onPointerUp={endComposerResize}
-              onPointerCancel={endComposerResize}
-              onKeyDown={resizeComposerFromKeyboard}
-              title={t("composer.resize")}
-              aria-label={t("composer.resize")}
-            >
-              <span />
-            </button>
-            {hasCustomComposerPromptHeight && (
-              <button
-                type="button"
-                className="composer-reset-button"
-                onClick={resetPromptHeight}
-                title={t("composer.resetHeight")}
-                aria-label={t("composer.resetHeight")}
-              >
-                <FoldVertical size={14} />
-              </button>
-            )}
             <div className="composer-textarea-wrap" ref={promptWrapRef}>
               <textarea
                 ref={promptRef}

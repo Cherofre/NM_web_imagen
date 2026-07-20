@@ -38,10 +38,10 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.match(cssBlock(".composer"), /--composer-prompt-height:\s*148px;/);
   assert.match(cssBlock(".composer-inner"), /display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\);[\s\S]*width:\s*100%;[\s\S]*margin-inline:\s*0;/);
   assert.match(cssBlock(".composer-top"), /display:\s*grid;[\s\S]*gap:\s*8px;[\s\S]*min-height:\s*0;/);
-  assert.match(appSource, /<div className="composer-inner">\s*<div className="composer-top">\s*\{references\.length > 0 && \(/);
-  assert.match(appSource, /<div className="composer-input">\s*<button\s+type="button"\s+className="composer-resize-handle"/);
+  assert.match(appSource, /<button\s+type="button"\s+className="composer-resize-handle"[\s\S]*?<div className="composer-inner">\s*<div className="composer-top">\s*\{references\.length > 0 && \(/);
+  assert.doesNotMatch(appSource, /<div className="composer-input">\s*<button\s+type="button"\s+className="composer-resize-handle"/);
   assert.match(cssBlock(".composer-input"), /align-items:\s*stretch;[\s\S]*min-height:\s*0;/);
-  assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-9px;[\s\S]*left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*18px;[\s\S]*cursor:\s*ns-resize;/);
+  assert.match(cssBlock(".composer-resize-handle"), /position:\s*absolute;[\s\S]*top:\s*-10px;[\s\S]*left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*20px;[\s\S]*cursor:\s*ns-resize;/);
   assert.match(cssBlock(".composer-resize-handle::before"), /left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*1px;[\s\S]*background:\s*transparent;/);
   assert.match(cssBlock(".composer-resize-handle span"), /width:\s*52px;[\s\S]*height:\s*4px;/);
   assert.match(css, /\.composer-resize-handle:hover::before,[\s\S]*\.composer-resize-handle:focus-visible::before,[\s\S]*\.composer-resize-handle:active::before\s*\{[^}]*background:\s*rgba\(28, 25, 23, 0\.12\);/);
@@ -53,8 +53,8 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /resize:\s*vertical;/);
   assert.match(cssBlock(".composer-input textarea"), /width:\s*100%;/);
   assert.match(cssBlock(".composer-input textarea"), /height:\s*100%;/);
-  assert.match(appSource, /\{hasCustomComposerPromptHeight && \(\s*<button[\s\S]*className="composer-reset-button"/);
-  assert.match(cssBlock(".composer-reset-button"), /position:\s*absolute;[\s\S]*top:\s*-12px;[\s\S]*left:\s*calc\(50% \+ 38px\);[\s\S]*width:\s*24px;[\s\S]*height:\s*24px;/);
+  assert.doesNotMatch(appSource, /className="composer-reset-button"/);
+  assert.doesNotMatch(css, /\.composer-reset-button\s*\{/);
   assert.match(cssBlock(".submit-button"), /grid-row:\s*1;[\s\S]*align-self:\s*end;/);
   assert.match(cssBlock(".drawer-actions"), /justify-content:\s*flex-end;/);
   assert.match(cssBlock(".session-prompt-drawer"), /grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;/);
@@ -151,7 +151,13 @@ test("composer height persists as a browser layout preference", () => {
   assert.match(appSource, /localStorage\.removeItem\(composerPromptHeightStorageKey\)/);
   assert.match(appSource, /function endComposerResize[\s\S]*saveStoredComposerPromptHeight\(composerPromptHeightPreferenceRef\.current\)/);
   assert.match(appSource, /onKeyDown=\{resizeComposerFromKeyboard\}/);
+  assert.match(appSource, /onDoubleClick=\{resetPromptHeight\}/);
+  assert.match(appSource, /if \(event\.key === "Home"\) \{[\s\S]*resetPromptHeight\(\)/);
+  assert.match(appSource, /aria-keyshortcuts="Home"/);
   assert.match(appSource, /role="separator"[\s\S]*aria-valuenow=\{composerPromptHeight\}/);
+  assert.match(i18nSource, /"composer\.resizeHint": "拖动调整输入区高度，双击恢复默认"/);
+  assert.match(i18nSource, /"composer\.resizeHint": "Drag to resize input height, double-click to reset"/);
+  assert.doesNotMatch(i18nSource, /composer\.resetHeightShort/);
 });
 
 test("queue rows expose cancel retry apply and remove controls", () => {
