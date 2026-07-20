@@ -68,3 +68,9 @@ test("generation file helper appends reference files before the mask snapshot", 
   assert.strictEqual(form.getAll("reference_files")[0], base);
   assert.strictEqual(form.get("mask_file"), mask);
 });
+
+test("mask preview dimensions preserve aspect ratio inside a compact edge", () => {
+  assert.deepEqual(masks.maskPreviewDimensions(1600, 900, 384), { width: 384, height: 216 });
+  assert.deepEqual(masks.maskPreviewDimensions(900, 1600, 384), { width: 216, height: 384 });
+  assert.deepEqual(masks.maskPreviewDimensions(240, 180, 384), { width: 240, height: 180 });
+});

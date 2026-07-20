@@ -32,6 +32,7 @@ def studio_session_payload(
     *,
     expected_revision=_MISSING,
     references=None,
+    mask_snapshot=None,
 ) -> dict:
     now = "2026-07-10T10:00:00Z"
     turn = {
@@ -45,6 +46,8 @@ def studio_session_payload(
     }
     if references is not None:
         turn["referenceSnapshots"] = references
+    if mask_snapshot is not None:
+        turn["maskSnapshot"] = mask_snapshot
     payload = {
         "active_session_id": "session-1",
         "sessions": [
@@ -126,6 +129,34 @@ class StudioSessionTests(unittest.TestCase):
         assert path is not None
         self.assertTrue(path.exists())
         return body, path
+
+    def test_studio_session_persists_a_lightweight_mask_review_snapshot(self) -> None:
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "遮罩回看",
+                expected_revision=1,
+                mask_snapshot={
+                    "id": "mask-review-1",
+                    "name": "mask-preview.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW),
+                },
+            ),
+        )
+
+        self.assertEqual(200, response.status_code)
+        snapshot = response.json()["sessions"][0]["turns"][0]["maskSnapshot"]
+        self.assertEqual("mask-review-1", snapshot["id"])
+        self.assertTrue(snapshot["src"].startswith("/outputs/session_refs/"))
+        path = webapp.path_from_output_url(snapshot["src"])
+        self.assertIsNotNone(path)
+        assert path is not None
+        self.assertTrue(path.exists())
+
+        loaded = self.client.get("/api/studio/sessions")
+        self.assertEqual(200, loaded.status_code)
+        self.assertEqual(snapshot, loaded.json()["sessions"][0]["turns"][0]["maskSnapshot"])
 
     def test_studio_session_get_defaults_and_legacy_state_use_revision_one(self) -> None:
         empty_response = self.client.get("/api/studio/sessions")

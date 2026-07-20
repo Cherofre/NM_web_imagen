@@ -18,6 +18,19 @@ test("Studio exposes a first-reference mask editor and snapshots the mask into q
   assert.match(appSource, /index === 0 && maskCapability\.available/);
 });
 
+test("applied masks create a lightweight review snapshot on the submitted turn", () => {
+  assert.match(editorSource, /previewFile:\s*File/);
+  assert.match(editorSource, /maskPreviewDimensions/);
+  assert.match(editorSource, /new File\(\[previewBlob\], "mask-preview\.webp"/);
+  assert.match(appSource, /maskSnapshot\?: ReferenceSnapshot/);
+  assert.match(appSource, /maskSnapshot:\s*turn\.maskSnapshot/);
+  assert.match(appSource, /currentMask\?\.previewFile/);
+  assert.match(appSource, /className="turn-reference-thumb turn-mask-thumb"/);
+  assert.match(appSource, /isMaskSnapshot:\s*true/);
+  assert.match(styleSource, /\.turn-mask-thumb/);
+  assert.match(i18nSource, /"mask\.snapshot"/);
+});
+
 test("result preview can become the first reference and open mask editing directly", () => {
   assert.match(appSource, /async function editPreviewMask/);
   assert.match(appSource, /setActiveEngine\("gpt-image-2"\)/);
@@ -87,6 +100,6 @@ test("mask editor follows the existing product vocabulary and remains usable on 
   assert.match(i18nSource, /"mask\.paintHint"/);
   assert.match(i18nSource, /"mask\.promptLimit"/);
   assert.match(i18nSource, /"mask\.shortcutHelp"/);
-  assert.match(i18nSource, /刷新页面后不会保留/);
-  assert.match(i18nSource, /not kept after a page refresh/);
+  assert.match(i18nSource, /刷新后不能继续编辑原遮罩/);
+  assert.match(i18nSource, /cannot be edited after refresh/);
 });

@@ -22,6 +22,9 @@ test("quick history preview shows multiple recent image-bearing records", () => 
 test("Escape closes quick history, backs out of detail, then closes the browser", () => {
   assert.deepEqual(historySurfaceAfterEscape({ mode: "quick" }), { mode: "closed" });
   assert.deepEqual(historySurfaceAfterEscape({ mode: "browser", detailId: "entry-1" }), { mode: "browser" });
+  assert.deepEqual(historySurfaceAfterEscape({ mode: "browser", detailId: "entry-1", origin: "browser" }), { mode: "browser" });
+  assert.deepEqual(historySurfaceAfterEscape({ mode: "browser", detailId: "entry-1", origin: "sidebar" }), { mode: "closed" });
+  assert.deepEqual(historySurfaceAfterEscape({ mode: "browser", detailId: "entry-1", origin: "quick" }), { mode: "quick" });
   assert.deepEqual(historySurfaceAfterEscape({ mode: "browser" }), { mode: "closed" });
   assert.deepEqual(historySurfaceAfterEscape({ mode: "closed" }), { mode: "closed" });
 });

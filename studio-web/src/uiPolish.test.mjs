@@ -229,7 +229,7 @@ test("queue and chat requests share backend job cancellation protocol", () => {
 
 test("queue rows show multi-image results as a thumbnail collage", () => {
   assert.match(appSource, /type PreviewImage = \{[\s\S]*gallery\?: PreviewImage\[\];[\s\S]*galleryIndex\?: number;/);
-  assert.match(appSource, /function openPreviewImages\(images: GeneratedImage\[\], index = 0\)/);
+  assert.match(appSource, /function openPreviewImages\(images: GeneratedImage\[\], index = 0, historyContext\?: PreviewHistoryContext\)/);
   assert.match(appSource, /function shiftPreviewImage\(direction: -1 \| 1\)/);
   assert.match(appSource, /const jobImages = job\.images \|\| \[\];/);
   assert.match(appSource, /const previewImages = jobImages\.slice\(0, 4\);/);
@@ -694,7 +694,7 @@ test("history uses one compact and full surface with an in-window detail", () =>
   assert.match(appSource, /recentHistoryEntries\.map\(\(entry\) =>/);
   assert.match(appSource, /const image = entry\.images\?\.\[0\];/);
   assert.match(appSource, /className="history-quick-count"/);
-  assert.match(appSource, /openPreviewImages\(entry\.images \|\| \[\], 0\)/);
+  assert.match(appSource, /openPreviewImages\(entry\.images \|\| \[\], 0, \{/);
   assert.match(appSource, /className="history-quick-expand"/);
   assert.match(appSource, /className="history-browser-grid"/);
   assert.doesNotMatch(appSource, /history-browser-list/);
@@ -706,8 +706,8 @@ test("history uses one compact and full surface with an in-window detail", () =>
   assert.match(appSource, /t\("history\.removeRecord"\)/);
   assert.match(appSource, /t\("history\.deleteFiles"\)/);
   assert.match(appSource, /query\.set\("delete_files", "true"\)/);
-  assert.match(appSource, /function openHistoryContext\(entry: HistoryEntry\) \{[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id \}\);/);
-  assert.match(appSource, /historyRestoreScrollRef\.current = true;[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id \}\);/);
+  assert.match(appSource, /function openHistoryContext\(entry: HistoryEntry, origin: HistoryOrigin = "browser"\) \{[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id, origin \}\);/);
+  assert.match(appSource, /historyRestoreScrollRef\.current = true;[\s\S]*setHistorySurface\(\{ mode: "browser", detailId: entry\.id, origin \}\);/);
   assert.match(appSource, /if \(historyBrowserScrollRef\.current\) \{[\s\S]*historyBrowserScrollRef\.current\.scrollTop = historyBrowserScrollTopRef\.current;/);
   assert.match(appSource, /className="history-browser-card-main"[\s\S]*onClick=\{\(\) => openHistoryContext\(entry\)\}/);
   assert.match(appSource, /historySurface\.mode === "browser" && historyDetail/);
@@ -738,8 +738,9 @@ test("history browser keeps heavy lists responsive and closes from Escape", () =
   assert.notEqual(keyHandlerStart, -1, "Missing global Escape handler");
   assert.notEqual(keyHandlerEnd, -1, "Missing global Escape registration");
   assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /if \(previewImage\) \{[\s\S]*closePreviewImage\(\);[\s\S]*return;/);
-  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /historyQuickTriggerRef\.current\?\.focus\(\)/);
-  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /setHistorySurface\(\(current\) => historySurfaceAfterEscape\(current\)\);/);
+  assert.match(appSource.slice(keyHandlerStart, keyHandlerEnd), /escapeHistorySurface\(\);/);
+  assert.match(appSource, /function escapeHistorySurface\(\) \{[\s\S]*historySurfaceAfterEscape\(historySurface\)[\s\S]*historyQuickTriggerRef\.current\?\.focus\(\)/);
+  assert.match(appSource, /onKeyDown=\{handleHistorySurfaceKeyDown\}/);
   assert.match(appSource, /const HISTORY_BROWSER_PAGE_SIZE = 80;/);
   assert.match(appSource, /const \[historyBrowserLimit, setHistoryBrowserLimit\] = useState\(HISTORY_BROWSER_PAGE_SIZE\);/);
   assert.match(appSource, /const visibleHistory = filteredHistory\.slice\(0, historyBrowserLimit\);/);

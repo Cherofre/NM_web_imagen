@@ -1563,6 +1563,23 @@ def inspect_studio_reference_source(
     return raw_bytes, detected_mime_type, len(raw_bytes), None
 
 
+def studio_turn_snapshot_values(turn: Any) -> List[Dict[str, Any]]:
+    if not isinstance(turn, dict):
+        return []
+    values: List[Dict[str, Any]] = []
+    snapshots = turn.get("referenceSnapshots")
+    if isinstance(snapshots, list):
+        values.extend(
+            snapshot
+            for snapshot in snapshots[:STUDIO_MAX_REFS_PER_TURN]
+            if isinstance(snapshot, dict)
+        )
+    mask_snapshot = turn.get("maskSnapshot")
+    if isinstance(mask_snapshot, dict):
+        values.append(mask_snapshot)
+    return values
+
+
 def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
     total_bytes = 0
     sessions_value = payload.get("sessions") if isinstance(payload, dict) else []
@@ -1578,14 +1595,7 @@ def preflight_studio_reference_request(payload: Dict[str, Any]) -> None:
         turns_value = session.get("turns")
         turns = turns_value if isinstance(turns_value, list) else []
         for turn in turns[-STUDIO_MAX_TURNS:]:
-            if not isinstance(turn, dict):
-                continue
-            snapshots = turn.get("referenceSnapshots")
-            if not isinstance(snapshots, list):
-                continue
-            for snapshot in snapshots[:STUDIO_MAX_REFS_PER_TURN]:
-                if not isinstance(snapshot, dict):
-                    continue
+            for snapshot in studio_turn_snapshot_values(turn):
                 src = str(snapshot.get("src") or "").strip()
                 if not src:
                     continue
@@ -1912,6 +1922,17 @@ def compact_studio_turn(
         ]
         if refs:
             compact["referenceSnapshots"] = refs
+    mask_snapshot = turn.get("maskSnapshot")
+    if isinstance(mask_snapshot, dict):
+        normalized_mask_snapshot = normalize_studio_reference(
+            mask_snapshot,
+            session_id,
+            turn_id,
+            STUDIO_MAX_REFS_PER_TURN,
+            created_paths,
+        )
+        if normalized_mask_snapshot:
+            compact["maskSnapshot"] = normalized_mask_snapshot
     return compact
 
 
@@ -1993,12 +2014,7 @@ def collect_referenced_output_paths(sessions: List[Dict[str, Any]]) -> set[Path]
     paths: set[Path] = set()
     for session in sessions:
         for turn in session.get("turns", []):
-            refs = turn.get("referenceSnapshots", [])
-            if not isinstance(refs, list):
-                continue
-            for ref in refs:
-                if not isinstance(ref, dict):
-                    continue
+            for ref in studio_turn_snapshot_values(turn):
                 path = path_from_output_url(str(ref.get("src") or ""))
                 if path:
                     paths.add(path.resolve())

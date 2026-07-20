@@ -106,6 +106,7 @@ import {
   historySurfaceAfterEscape,
   positionHistoryQuickPopover,
   recentHistoryEntriesWithImages,
+  type HistoryOrigin,
   type HistoryQuickPosition,
   type HistorySurfaceState,
 } from "./historySurface";
@@ -177,6 +178,7 @@ type ConversationTurn = {
   elapsedSeconds?: number;
   images: GeneratedImage[];
   referenceSnapshots?: ReferenceSnapshot[];
+  maskSnapshot?: ReferenceSnapshot;
   reply?: string;
   error?: string;
   meta?: Record<string, unknown>;
@@ -346,6 +348,15 @@ type PreviewImage = {
   sourceFile?: File;
   gallery?: PreviewImage[];
   galleryIndex?: number;
+  historyEntryId?: string;
+  historyOrigin?: HistoryOrigin;
+  isMaskSnapshot?: boolean;
+};
+
+type PreviewHistoryContext = {
+  historyEntryId: string;
+  historyOrigin: HistoryOrigin;
+  requestedSize?: string;
 };
 
 type HistoryFavoriteFilter = "all" | "favorite";
@@ -612,6 +623,7 @@ function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): Conversat
     ...turn,
     images: turn.images.map(compactGeneratedImage),
     referenceSnapshots: turn.referenceSnapshots?.map((snapshot) => compactReferenceSnapshot(snapshot, keepReferenceSrc)),
+    maskSnapshot: turn.maskSnapshot ? compactReferenceSnapshot(turn.maskSnapshot, keepReferenceSrc) : undefined,
   };
   if (!compact.posterText) {
     delete compact.posterText;
@@ -1780,7 +1792,10 @@ function App() {
 
     function closeForOutsidePointer(event: globalThis.PointerEvent) {
       const target = event.target;
-      if (target instanceof Element && (target.closest(".history-quick-popover") || target.closest(".history-quick-trigger"))) return;
+      if (
+        target instanceof Element
+        && (target.closest(".history-quick-popover") || target.closest(".history-quick-trigger") || target.closest(".lightbox"))
+      ) return;
       setHistorySurface({ mode: "closed" });
       setHistoryQuickPosition(null);
     }
@@ -1825,7 +1840,7 @@ function App() {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (historyActionMenu) {
         event.preventDefault();
         setHistoryActionMenu(null);
@@ -1840,22 +1855,45 @@ function App() {
         closePreviewImage();
         return;
       }
-      setAdvancedOpen(false);
-      closeConnectionDrawer();
-      setRenameOpen(false);
-      setSessionPromptOpen(false);
-      setPendingMultiImageConfirm(null);
-      if (historySurface.mode === "quick" || (historySurface.mode === "browser" && !historySurface.detailId)) {
-        window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+      const hasSecondarySurface = advancedOpen
+        || connectionOpen
+        || renameOpen
+        || promptEditorOpen
+        || sessionPromptOpen
+        || Boolean(pendingSessionSwitch)
+        || Boolean(pendingMultiImageConfirm)
+        || Boolean(composerPopover);
+      if (hasSecondarySurface) {
+        event.preventDefault();
+        setAdvancedOpen(false);
+        closeConnectionDrawer();
+        setRenameOpen(false);
+        setPromptEditorOpen(false);
+        setSessionPromptOpen(false);
+        setPendingSessionSwitch(null);
+        setPendingMultiImageConfirm(null);
+        setComposerPopover(null);
+        return;
       }
-      setHistorySurface((current) => historySurfaceAfterEscape(current));
-      setHistoryQuickPosition(null);
-      closePreviewImage();
-      setComposerPopover(null);
+      if (historySurface.mode === "closed") return;
+      event.preventDefault();
+      escapeHistorySurface();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previewImage, historyActionMenu, historySurface]);
+  }, [
+    advancedOpen,
+    composerPopover,
+    connectionOpen,
+    historyActionMenu,
+    historySurface,
+    pendingMultiImageConfirm,
+    pendingSessionSwitch,
+    previewImage,
+    promptEditorOpen,
+    renameOpen,
+    sessionPromptOpen,
+  ]);
 
   useEffect(() => {
     setComposerPopover(null);
@@ -2266,11 +2304,26 @@ function App() {
   }
 
   function closeHistorySurface(restoreFocus = true) {
+    const shouldRestoreFocus = restoreFocus
+      && !(historySurface.mode === "browser" && historySurface.origin === "sidebar");
     setHistoryActionMenu(null);
     historyRestoreScrollRef.current = false;
     setHistorySurface({ mode: "closed" });
     setHistoryQuickPosition(null);
-    if (restoreFocus) window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+    if (shouldRestoreFocus) window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+  }
+
+  function escapeHistorySurface() {
+    const next = historySurfaceAfterEscape(historySurface);
+    if (next.mode === "closed") {
+      closeHistorySurface();
+      return;
+    }
+    setHistoryActionMenu(null);
+    setHistorySurface(next);
+    if (next.mode === "quick") {
+      window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
+    }
   }
 
   async function toggleHistoryQuick() {
@@ -2560,6 +2613,7 @@ function App() {
       baseFingerprint: referenceFileFingerprint(result.baseFile),
       baseFile: result.baseFile,
       maskFile: result.maskFile,
+      previewFile: result.previewFile,
       coverage: result.coverage,
     };
     setReferences((current) => current.length ? [result.baseFile, ...current.slice(1)] : current);
@@ -2632,11 +2686,16 @@ function App() {
     resetPreviewCanvas();
   }
 
-  function openPreviewImages(images: GeneratedImage[], index = 0) {
+  function openPreviewImages(images: GeneratedImage[], index = 0, historyContext?: PreviewHistoryContext) {
     const gallery = images
       .map<PreviewImage | null>((image, imageIndex) => {
         const src = imageSrc(image);
-        return src ? { src, name: imageName(image, imageIndex), dimensions: image.dimensions } : null;
+        return src ? {
+          src,
+          name: imageName(image, imageIndex),
+          dimensions: image.dimensions,
+          ...historyContext,
+        } : null;
       })
       .filter((image): image is PreviewImage => Boolean(image));
     const galleryIndex = Math.min(Math.max(index, 0), Math.max(gallery.length - 1, 0));
@@ -2887,28 +2946,36 @@ function App() {
     closeConnectionDrawer();
     setRenameOpen(false);
     setPromptEditorOpen(false);
-    if (historySurface.mode === "quick" || (historySurface.mode === "browser" && !historySurface.detailId)) {
-      window.requestAnimationFrame(() => historyQuickTriggerRef.current?.focus());
-    }
-    setHistorySurface((current) => historySurfaceAfterEscape(current));
-    setHistoryQuickPosition(null);
+    setSessionPromptOpen(false);
     setPendingMultiImageConfirm(null);
-    closePreviewImage();
     setComposerPopover(null);
+  }
+
+  function handleHistorySurfaceKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    escapeHistorySurface();
   }
 
   function handlePreviewKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowLeft") {
       event.preventDefault();
+      event.stopPropagation();
       shiftPreviewImage(-1);
       return;
     }
     if (event.key === "ArrowRight") {
       event.preventDefault();
+      event.stopPropagation();
       shiftPreviewImage(1);
       return;
     }
-    closeOnEscape(event);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closePreviewImage();
+    }
   }
 
   async function outputReferenceFile(src: string, name: string) {
@@ -3490,6 +3557,9 @@ function App() {
       ? [currentMask.baseFile, ...currentReferences.slice(1)]
       : currentReferences;
     const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(submissionReferences));
+    const maskSnapshot = currentMask?.previewFile
+      ? (await createReferenceSnapshots([currentMask.previewFile]))[0]
+      : undefined;
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
     const submitContextPrompt = submissionDrafts.context_prompt;
@@ -3504,6 +3574,7 @@ function App() {
       status: "queued",
       images: [],
       referenceSnapshots,
+      maskSnapshot,
       meta: {
         model: currentModel,
         reference_count: submissionReferences.length,
@@ -3855,11 +3926,11 @@ function App() {
   }
 
   function openHistoryPreview(entry: HistoryEntry) {
-    const firstImage = entry.images?.[0];
-    const src = imageSrc(firstImage);
-    if (src) {
-      openPreviewImage({ src, name: imageName(firstImage), dimensions: firstImage?.dimensions, requestedSize: requestedSizeLabel(entry) });
-    }
+    openPreviewImages(entry.images || [], 0, {
+      historyEntryId: entry.id,
+      historyOrigin: "sidebar",
+      requestedSize: requestedSizeLabel(entry),
+    });
   }
 
   async function continueFromTurn(turn: ConversationTurn, image?: GeneratedImage, index = 0) {
@@ -3880,15 +3951,29 @@ function App() {
     }
   }
 
-  function openHistoryContext(entry: HistoryEntry) {
+  function openHistoryContext(entry: HistoryEntry, origin: HistoryOrigin = "browser") {
     setHistoryActionMenu(null);
-    historyBrowserScrollTopRef.current = historyBrowserScrollRef.current?.scrollTop || 0;
-    historyRestoreScrollRef.current = true;
-    setHistoryQuickPosition(null);
-    setHistorySurface({ mode: "browser", detailId: entry.id });
+    if (origin === "browser") {
+      historyBrowserScrollTopRef.current = historyBrowserScrollRef.current?.scrollTop || 0;
+      historyRestoreScrollRef.current = true;
+    } else {
+      historyRestoreScrollRef.current = false;
+    }
+    if (origin !== "quick") setHistoryQuickPosition(null);
+    setHistorySurface({ mode: "browser", detailId: entry.id, origin });
+  }
+
+  function openPreviewHistoryContext() {
+    if (!previewImage?.historyEntryId) return;
+    const entry = history.find((item) => item.id === previewImage.historyEntryId);
+    if (!entry) return;
+    const origin = previewImage.historyOrigin || "browser";
+    closePreviewImage();
+    openHistoryContext(entry, origin);
   }
 
   function backToHistoryBrowser() {
+    setHistoryQuickPosition(null);
     setHistorySurface({ mode: "browser" });
   }
 
@@ -4035,7 +4120,7 @@ function App() {
                       const imageCount = images.length;
                       return (
                         <article className="history-card" key={entry.id}>
-                          <button className="history-open" type="button" onClick={() => openHistoryContext(entry)}>
+                          <button className="history-open" type="button" onClick={() => openHistoryContext(entry, "sidebar")}>
                             <span className="history-thumb" data-image-count={Math.min(imageCount, 4)} aria-hidden="true">
                               {images.slice(0, 4).map((image, index) => {
                                 const src = imageSrc(image);
@@ -4271,9 +4356,9 @@ function App() {
                     {turn.referenceSnapshots?.length ? ` · ${t("reference.turnMeta", { count: turn.referenceSnapshots.length })}` : ""}
                   </div>
                   <p>{turn.prompt}</p>
-                  {turn.referenceSnapshots?.length ? (
-                    <div className="turn-reference-strip" aria-label={t("reference.turnCount", { count: turn.referenceSnapshots.length })}>
-                      {turn.referenceSnapshots.map((reference, index) => (
+                  {turn.referenceSnapshots?.length || turn.maskSnapshot ? (
+                    <div className="turn-reference-strip" aria-label={t("reference.turnCount", { count: turn.referenceSnapshots?.length || 0 })}>
+                      {turn.referenceSnapshots?.map((reference, index) => (
                         reference.src ? (
                           <button
                             type="button"
@@ -4290,6 +4375,23 @@ function App() {
                           </span>
                         )
                       ))}
+                      {turn.maskSnapshot?.src && (
+                        <button
+                          type="button"
+                          className="turn-reference-thumb turn-mask-thumb"
+                          onClick={() => openPreviewImage({
+                            src: turn.maskSnapshot?.src || "",
+                            name: t("mask.snapshot"),
+                            dimensions: turn.maskSnapshot?.dimensions,
+                            isMaskSnapshot: true,
+                          })}
+                          title={t("mask.viewSnapshot")}
+                          aria-label={t("mask.viewSnapshot")}
+                        >
+                          <img src={turn.maskSnapshot.src} alt="" loading="lazy" />
+                          <span>{t("mask.snapshot")}</span>
+                        </button>
+                      )}
                     </div>
                   ) : null}
                   <div className="turn-user-actions" aria-label={t("response.turnActions")}>
@@ -5151,7 +5253,11 @@ function App() {
                   <button
                     type="button"
                     key={entry.id}
-                    onClick={() => openPreviewImages(entry.images || [], 0)}
+                    onClick={() => openPreviewImages(entry.images || [], 0, {
+                      historyEntryId: entry.id,
+                      historyOrigin: "quick",
+                      requestedSize: requestedSizeLabel(entry),
+                    })}
                     disabled={!src}
                     title={`${formatTime(entry.created_at, language)} · ${engineLabel(entry.engine || "gpt-image-2")} · ${entry.prompt || t("history.noPrompt")}`}
                   >
@@ -5246,7 +5352,7 @@ function App() {
       {historySurface.mode === "browser" && (
         <div className="history-detail-shell">
           <button className="history-detail-backdrop" type="button" aria-label={t("history.closeBrowser")} onClick={() => closeHistorySurface()} />
-          <section className={historyDetail ? "history-browser is-detail" : "history-browser"} role="dialog" aria-modal="true" aria-label={t("history.browser")} tabIndex={-1} onKeyDown={closeOnEscape}>
+          <section className={historyDetail ? "history-browser is-detail" : "history-browser"} role="dialog" aria-modal="true" aria-label={t("history.browser")} tabIndex={-1} onKeyDown={handleHistorySurfaceKeyDown}>
             {historySurface.mode === "browser" && historyDetail ? (
               <>
                 <div className="history-detail-head history-browser-detail-head">
@@ -5374,7 +5480,11 @@ function App() {
                                 type="button"
                                 className="history-browser-batch-image"
                                 key={`${entry.id}-${index}`}
-                                onClick={() => openPreviewImages(entry.images || [], index)}
+                                onClick={() => openPreviewImages(entry.images || [], index, {
+                                  historyEntryId: entry.id,
+                                  historyOrigin: "browser",
+                                  requestedSize: requestedSizeLabel(entry),
+                                })}
                                 disabled={!src}
                                 title={t("history.previewImage")}
                               >
@@ -5469,19 +5579,35 @@ function App() {
               </strong>
               <span>
                 <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
-                <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
-                <button
-                  type="button"
-                  className="preview-mask-action"
-                  onClick={() => void editPreviewMask(previewImage)}
-                  title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
-                  aria-label={t("preview.editMask")}
-                  aria-busy={previewMaskLoading}
-                  disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
-                >
-                  {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
-                  <span>{t("preview.editMask")}</span>
-                </button>
+                {previewImage.historyEntryId && (
+                  <button
+                    type="button"
+                    className="preview-history-action"
+                    onClick={openPreviewHistoryContext}
+                    title={t("preview.viewHistoryDetails")}
+                    aria-label={t("preview.viewHistoryDetails")}
+                  >
+                    <ExternalLink size={16} />
+                    <span>{t("preview.viewHistoryDetails")}</span>
+                  </button>
+                )}
+                {!previewImage.isMaskSnapshot && (
+                  <>
+                    <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
+                    <button
+                      type="button"
+                      className="preview-mask-action"
+                      onClick={() => void editPreviewMask(previewImage)}
+                      title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
+                      aria-label={t("preview.editMask")}
+                      aria-busy={previewMaskLoading}
+                      disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
+                    >
+                      {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
+                      <span>{t("preview.editMask")}</span>
+                    </button>
+                  </>
+                )}
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>

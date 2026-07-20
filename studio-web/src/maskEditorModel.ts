@@ -9,8 +9,21 @@ export type MaskAttachment<FileType extends ReferenceFileIdentity = File> = {
   baseFingerprint: string;
   baseFile: FileType;
   maskFile: FileType;
+  previewFile?: FileType;
   coverage?: number;
 };
+
+export function maskPreviewDimensions(width: number, height: number, maxEdge = 384) {
+  const safeWidth = Math.max(0, Number(width) || 0);
+  const safeHeight = Math.max(0, Number(height) || 0);
+  const safeMaxEdge = Math.max(1, Math.floor(Number(maxEdge) || 1));
+  if (!safeWidth || !safeHeight) return { width: 0, height: 0 };
+  const scale = Math.min(1, safeMaxEdge / Math.max(safeWidth, safeHeight));
+  return {
+    width: Math.max(1, Math.round(safeWidth * scale)),
+    height: Math.max(1, Math.round(safeHeight * scale)),
+  };
+}
 
 export function referenceFileFingerprint(file: ReferenceFileIdentity | null | undefined) {
   if (!file) return "";

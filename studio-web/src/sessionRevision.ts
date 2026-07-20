@@ -21,6 +21,7 @@ type ReferenceLike = {
 type TurnWithReferences = {
   id: string;
   referenceSnapshots?: readonly ReferenceLike[];
+  maskSnapshot?: ReferenceLike;
 };
 
 export type SessionWithReferences = SessionLike & {
@@ -351,6 +352,26 @@ function referenceFieldsMatch(reference: ReferenceLike, fields: Partial<Referenc
   ));
 }
 
+function canonicalReferenceUpdate(
+  currentReference: ReferenceLike,
+  sentReference: ReferenceLike | undefined,
+  serverReference: ReferenceLike | undefined,
+) {
+  if (
+    !sentReference
+    || !serverReference
+    || currentReference.id !== sentReference.id
+    || sentReference.id !== serverReference.id
+  ) {
+    return currentReference;
+  }
+  const sentSrc = typeof sentReference.src === "string" ? sentReference.src : "";
+  if (!sentSrc || currentReference.src !== sentSrc) return currentReference;
+  const fields = canonicalReferenceFields(serverReference);
+  if (!fields || referenceFieldsMatch(currentReference, fields)) return currentReference;
+  return { ...currentReference, ...fields };
+}
+
 export function applyCanonicalReferenceUpdates<Session extends SessionWithReferences>({
   currentSessions,
   sentSessions,
@@ -376,29 +397,29 @@ export function applyCanonicalReferenceUpdates<Session extends SessionWithRefere
     const turns = currentSession.turns.map((currentTurn: TurnWithReferences) => {
       const sentTurn = sentTurns.get(currentTurn.id);
       const serverTurn = serverTurns.get(currentTurn.id);
-      if (!sentTurn || !serverTurn || !Array.isArray(currentTurn.referenceSnapshots)) {
+      if (!sentTurn || !serverTurn) {
         return currentTurn;
       }
       const sentReferences = referenceById(sentTurn);
       const serverReferences = referenceById(serverTurn);
       let turnChanged = false;
-      const referenceSnapshots = currentTurn.referenceSnapshots.map((currentReference: ReferenceLike) => {
-        const sentReference = sentReferences.get(currentReference.id);
-        const serverReference = serverReferences.get(currentReference.id);
-        const sentSrc = typeof sentReference?.src === "string" ? sentReference.src : "";
-        if (!sentSrc || currentReference.src !== sentSrc || !serverReference) {
-          return currentReference;
-        }
-        const fields = canonicalReferenceFields(serverReference);
-        if (!fields || referenceFieldsMatch(currentReference, fields)) {
-          return currentReference;
-        }
-        changed = true;
-        sessionChanged = true;
-        turnChanged = true;
-        return { ...currentReference, ...fields };
-      });
-      return turnChanged ? { ...currentTurn, referenceSnapshots } : currentTurn;
+      const referenceSnapshots = Array.isArray(currentTurn.referenceSnapshots)
+        ? currentTurn.referenceSnapshots.map((currentReference: ReferenceLike) => {
+          const sentReference = sentReferences.get(currentReference.id);
+          const serverReference = serverReferences.get(currentReference.id);
+          const updatedReference = canonicalReferenceUpdate(currentReference, sentReference, serverReference);
+          if (updatedReference !== currentReference) turnChanged = true;
+          return updatedReference;
+        })
+        : currentTurn.referenceSnapshots;
+      const maskSnapshot = currentTurn.maskSnapshot
+        ? canonicalReferenceUpdate(currentTurn.maskSnapshot, sentTurn.maskSnapshot, serverTurn.maskSnapshot)
+        : currentTurn.maskSnapshot;
+      if (maskSnapshot !== currentTurn.maskSnapshot) turnChanged = true;
+      if (!turnChanged) return currentTurn;
+      changed = true;
+      sessionChanged = true;
+      return { ...currentTurn, referenceSnapshots, maskSnapshot };
     });
     return sessionChanged ? { ...currentSession, turns } as Session : currentSession;
   });

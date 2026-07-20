@@ -24,6 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { maskPreviewDimensions } from "./maskEditorModel";
 
 type Translator = (key: string, params?: Record<string, string | number>) => string;
 type MaskTool = "brush" | "eraser" | "move";
@@ -36,6 +37,7 @@ type MaskCommand =
 export type MaskEditorResult = {
   baseFile: File;
   maskFile: File;
+  previewFile: File;
   coverage: number;
 };
 
@@ -61,12 +63,12 @@ function pngName(name: string) {
   return `${stem}.png`;
 }
 
-function canvasBlob(canvas: HTMLCanvasElement) {
+function canvasBlob(canvas: HTMLCanvasElement, type = "image/png", quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error("PNG export failed"));
-    }, "image/png");
+    }, type, quality);
   });
 }
 
@@ -511,7 +513,23 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
       maskContext.drawImage(overlay, 0, 0);
       maskContext.globalCompositeOperation = "source-over";
 
-      const [baseBlob, maskBlob] = await Promise.all([canvasBlob(base), canvasBlob(maskCanvas)]);
+      const previewCanvas = document.createElement("canvas");
+      const previewSize = maskPreviewDimensions(base.width, base.height);
+      previewCanvas.width = previewSize.width;
+      previewCanvas.height = previewSize.height;
+      const previewContext = previewCanvas.getContext("2d");
+      if (!previewContext) throw new Error(t("mask.exportFailed"));
+      previewContext.drawImage(base, 0, 0, previewCanvas.width, previewCanvas.height);
+      previewContext.save();
+      previewContext.globalAlpha = 0.52;
+      previewContext.drawImage(overlay, 0, 0, previewCanvas.width, previewCanvas.height);
+      previewContext.restore();
+
+      const [baseBlob, maskBlob, previewBlob] = await Promise.all([
+        canvasBlob(base),
+        canvasBlob(maskCanvas),
+        canvasBlob(previewCanvas, "image/webp", 0.82),
+      ]);
       if (baseBlob.size > MAX_MASK_FILE_BYTES || maskBlob.size > MAX_MASK_FILE_BYTES) {
         throw new Error(t("mask.fileTooLarge"));
       }
@@ -519,6 +537,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
       onApply({
         baseFile: new File([baseBlob], pngName(file.name), { type: "image/png", lastModified: stamp }),
         maskFile: new File([maskBlob], "mask.png", { type: "image/png", lastModified: stamp }),
+        previewFile: new File([previewBlob], "mask-preview.webp", { type: "image/webp", lastModified: stamp }),
         coverage: selectedCoverage,
       });
     } catch (cause) {
@@ -531,6 +550,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       onCancel();
       return;
     }

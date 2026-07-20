@@ -1420,6 +1420,29 @@ button.primary-action:focus-visible,
   object-fit: cover;
 }
 
+.turn-mask-thumb {
+  position: relative;
+}
+
+.turn-mask-thumb span {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  left: 4px;
+  overflow: hidden;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(17, 17, 17, 0.78);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .turn-reference-file {
   display: inline-flex;
   align-items: center;
@@ -4108,7 +4131,8 @@ button.primary-action:focus-visible,
   text-decoration: none;
 }
 
-.lightbox-card .preview-mask-action {
+.lightbox-card .preview-mask-action,
+.lightbox-card .preview-history-action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4117,17 +4141,20 @@ button.primary-action:focus-visible,
   transition: background 0.16s ease, border-color 0.16s ease, transform 0.1s ease;
 }
 
-.lightbox-card .preview-mask-action:hover:not(:disabled) {
+.lightbox-card .preview-mask-action:hover:not(:disabled),
+.lightbox-card .preview-history-action:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.26);
   background: rgba(255, 255, 255, 0.14);
 }
 
-.lightbox-card .preview-mask-action:active:not(:disabled) {
+.lightbox-card .preview-mask-action:active:not(:disabled),
+.lightbox-card .preview-history-action:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.2);
   transform: translateY(1px);
 }
 
-.lightbox-card .preview-mask-action:focus-visible {
+.lightbox-card .preview-mask-action:focus-visible,
+.lightbox-card .preview-history-action:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
@@ -4669,11 +4696,13 @@ button.primary-action:focus-visible,
 }
 
 @media (max-width: 720px) {
-  .lightbox-card .preview-mask-action {
+  .lightbox-card .preview-mask-action,
+  .lightbox-card .preview-history-action {
     padding: 0;
   }
 
-  .preview-mask-action span {
+  .preview-mask-action span,
+  .preview-history-action span {
     display: none;
   }
 
@@ -4722,6 +4751,7 @@ button.primary-action:focus-visible,
   .mask-editor-card button,
   .lightbox-zoom-tools button,
   .preview-mask-action,
+  .preview-history-action,
   .mask-editor-shortcut-help,
   .mask-editor-canvas-stack,
   .queue-capsule,

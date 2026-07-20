@@ -335,6 +335,7 @@ test("canonical reference updates apply only to unchanged sent sources without m
         { id: "ref-apply", name: "keep-name.png", src: "data:image/png;base64,apply" },
         { id: "ref-edited", src: "data:image/png;base64,old" },
       ],
+      maskSnapshot: { id: "mask-apply", name: "mask-preview.webp", src: "data:image/webp;base64,mask" },
     }],
   }];
   const currentSessions = structuredClone(sentSessions);
@@ -360,6 +361,14 @@ test("canonical reference updates apply only to unchanged sent sources without m
           size: 456,
         },
       ],
+      maskSnapshot: {
+        id: "mask-apply",
+        name: "mask-preview.webp",
+        src: "/outputs/session_refs/mask-applied.webp",
+        mime_type: "image/webp",
+        size: 321,
+        dimensions: { width: 216, height: 384 },
+      },
     }],
   }];
   const currentBefore = structuredClone(currentSessions);
@@ -385,6 +394,14 @@ test("canonical reference updates apply only to unchanged sent sources without m
   });
   assert.equal(references[1].src, "data:image/png;base64,user-edited");
   assert.equal(references[1].mime_type, undefined);
+  assert.deepEqual(result.sessions[0].turns[0].maskSnapshot, {
+    id: "mask-apply",
+    name: "mask-preview.webp",
+    src: "/outputs/session_refs/mask-applied.webp",
+    mime_type: "image/webp",
+    size: 321,
+    dimensions: { width: 216, height: 384 },
+  });
   assert.deepEqual(currentSessions, currentBefore);
   assert.deepEqual(sentSessions, sentBefore);
   assert.deepEqual(serverSessions, serverBefore);

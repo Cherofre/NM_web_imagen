@@ -1,7 +1,9 @@
+export type HistoryOrigin = "sidebar" | "quick" | "browser";
+
 export type HistorySurfaceState =
   | { mode: "closed" }
   | { mode: "quick" }
-  | { mode: "browser"; detailId?: string };
+  | { mode: "browser"; detailId?: string; origin?: HistoryOrigin };
 
 type HistoryEntryLike = {
   images?: unknown[];
@@ -40,7 +42,11 @@ export function recentHistoryEntriesWithImages<T extends HistoryEntryLike>(entri
 
 export function historySurfaceAfterEscape(state: HistorySurfaceState): HistorySurfaceState {
   if (state.mode === "quick") return { mode: "closed" };
-  if (state.mode === "browser" && state.detailId) return { mode: "browser" };
+  if (state.mode === "browser" && state.detailId) {
+    if (state.origin === "sidebar") return { mode: "closed" };
+    if (state.origin === "quick") return { mode: "quick" };
+    return { mode: "browser" };
+  }
   if (state.mode === "browser") return { mode: "closed" };
   return state;
 }
