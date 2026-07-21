@@ -1767,6 +1767,10 @@ button.primary-action:focus-visible,
   max-height: min(600px, 64vh);
 }
 
+.turn-images.expanded .image-grid {
+  scroll-margin-top: 12px;
+}
+
 .turn-images.multi-result .image-toggle {
   grid-row: 1;
 }

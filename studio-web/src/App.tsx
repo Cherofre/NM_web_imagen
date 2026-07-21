@@ -1292,6 +1292,7 @@ function App() {
   const queueProcessingRef = useRef<string | null>(null);
   const conversationCanvasRef = useRef<HTMLElement | null>(null);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
+  const turnImageGridRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const composerToolsRef = useRef<HTMLDivElement | null>(null);
   const historyQuickTriggerRef = useRef<HTMLButtonElement | null>(null);
   const historyBrowserScrollRef = useRef<HTMLDivElement | null>(null);
@@ -3979,7 +3980,21 @@ function App() {
   }
 
   function toggleTurnExpanded(turnId: string) {
+    const willExpand = !(expandedTurns[turnId] ?? false);
     setExpandedTurns((current) => ({ ...current, [turnId]: !(current[turnId] ?? false) }));
+    if (!willExpand) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const imageGrid = turnImageGridRefs.current[turnId];
+        if (!imageGrid) return;
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+        imageGrid.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          block: "start",
+          inline: "nearest",
+        });
+      });
+    });
   }
 
   function setCustomSizeDimension(dimension: "width" | "height", value: string) {
@@ -4619,7 +4634,12 @@ function App() {
                     )}
                     {turn.images.length > 0 && (
                       <div className={`${isTurnExpanded(turn) ? "turn-images expanded" : "turn-images collapsed"} ${turn.images.length === 1 ? "single-result" : "multi-result"}`}>
-                        <div className={turn.images.length === 1 ? "image-grid single" : "image-grid"}>
+                        <div
+                          ref={(node) => {
+                            turnImageGridRefs.current[turn.id] = node;
+                          }}
+                          className={turn.images.length === 1 ? "image-grid single" : "image-grid"}
+                        >
                         {turn.images.map((image, index) => {
                           const src = imageSrc(image);
                           const name = imageName(image, index);

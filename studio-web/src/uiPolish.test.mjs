@@ -623,6 +623,13 @@ test("single results stay compact and use the lightbox instead of inline expansi
   assert.doesNotMatch(i18nSource, /"image\.expandOne"/);
 });
 
+test("expanding multi-image results brings the image grid into view", () => {
+  assert.match(appSource, /const turnImageGridRefs = useRef<Record<string, HTMLDivElement \| null>>\(\{\}\);/);
+  assert.match(appSource, /function toggleTurnExpanded\(turnId: string\)[\s\S]*const willExpand = !\(expandedTurns\[turnId\] \?\? false\);[\s\S]*requestAnimationFrame\(\(\) => \{[\s\S]*scrollIntoView\(\{[\s\S]*block: "start",[\s\S]*inline: "nearest",[\s\S]*\}\)/);
+  assert.match(appSource, /ref=\{\(node\) => \{[\s\S]*turnImageGridRefs\.current\[turn\.id\] = node;[\s\S]*\}\}[\s\S]*className=\{turn\.images\.length === 1 \? "image-grid single" : "image-grid"\}/);
+  assert.match(cssBlock(".turn-images.expanded .image-grid"), /scroll-margin-top:\s*12px;/);
+});
+
 test("sidebar, conversation, composer and header use the simplified hierarchy", () => {
   assert.match(appSource, /className="sidebar-list-section"/);
   assert.match(cssBlock(".sidebar-list-section"), /grid-template-rows:\s*auto minmax\(0, 1fr\);[\s\S]*min-height:\s*0;/);
