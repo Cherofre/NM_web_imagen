@@ -57,7 +57,7 @@ type MaskEditorProps = {
   onRemove?: () => void;
 };
 
-const MAX_MASK_PIXELS = 24_000_000;
+const MAX_MASK_PIXELS = 8_294_400;
 const MAX_MASK_FILE_BYTES = 25 * 1024 * 1024;
 const MASK_COLOR = "rgba(239, 68, 68, 1)";
 
@@ -283,7 +283,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
         const height = image.naturalHeight;
         if (!width || !height) throw new Error(t("mask.loadFailed"));
         if (width * height > MAX_MASK_PIXELS) {
-          throw new Error(t("mask.tooLarge", { max: 24 }));
+          throw new Error(t("mask.tooLarge", { max: 8.3 }));
         }
 
         const base = baseCanvasRef.current;

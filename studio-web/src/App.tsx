@@ -97,10 +97,13 @@ import {
   activeMaskAttachment,
   appendGenerationFiles,
   maskEditorCapability,
+  maskPromptHasSpecificTarget,
+  normalizeMaskEncoding,
   referenceFileFingerprint,
   referencesWithMaskBase,
   resolveMaskEndpoint,
   type MaskAttachment,
+  type MaskEncoding,
 } from "./maskEditorModel";
 import {
   historySurfaceAfterEscape,
@@ -248,6 +251,7 @@ type GenerationQueuePayload = {
   bananaForm: BananaForm;
   references: File[];
   maskFile?: File;
+  maskEncoding?: MaskEncoding;
   contextPrompt: string;
   negativePrompt: string;
   posterText: string;
@@ -1037,6 +1041,7 @@ function createFormData(
   banana: BananaForm,
   references: File[],
   maskFile: File | null | undefined,
+  maskEncoding: MaskEncoding | null | undefined,
   gptTextDraft: { context_prompt?: string; negative_prompt?: string; poster_text?: string } | undefined,
   jobId: string,
 ) {
@@ -1046,6 +1051,10 @@ function createFormData(
     data.append(key, String(value));
   });
   appendGenerationFiles(data, references, maskFile);
+  if (maskFile) {
+    data.append("mask_encoding", normalizeMaskEncoding(maskEncoding));
+    data.append("strict_mask", "true");
+  }
   return appendJobId(data, jobId);
 }
 
@@ -3228,6 +3237,7 @@ function App() {
           payload.bananaForm,
           payload.references,
           payload.maskFile,
+          payload.maskEncoding,
           {
             context_prompt: payload.contextPrompt,
             negative_prompt: payload.negativePrompt,
@@ -3391,6 +3401,11 @@ function App() {
     const prompt = submissionDrafts.prompt.trim();
     if (!prompt) {
       setNotice(currentMode === "chat" ? t("status.emptyChat") : t("status.emptyPrompt"));
+      promptRef.current?.focus();
+      return;
+    }
+    if (currentMask && !maskPromptHasSpecificTarget(`${submissionDrafts.context_prompt}\n${prompt}`)) {
+      setNotice(t("mask.promptTargetRequired"));
       promptRef.current?.focus();
       return;
     }
@@ -3598,6 +3613,8 @@ function App() {
         model: currentModel,
         reference_count: submissionReferences.length,
         mask_used: Boolean(currentMask),
+        mask_encoding: currentMask?.encoding || "",
+        strict_mask: Boolean(currentMask),
         context_prompt: submitContextPrompt,
         queued_at: createdAt,
       },
@@ -3636,6 +3653,7 @@ function App() {
       bananaForm: currentBananaForm,
       references: [...submissionReferences],
       maskFile: currentMask?.maskFile,
+      maskEncoding: currentMask?.encoding,
       contextPrompt: submitContextPrompt,
       negativePrompt: submitNegativePrompt,
       posterText: submitPosterText,
@@ -4462,6 +4480,7 @@ function App() {
                         <span>{turn.meta?.model ? String(turn.meta.model) : engineLabel(turn.engine)}</span>
                         {sharedImageDimensionsLabel(turn.images) && <span>{sharedImageDimensionsLabel(turn.images)}</span>}
                         {turn.elapsedSeconds ? <span>{language === "en" ? `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)}s` : `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒`}</span> : null}
+                        {turn.meta?.strict_mask ? <span>{t("mask.strictBadge")}</span> : null}
                         <span>#{turnIndex + 1}</span>
                       </div>
                     </div>
@@ -4616,7 +4635,7 @@ function App() {
                           <span className="reference-mask-badges">
                             <em className="reference-mask-badge">{t("mask.baseBadge")}</em>
                             {activeComposerMask && (
-                              <em className="reference-mask-badge is-applied">
+                              <em className="reference-mask-badge is-applied" title={t("mask.strictProtection")}>
                                 {t(activeComposerMask.encoding === "compat" ? "mask.compatBadge" : "mask.appliedBadge")}
                               </em>
                             )}

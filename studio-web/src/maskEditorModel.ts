@@ -25,6 +25,27 @@ export function maskAlphaSelectsPixel(alpha: number, encoding: MaskEncoding) {
   return encoding === "compat" ? normalizedAlpha >= 128 : normalizedAlpha < 128;
 }
 
+export function maskPromptHasSpecificTarget(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const patterns = [
+    "(?:改成|换成|换为|替换成|替换为|改为|调整为|设置为|变成|变得|做成)([^。！？\\n]{2,})",
+    "(?:添加|增加|删除|移除|擦除|去掉)([^。！？\\n]{1,})",
+    "\\b(?:replace|change|turn|convert|transform)\\b.+?\\b(?:with|to|into)\\b\\s+([^.!?\\n]+)",
+    "\\b(?:add|remove|erase|delete)\\b\\s+([^.!?\\n]+)",
+  ];
+  const vagueTarget = /^(?:(?:(?:另(?:一)?|一|其他|不同|新)?(?:个|种)?(?:的)?(?:风格|样式|效果|内容|画面)(?:一下)?|一下)|(?:a|an)?(?:another|different|new)?(?:style|look|effect|something)?)$/iu;
+  for (const source of patterns) {
+    const pattern = new RegExp(source, "giu");
+    for (const match of text.matchAll(pattern)) {
+      const target = String(match[1] || "").split(/[,，;；](?=其余|其他|人物|主体|未涂|遮罩外|选区外)/u, 1)[0];
+      const compact = target.replace(/[^0-9A-Za-z\p{Script=Han}]+/gu, "").toLowerCase();
+      if (compact.length >= 2 && !vagueTarget.test(compact)) return true;
+    }
+  }
+  return false;
+}
+
 export function maskPreviewDimensions(width: number, height: number, maxEdge = 384) {
   const safeWidth = Math.max(0, Number(width) || 0);
   const safeHeight = Math.max(0, Number(height) || 0);

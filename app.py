@@ -3,6 +3,7 @@ import asyncio
 import base64
 from datetime import datetime
 import hashlib
+from io import BytesIO
 import ipaddress
 import math
 from html import unescape
@@ -27,6 +28,7 @@ from fastapi.routing import APIRoute
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
+from PIL import Image, ImageOps
 
 from image_safety import (
     REFERENCE_IMAGE_MAX_BYTES,
@@ -105,6 +107,7 @@ GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
 UPSTREAM_RESULT_MAX_IMAGES = 10
 UPSTREAM_RESULT_MAX_BYTES = 150 * 1024 * 1024
 UPSTREAM_RESULT_LIMIT_MESSAGE = "上游图片结果超过请求级安全预算"
+STRICT_MASK_MAX_PIXELS = 8_294_400
 PUBLIC_URL_PLACEHOLDER = "[invalid endpoint]"
 CLIENT_ERROR_DETAILS = {
     "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
@@ -1295,6 +1298,124 @@ def cleanup_generated_image_files(
             "save_error_code",
         ):
             image.pop(key, None)
+
+
+def mask_prompt_has_specific_target(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+
+    target_patterns = (
+        r"(?:改成|换成|换为|替换成|替换为|改为|调整为|设置为|变成|变得|做成)([^。！？\n]{2,})",
+        r"(?:添加|增加|删除|移除|擦除|去掉)([^。！？\n]{1,})",
+        r"\b(?:replace|change|turn|convert|transform)\b.+?\b(?:with|to|into)\b\s+([^.!?\n]+)",
+        r"\b(?:add|remove|erase|delete)\b\s+([^.!?\n]+)",
+    )
+    vague_targets = re.compile(
+        r"^(?:(?:(?:另(?:一)?|一|其他|不同|新)?(?:个|种)?(?:的)?(?:风格|样式|效果|内容|画面)(?:一下)?|一下)|"
+        r"(?:a|an)?(?:another|different|new)?(?:style|look|effect|something)?)$",
+        re.IGNORECASE,
+    )
+    for pattern in target_patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            target = re.split(
+                r"[,，;；](?:其余|其他|人物|主体|未涂|遮罩外|选区外)",
+                match.group(1),
+                maxsplit=1,
+            )[0]
+            compact = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", target).lower()
+            if len(compact) >= 2 and not vague_targets.fullmatch(compact):
+                return True
+    return False
+
+
+def harden_mask_prompt(prompt: str) -> str:
+    return (
+        "这是一次局部遮罩编辑。必须把遮罩定义的可编辑区域作为唯一修改范围；"
+        "不要重绘或重新设计遮罩外的人物、脸、头发、服装、姿势、构图、光影和细节。"
+        "只执行下面的具体修改，不要把风格变化扩散到遮罩外。\n\n"
+        f"具体修改要求：{prompt.strip()}"
+    )
+
+
+def normalize_mask_encoding(value: str) -> str:
+    normalized = str(value or "standard").strip().lower()
+    if normalized not in {"standard", "compat"}:
+        raise ValueError("遮罩发送方式只能是 standard 或 compat")
+    return normalized
+
+
+def strict_mask_composite_png(
+    generated_raw: bytes,
+    *,
+    base_raw: bytes,
+    mask_raw: bytes,
+    mask_encoding: str = "standard",
+) -> bytes:
+    encoding = normalize_mask_encoding(mask_encoding)
+    base_dimensions = detect_image_dimensions(base_raw, "image/png")
+    mask_dimensions = detect_image_dimensions(mask_raw, "image/png")
+    generated_mime = detect_raster_mime(generated_raw)
+    generated_dimensions = detect_image_dimensions(generated_raw, generated_mime or "")
+    if not base_dimensions or not mask_dimensions or not generated_dimensions:
+        raise ValueError("严格遮罩无法读取图片尺寸")
+    if base_dimensions["width"] * base_dimensions["height"] > STRICT_MASK_MAX_PIXELS:
+        raise ValueError("严格遮罩底图超过 829 万像素限制")
+    if mask_dimensions != base_dimensions:
+        raise ValueError("严格遮罩尺寸与底图不一致")
+    if generated_dimensions["width"] * generated_dimensions["height"] > STRICT_MASK_MAX_PIXELS:
+        raise ValueError("严格遮罩生成结果超过 829 万像素限制")
+
+    with Image.open(BytesIO(base_raw)) as source_image:
+        source_image.load()
+        base = source_image.convert("RGBA")
+    with Image.open(BytesIO(mask_raw)) as mask_image:
+        mask_image.load()
+        mask = mask_image.convert("RGBA")
+    with Image.open(BytesIO(generated_raw)) as generated_image:
+        generated_image.load()
+        generated = generated_image.convert("RGBA")
+
+    if mask.size != base.size:
+        raise ValueError("严格遮罩尺寸与底图不一致")
+    if generated.size != base.size:
+        base_ratio = base.width / base.height
+        generated_ratio = generated.width / generated.height
+        if abs(base_ratio - generated_ratio) / base_ratio > 0.01:
+            raise ValueError("严格遮罩要求生成结果与底图保持相同比例")
+        generated = generated.resize(base.size, Image.Resampling.LANCZOS)
+
+    protected_alpha = mask.getchannel("A")
+    if encoding == "compat":
+        protected_alpha = ImageOps.invert(protected_alpha)
+    composite = Image.composite(base, generated, protected_alpha)
+    output = BytesIO()
+    composite.save(output, format="PNG", compress_level=6)
+    return output.getvalue()
+
+
+def apply_strict_mask_to_images(
+    images: List[Dict[str, Any]],
+    *,
+    base_raw: bytes,
+    mask_raw: bytes,
+    mask_encoding: str,
+) -> None:
+    for image in images:
+        extracted = extract_image_bytes(str(image.get("src") or ""))
+        if not extracted:
+            raise ValueError("严格遮罩无法读取上游图片结果")
+        generated_raw, _generated_mime = extracted
+        composited = strict_mask_composite_png(
+            generated_raw,
+            base_raw=base_raw,
+            mask_raw=mask_raw,
+            mask_encoding=mask_encoding,
+        )
+        encoded = base64.b64encode(composited).decode("ascii")
+        image["src"] = data_url_from_base64(encoded, "image/png")
+        image["mime_type"] = "image/png"
+        image["strict_mask_applied"] = True
 
 
 def save_generated_images(
@@ -4357,6 +4478,8 @@ def create_app() -> FastAPI:
         api_endpoint: str = Form("auto"),
         reference_files: Optional[List[UploadFile]] = File(default=None),
         mask_file: Optional[UploadFile] = File(default=None),
+        mask_encoding: str = Form("standard"),
+        strict_mask: bool = Form(True),
         job_id: str = Depends(generation_job_scope),
     ) -> Dict[str, Any]:
         JOB_REGISTRY.raise_if_canceled(job_id)
@@ -4371,6 +4494,7 @@ def create_app() -> FastAPI:
             reference_assets = await read_upload_assets(reference_files, limit=16)
             normalized_size = normalize_gpt_size(custom_size if size == "custom" else size)
             mask_asset: Optional[Dict[str, Any]] = None
+            normalized_mask_encoding = "standard"
             if mask_file is not None:
                 if not reference_assets:
                     raise HTTPException(status_code=400, detail="使用遮罩前请先添加第一张编辑底图")
@@ -4378,6 +4502,12 @@ def create_app() -> FastAPI:
                 if requested_endpoint not in {"auto", "/v1/images/edits"}:
                     raise HTTPException(status_code=400, detail="遮罩只支持 GPT 图片编辑接口，请使用 auto 或 /v1/images/edits")
                 mask_asset = await read_edit_mask_asset(mask_file, base_asset=reference_assets[0])
+                normalized_mask_encoding = normalize_mask_encoding(mask_encoding)
+                if strict_mask and mask_asset["dimensions"]["width"] * mask_asset["dimensions"]["height"] > STRICT_MASK_MAX_PIXELS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="严格遮罩最多支持约 829 万像素，请先缩小底图。",
+                    )
                 if sum(len(asset["bytes"]) for asset in reference_assets) + len(mask_asset["bytes"]) > REFERENCE_REQUEST_MAX_BYTES:
                     raise HTTPException(status_code=413, detail="参考图和遮罩总大小超过 150 MiB 限制")
                 resolved_endpoint = "/v1/images/edits"
@@ -4397,6 +4527,16 @@ def create_app() -> FastAPI:
 
         poster_text_clean = poster_text.strip()
         effective_prompt = merge_generation_context_prompt(prompt, context_prompt)
+        if mask_asset is not None:
+            if not mask_prompt_has_specific_target(effective_prompt):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "请明确写出涂红区域要改成什么，例如："
+                        "“把涂红的外部背景改成夜晚城市，人物保持不变”。"
+                    ),
+                )
+            effective_prompt = harden_mask_prompt(effective_prompt)
         if poster_text_clean:
             effective_prompt = (
                 f"{effective_prompt}\n\n"
@@ -4422,7 +4562,7 @@ def create_app() -> FastAPI:
             payload["seed"] = seed
         if style_preset != "none":
             payload["style_preset"] = style_preset
-        if enhance_prompt is False:
+        if mask_asset is not None or enhance_prompt is False:
             payload["enhance_prompt"] = False
         if safety_check is False:
             payload["safety_check"] = False
@@ -4630,6 +4770,23 @@ def create_app() -> FastAPI:
                 detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
             ) from exc
 
+        if mask_asset is not None and strict_mask:
+            JOB_REGISTRY.raise_if_canceled(job_id)
+            try:
+                await asyncio.to_thread(
+                    apply_strict_mask_to_images,
+                    images,
+                    base_raw=reference_assets[0]["bytes"],
+                    mask_raw=mask_asset["bytes"],
+                    mask_encoding=normalized_mask_encoding,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="严格遮罩合成失败，未保存未保护的结果。请确认底图、遮罩和返回图片尺寸一致。",
+                ) from exc
+            JOB_REGISTRY.raise_if_canceled(job_id)
+
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
         try:
@@ -4655,6 +4812,8 @@ def create_app() -> FastAPI:
                 "response_format": response_format,
                 "reference_count": len(reference_assets),
                 "mask_used": mask_asset is not None,
+                "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
+                "strict_mask": bool(mask_asset is not None and strict_mask),
                 "image_count": len(images),
                 "saved_count": saved_count,
                 "output_dir": "outputs",
@@ -4680,6 +4839,8 @@ def create_app() -> FastAPI:
                 "edit_mode": edit_mode,
                 "reference_strength": reference_strength,
                 "mask_used": mask_asset is not None,
+                "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
+                "strict_mask": bool(mask_asset is not None and strict_mask),
                 "timeout": timeout,
                 "infinite_timeout": infinite_timeout,
             }

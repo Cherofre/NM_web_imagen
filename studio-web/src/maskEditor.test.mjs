@@ -65,6 +65,15 @@ test("mask encoding supports official and reverse-alpha gateway semantics", () =
   assert.equal(masks.normalizeMaskEncoding("unexpected"), "standard");
 });
 
+test("masked edits require a concrete target instead of a generic style change", () => {
+  assert.equal(masks.maskPromptHasSpecificTarget("只修改红色遮罩覆盖的部分，让那个区域换一种风格。"), false);
+  assert.equal(masks.maskPromptHasSpecificTarget("遮罩部分换一下。"), false);
+  assert.equal(masks.maskPromptHasSpecificTarget("把遮罩区域换成另一种风格。"), false);
+  assert.equal(masks.maskPromptHasSpecificTarget("Change the mask to a different style."), false);
+  assert.equal(masks.maskPromptHasSpecificTarget("把涂红的外部背景改成夜晚城市，人物保持不变。"), true);
+  assert.equal(masks.maskPromptHasSpecificTarget("Remove the people inside the mask."), true);
+});
+
 test("generation file helper appends reference files before the mask snapshot", () => {
   const base = new File(["base"], "base.png", { type: "image/png", lastModified: 1 });
   const second = new File(["second"], "second.png", { type: "image/png", lastModified: 2 });

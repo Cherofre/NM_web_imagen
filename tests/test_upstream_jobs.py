@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 import json
 import tempfile
 import threading
@@ -12,6 +13,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import app as webapp
 from upstream import (
@@ -35,13 +37,17 @@ PNG_1X1 = base64.b64encode(
     b"\x00\x00\x00\x00IEND\xaeB`\x82"
 ).decode("ascii")
 PNG_1X1_RAW = base64.b64decode(PNG_1X1)
-PNG_RGBA_1X1_RAW = (
-    b"\x89PNG\r\n\x1a\n"
-    b"\x00\x00\x00\rIHDR"
-    b"\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00"
-    b"\x00\x00\x00\x00"
-)
+
+
+def png_bytes(mode, size, pixels):
+    image = Image.new(mode, size)
+    image.putdata(pixels)
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+PNG_RGBA_1X1_RAW = png_bytes("RGBA", (1, 1), [(255, 255, 255, 0)])
 EXACT_SECRET = "exact-client-key-ABC123"
 WINDOWS_SECRET_PATH = r"C:\Users\Alice\private\token.txt"
 POSIX_SECRET_PATH = "/home/alice/private/token.txt"
@@ -106,6 +112,57 @@ def assert_stable_http_error(test_case, response, status_code, error_code):
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
+    def test_mask_prompt_requires_a_concrete_edit_target(self) -> None:
+        self.assertFalse(
+            webapp.mask_prompt_has_specific_target(
+                "只修改红色遮罩覆盖的部分，让那个区域换一种风格。"
+            )
+        )
+        self.assertFalse(webapp.mask_prompt_has_specific_target("遮罩部分换一下。"))
+        self.assertFalse(webapp.mask_prompt_has_specific_target("把遮罩区域换成另一种风格。"))
+        self.assertFalse(webapp.mask_prompt_has_specific_target("Change the mask to a different style."))
+        self.assertTrue(
+            webapp.mask_prompt_has_specific_target(
+                "把涂红的外部背景改成夜晚城市，人物保持不变。"
+            )
+        )
+        self.assertTrue(webapp.mask_prompt_has_specific_target("Remove the people inside the mask."))
+
+    def test_strict_mask_composite_restores_every_unpainted_pixel(self) -> None:
+        base = png_bytes(
+            "RGBA",
+            (2, 1),
+            [(10, 20, 30, 255), (40, 50, 60, 255)],
+        )
+        generated = png_bytes(
+            "RGBA",
+            (2, 1),
+            [(200, 10, 10, 255), (10, 200, 10, 255)],
+        )
+        standard_mask = png_bytes(
+            "RGBA",
+            (2, 1),
+            [(255, 255, 255, 0), (255, 255, 255, 255)],
+        )
+        compat_mask = png_bytes(
+            "RGBA",
+            (2, 1),
+            [(255, 255, 255, 255), (255, 255, 255, 0)],
+        )
+
+        for encoding, mask in (("standard", standard_mask), ("compat", compat_mask)):
+            with self.subTest(encoding=encoding):
+                result = webapp.strict_mask_composite_png(
+                    generated,
+                    base_raw=base,
+                    mask_raw=mask,
+                    mask_encoding=encoding,
+                )
+                image = Image.open(BytesIO(result)).convert("RGBA")
+                pixels = [image.getpixel((0, 0)), image.getpixel((1, 0))]
+                self.assertEqual((200, 10, 10, 255), pixels[0])
+                self.assertEqual((40, 50, 60, 255), pixels[1])
+
     def test_public_url_hint_returns_only_normalized_host_and_nondefault_port(self) -> None:
         cases = {
             "https://user:pass@Example.COM/proxy/path-token?token=secret#fragment": "example.com",
@@ -1095,7 +1152,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post(
                 "/api/generate/gpt-image-2",
                 data={
-                    "prompt": "replace the selected area",
+                    "prompt": "replace the selected area with a blue sky",
                     "api_key": "sk-test",
                     "base_url": "https://example.com/v1",
                     "model": "gpt-image-2",
@@ -1113,6 +1170,36 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         files = executor.calls[0]["kwargs"]["files"]
         self.assertEqual(["image[]", "mask"], [item[0] for item in files])
         self.assertEqual("image/png", files[1][1][2])
+        request_data = executor.calls[0]["kwargs"]["data"]
+        self.assertFalse(request_data["enhance_prompt"])
+        self.assertIn("必须把遮罩定义的可编辑区域作为唯一修改范围", request_data["prompt"])
+        self.assertTrue(response.json()["meta"]["strict_mask"])
+        self.assertEqual("standard", response.json()["meta"]["mask_encoding"])
+
+    async def test_gpt_mask_rejects_targetless_style_prompt_before_upstream(self) -> None:
+        executor = RecordingExecutor()
+        with (
+            patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
+            patch.object(webapp.requests, "post", side_effect=self._gpt_post),
+        ):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "只修改红色遮罩覆盖的部分，让那个区域换一种风格。",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "api_endpoint": "auto",
+                },
+                files=[
+                    ("reference_files", ("base.png", PNG_1X1_RAW, "image/png")),
+                    ("mask_file", ("mask.png", PNG_RGBA_1X1_RAW, "image/png")),
+                ],
+            )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("请明确写出涂红区域要改成什么", response.json()["detail"])
+        self.assertEqual([], executor.calls)
 
     async def test_production_remote_results_use_download_executor_kind(self) -> None:
         executor = RecordingExecutor()
