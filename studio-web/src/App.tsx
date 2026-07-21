@@ -2591,6 +2591,10 @@ function App() {
       setNotice(t("status.sessionBusy"));
       return;
     }
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    if (!confirm(t("session.deleteConfirm", { title: localizeSessionTitle(session.title, t) }))) return;
+
     setSessions((current) => {
       const resolution = resolveSessionDeletion(current, activeSessionId, sessionId, () => createEmptySession(t("session.new")));
       if (resolution.clearReferences) {

@@ -111,6 +111,12 @@ test("session cards keep text selection and dead padding from swallowing clicks"
   assert.match(cssBlock(".session-card > button:last-child"), /position:\s*relative;[\s\S]*z-index:\s*2;/);
 });
 
+test("session deletion requires confirmation and explains what remains", () => {
+  assert.match(appSource, /function deleteSession\(sessionId: string\)[\s\S]*hasActiveQueueJobForSession\(queueJobs, sessionId\)[\s\S]*confirm\(t\("session\.deleteConfirm", \{ title: localizeSessionTitle\(session\.title, t\) \}\)\)/);
+  assert.match(i18nSource, /"session\.deleteConfirm": "删除会话「\{title\}」？其中的对话会被删除，生成图片仍保留在历史和存图夹中。"/);
+  assert.match(i18nSource, /"session\.deleteConfirm": "Delete chat \\\"\{title\}\\\"\? Its messages will be deleted, but generated images will remain in history and the output folder\."/);
+});
+
 test("advanced parameter toggles align to input height without stretching", () => {
   assert.match(cssBlock(".settings-grid"), /align-items:\s*start;/);
   assert.match(css, /\.toggle\s*\{[\s\S]*align-self:\s*end;[\s\S]*height:\s*42px;[\s\S]*min-height:\s*42px;/);
