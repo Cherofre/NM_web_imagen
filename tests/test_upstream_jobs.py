@@ -128,16 +128,11 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(webapp.mask_prompt_has_specific_target("Remove the people inside the mask."))
 
-    def test_strict_mask_composite_restores_every_unpainted_pixel(self) -> None:
+    def test_mask_guided_edit_base_marks_only_the_selected_region(self) -> None:
         base = png_bytes(
             "RGBA",
             (2, 1),
             [(10, 20, 30, 255), (40, 50, 60, 255)],
-        )
-        generated = png_bytes(
-            "RGBA",
-            (2, 1),
-            [(200, 10, 10, 255), (10, 200, 10, 255)],
         )
         standard_mask = png_bytes(
             "RGBA",
@@ -152,15 +147,16 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
 
         for encoding, mask in (("standard", standard_mask), ("compat", compat_mask)):
             with self.subTest(encoding=encoding):
-                result = webapp.strict_mask_composite_png(
-                    generated,
+                result = webapp.build_mask_guided_edit_png(
                     base_raw=base,
                     mask_raw=mask,
                     mask_encoding=encoding,
                 )
                 image = Image.open(BytesIO(result)).convert("RGBA")
                 pixels = [image.getpixel((0, 0)), image.getpixel((1, 0))]
-                self.assertEqual((200, 10, 10, 255), pixels[0])
+                self.assertGreater(pixels[0][0], pixels[0][1])
+                self.assertGreater(pixels[0][0], pixels[0][2])
+                self.assertNotEqual((10, 20, 30, 255), pixels[0])
                 self.assertEqual((40, 50, 60, 255), pixels[1])
 
     def test_public_url_hint_returns_only_normalized_host_and_nondefault_port(self) -> None:
@@ -1157,6 +1153,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "base_url": "https://example.com/v1",
                     "model": "gpt-image-2",
                     "api_endpoint": "auto",
+                    "strict_mask": "true",
                 },
                 files=[
                     ("reference_files", ("base.png", PNG_1X1_RAW, "image/png")),
@@ -1169,11 +1166,19 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(str(executor.calls[0]["args"][0]).endswith("/v1/images/edits"))
         files = executor.calls[0]["kwargs"]["files"]
         self.assertEqual(["image[]", "mask"], [item[0] for item in files])
+        self.assertNotEqual(PNG_1X1_RAW, files[0][1][1])
+        guided_base = Image.open(BytesIO(files[0][1][1])).convert("RGBA")
+        guided_pixel = guided_base.getpixel((0, 0))
+        self.assertGreater(guided_pixel[0], guided_pixel[1])
+        self.assertGreater(guided_pixel[0], guided_pixel[2])
         self.assertEqual("image/png", files[1][1][2])
         request_data = executor.calls[0]["kwargs"]["data"]
         self.assertFalse(request_data["enhance_prompt"])
-        self.assertIn("必须把遮罩定义的可编辑区域作为唯一修改范围", request_data["prompt"])
-        self.assertTrue(response.json()["meta"]["strict_mask"])
+        self.assertIn("红色半透明区域只是选区标记", request_data["prompt"])
+        self.assertIn("不要按轮廓裁切或拼贴", request_data["prompt"])
+        self.assertNotIn("唯一修改范围", request_data["prompt"])
+        self.assertEqual("visual-alpha", response.json()["meta"]["mask_guidance"])
+        self.assertNotIn("strict_mask", response.json()["meta"])
         self.assertEqual("standard", response.json()["meta"]["mask_encoding"])
 
     async def test_gpt_mask_rejects_targetless_style_prompt_before_upstream(self) -> None:

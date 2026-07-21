@@ -75,14 +75,16 @@ test("mask editor can keep official alpha semantics or opt into a reverse-alpha 
   assert.match(i18nSource, /"mask\.encodingHelp"/);
 });
 
-test("masked submissions use strict local protection and reject targetless prompts before queueing", () => {
+test("masked submissions use model-side visual guidance and reject targetless prompts before queueing", () => {
   assert.match(appSource, /maskPromptHasSpecificTarget/);
   assert.match(appSource, /mask\.promptTargetRequired/);
   assert.match(appSource, /data\.append\("mask_encoding"/);
-  assert.match(appSource, /data\.append\("strict_mask", "true"\)/);
+  assert.doesNotMatch(appSource, /data\.append\("strict_mask"/);
   assert.match(appSource, /maskEncoding:\s*currentMask\?\.encoding/);
-  assert.match(appSource, /turn\.meta\?\.strict_mask/);
+  assert.match(appSource, /mask_guidance:\s*Boolean\(currentMask\)/);
+  assert.match(appSource, /turn\.meta\?\.mask_guidance/);
   assert.match(i18nSource, /"mask\.strictProtection"/);
+  assert.match(i18nSource, /不做本地硬切拼接/);
 });
 
 test("mask editor exposes discoverable keyboard shortcuts for tools, brush size and zoom", () => {

@@ -1053,7 +1053,6 @@ function createFormData(
   appendGenerationFiles(data, references, maskFile);
   if (maskFile) {
     data.append("mask_encoding", normalizeMaskEncoding(maskEncoding));
-    data.append("strict_mask", "true");
   }
   return appendJobId(data, jobId);
 }
@@ -3614,7 +3613,7 @@ function App() {
         reference_count: submissionReferences.length,
         mask_used: Boolean(currentMask),
         mask_encoding: currentMask?.encoding || "",
-        strict_mask: Boolean(currentMask),
+        mask_guidance: Boolean(currentMask),
         context_prompt: submitContextPrompt,
         queued_at: createdAt,
       },
@@ -4480,7 +4479,7 @@ function App() {
                         <span>{turn.meta?.model ? String(turn.meta.model) : engineLabel(turn.engine)}</span>
                         {sharedImageDimensionsLabel(turn.images) && <span>{sharedImageDimensionsLabel(turn.images)}</span>}
                         {turn.elapsedSeconds ? <span>{language === "en" ? `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)}s` : `${turn.elapsedSeconds.toFixed(turn.elapsedSeconds < 10 ? 1 : 0)} 秒`}</span> : null}
-                        {turn.meta?.strict_mask ? <span>{t("mask.strictBadge")}</span> : null}
+                        {turn.meta?.mask_guidance ? <span>{t("mask.strictBadge")}</span> : null}
                         <span>#{turnIndex + 1}</span>
                       </div>
                     </div>

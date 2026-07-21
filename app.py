@@ -107,7 +107,7 @@ GENERATION_MULTIPART_MAX_FIELD_BYTES = 1024 * 1024
 UPSTREAM_RESULT_MAX_IMAGES = 10
 UPSTREAM_RESULT_MAX_BYTES = 150 * 1024 * 1024
 UPSTREAM_RESULT_LIMIT_MESSAGE = "上游图片结果超过请求级安全预算"
-STRICT_MASK_MAX_PIXELS = 8_294_400
+MASK_GUIDANCE_MAX_PIXELS = 8_294_400
 PUBLIC_URL_PLACEHOLDER = "[invalid endpoint]"
 CLIENT_ERROR_DETAILS = {
     "E_UPSTREAM_AUTH": "上游服务认证失败，请检查 API Key 或访问权限。",
@@ -1331,9 +1331,11 @@ def mask_prompt_has_specific_target(prompt: str) -> bool:
 
 def harden_mask_prompt(prompt: str) -> str:
     return (
-        "这是一次局部遮罩编辑。必须把遮罩定义的可编辑区域作为唯一修改范围；"
-        "不要重绘或重新设计遮罩外的人物、脸、头发、服装、姿势、构图、光影和细节。"
-        "只执行下面的具体修改，不要把风格变化扩散到遮罩外。\n\n"
+        "这是一次遮罩引导的局部编辑。第一张输入图是完整底图，其中的红色半透明区域只是选区标记，"
+        "不是最终画面内容，生成结果中不能保留红色标记。同请求的 Alpha 遮罩与红色区域表达同一选区。"
+        "请生成一张完整、自然连续的最终图：在红色区域完成下面的具体修改；未标红区域尽量保持原图中的人物身份、"
+        "脸、头发、服装、姿势、构图和细节。遮罩边界是过渡提示，不是裁切线；不要按轮廓裁切或拼贴，"
+        "允许在紧邻边缘处做必要的光影、纹理、雾气和透视融合，但不要把整体改动扩散到其他区域。\n\n"
         f"具体修改要求：{prompt.strip()}"
     )
 
@@ -1345,8 +1347,7 @@ def normalize_mask_encoding(value: str) -> str:
     return normalized
 
 
-def strict_mask_composite_png(
-    generated_raw: bytes,
+def build_mask_guided_edit_png(
     *,
     base_raw: bytes,
     mask_raw: bytes,
@@ -1355,16 +1356,12 @@ def strict_mask_composite_png(
     encoding = normalize_mask_encoding(mask_encoding)
     base_dimensions = detect_image_dimensions(base_raw, "image/png")
     mask_dimensions = detect_image_dimensions(mask_raw, "image/png")
-    generated_mime = detect_raster_mime(generated_raw)
-    generated_dimensions = detect_image_dimensions(generated_raw, generated_mime or "")
-    if not base_dimensions or not mask_dimensions or not generated_dimensions:
-        raise ValueError("严格遮罩无法读取图片尺寸")
-    if base_dimensions["width"] * base_dimensions["height"] > STRICT_MASK_MAX_PIXELS:
-        raise ValueError("严格遮罩底图超过 829 万像素限制")
+    if not base_dimensions or not mask_dimensions:
+        raise ValueError("遮罩引导无法读取图片尺寸")
+    if base_dimensions["width"] * base_dimensions["height"] > MASK_GUIDANCE_MAX_PIXELS:
+        raise ValueError("遮罩引导底图超过 829 万像素限制")
     if mask_dimensions != base_dimensions:
-        raise ValueError("严格遮罩尺寸与底图不一致")
-    if generated_dimensions["width"] * generated_dimensions["height"] > STRICT_MASK_MAX_PIXELS:
-        raise ValueError("严格遮罩生成结果超过 829 万像素限制")
+        raise ValueError("遮罩引导尺寸与底图不一致")
 
     with Image.open(BytesIO(base_raw)) as source_image:
         source_image.load()
@@ -1372,50 +1369,19 @@ def strict_mask_composite_png(
     with Image.open(BytesIO(mask_raw)) as mask_image:
         mask_image.load()
         mask = mask_image.convert("RGBA")
-    with Image.open(BytesIO(generated_raw)) as generated_image:
-        generated_image.load()
-        generated = generated_image.convert("RGBA")
-
     if mask.size != base.size:
-        raise ValueError("严格遮罩尺寸与底图不一致")
-    if generated.size != base.size:
-        base_ratio = base.width / base.height
-        generated_ratio = generated.width / generated.height
-        if abs(base_ratio - generated_ratio) / base_ratio > 0.01:
-            raise ValueError("严格遮罩要求生成结果与底图保持相同比例")
-        generated = generated.resize(base.size, Image.Resampling.LANCZOS)
+        raise ValueError("遮罩引导尺寸与底图不一致")
 
-    protected_alpha = mask.getchannel("A")
-    if encoding == "compat":
-        protected_alpha = ImageOps.invert(protected_alpha)
-    composite = Image.composite(base, generated, protected_alpha)
+    editable_alpha = mask.getchannel("A")
+    if encoding == "standard":
+        editable_alpha = ImageOps.invert(editable_alpha)
+    overlay_alpha = editable_alpha.point(lambda value: round(value * 0.58))
+    red_overlay = Image.new("RGBA", base.size, (239, 68, 68, 0))
+    red_overlay.putalpha(overlay_alpha)
+    guided = Image.alpha_composite(base, red_overlay)
     output = BytesIO()
-    composite.save(output, format="PNG", compress_level=6)
+    guided.save(output, format="PNG", compress_level=6)
     return output.getvalue()
-
-
-def apply_strict_mask_to_images(
-    images: List[Dict[str, Any]],
-    *,
-    base_raw: bytes,
-    mask_raw: bytes,
-    mask_encoding: str,
-) -> None:
-    for image in images:
-        extracted = extract_image_bytes(str(image.get("src") or ""))
-        if not extracted:
-            raise ValueError("严格遮罩无法读取上游图片结果")
-        generated_raw, _generated_mime = extracted
-        composited = strict_mask_composite_png(
-            generated_raw,
-            base_raw=base_raw,
-            mask_raw=mask_raw,
-            mask_encoding=mask_encoding,
-        )
-        encoded = base64.b64encode(composited).decode("ascii")
-        image["src"] = data_url_from_base64(encoded, "image/png")
-        image["mime_type"] = "image/png"
-        image["strict_mask_applied"] = True
 
 
 def save_generated_images(
@@ -4479,7 +4445,9 @@ def create_app() -> FastAPI:
         reference_files: Optional[List[UploadFile]] = File(default=None),
         mask_file: Optional[UploadFile] = File(default=None),
         mask_encoding: str = Form("standard"),
-        strict_mask: bool = Form(True),
+        # Compatibility-only field for an older cached Studio build. It is
+        # intentionally ignored: masked results are never hard-composited.
+        strict_mask: bool = Form(False),
         job_id: str = Depends(generation_job_scope),
     ) -> Dict[str, Any]:
         JOB_REGISTRY.raise_if_canceled(job_id)
@@ -4492,6 +4460,7 @@ def create_app() -> FastAPI:
 
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)
+            request_reference_assets = reference_assets
             normalized_size = normalize_gpt_size(custom_size if size == "custom" else size)
             mask_asset: Optional[Dict[str, Any]] = None
             normalized_mask_encoding = "standard"
@@ -4503,12 +4472,29 @@ def create_app() -> FastAPI:
                     raise HTTPException(status_code=400, detail="遮罩只支持 GPT 图片编辑接口，请使用 auto 或 /v1/images/edits")
                 mask_asset = await read_edit_mask_asset(mask_file, base_asset=reference_assets[0])
                 normalized_mask_encoding = normalize_mask_encoding(mask_encoding)
-                if strict_mask and mask_asset["dimensions"]["width"] * mask_asset["dimensions"]["height"] > STRICT_MASK_MAX_PIXELS:
+                if mask_asset["dimensions"]["width"] * mask_asset["dimensions"]["height"] > MASK_GUIDANCE_MAX_PIXELS:
                     raise HTTPException(
                         status_code=400,
-                        detail="严格遮罩最多支持约 829 万像素，请先缩小底图。",
+                        detail="遮罩引导最多支持约 829 万像素，请先缩小底图。",
                     )
-                if sum(len(asset["bytes"]) for asset in reference_assets) + len(mask_asset["bytes"]) > REFERENCE_REQUEST_MAX_BYTES:
+                guided_base_raw = await asyncio.to_thread(
+                    build_mask_guided_edit_png,
+                    base_raw=reference_assets[0]["bytes"],
+                    mask_raw=mask_asset["bytes"],
+                    mask_encoding=normalized_mask_encoding,
+                )
+                guided_base_b64 = base64.b64encode(guided_base_raw).decode("ascii")
+                guided_base_asset = {
+                    **reference_assets[0],
+                    "filename": "mask-guided-base.png",
+                    "request_filename": "mask-guided-base.png",
+                    "mime_type": "image/png",
+                    "bytes": guided_base_raw,
+                    "base64_data": guided_base_b64,
+                    "data_url": data_url_from_base64(guided_base_b64, "image/png"),
+                }
+                request_reference_assets = [guided_base_asset, *reference_assets[1:]]
+                if sum(len(asset["bytes"]) for asset in request_reference_assets) + len(mask_asset["bytes"]) > REFERENCE_REQUEST_MAX_BYTES:
                     raise HTTPException(status_code=413, detail="参考图和遮罩总大小超过 150 MiB 限制")
                 resolved_endpoint = "/v1/images/edits"
             else:
@@ -4567,7 +4553,7 @@ def create_app() -> FastAPI:
         if safety_check is False:
             payload["safety_check"] = False
 
-        image_data_urls = [asset["data_url"] for asset in reference_assets]
+        image_data_urls = [asset["data_url"] for asset in request_reference_assets]
         headers = gpt_headers(api_key)
         request_kwargs: Dict[str, Any]
         files: List[Tuple[str, Tuple[str, bytes, str]]] = []
@@ -4605,7 +4591,7 @@ def create_app() -> FastAPI:
                         asset["mime_type"],
                     ),
                 )
-                for asset in reference_assets
+                for asset in request_reference_assets
             ]
             if mask_asset is not None:
                 files.append(
@@ -4770,23 +4756,6 @@ def create_app() -> FastAPI:
                 detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
             ) from exc
 
-        if mask_asset is not None and strict_mask:
-            JOB_REGISTRY.raise_if_canceled(job_id)
-            try:
-                await asyncio.to_thread(
-                    apply_strict_mask_to_images,
-                    images,
-                    base_raw=reference_assets[0]["bytes"],
-                    mask_raw=mask_asset["bytes"],
-                    mask_encoding=normalized_mask_encoding,
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail="严格遮罩合成失败，未保存未保护的结果。请确认底图、遮罩和返回图片尺寸一致。",
-                ) from exc
-            JOB_REGISTRY.raise_if_canceled(job_id)
-
         elapsed_seconds = round(time.time() - started_at, 2)
         history_entry: Optional[Dict[str, Any]] = None
         try:
@@ -4813,7 +4782,7 @@ def create_app() -> FastAPI:
                 "reference_count": len(reference_assets),
                 "mask_used": mask_asset is not None,
                 "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
-                "strict_mask": bool(mask_asset is not None and strict_mask),
+                "mask_guidance": "visual-alpha" if mask_asset is not None else "",
                 "image_count": len(images),
                 "saved_count": saved_count,
                 "output_dir": "outputs",
@@ -4840,7 +4809,7 @@ def create_app() -> FastAPI:
                 "reference_strength": reference_strength,
                 "mask_used": mask_asset is not None,
                 "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
-                "strict_mask": bool(mask_asset is not None and strict_mask),
+                "mask_guidance": "visual-alpha" if mask_asset is not None else "",
                 "timeout": timeout,
                 "infinite_timeout": infinite_timeout,
             }
