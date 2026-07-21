@@ -48,6 +48,33 @@ test("mask attachment becomes inactive when the first reference changes", () => 
   assert.equal(masks.activeMaskAttachment(attachment, []), null);
 });
 
+test("reusable mask payload drops the old base and rebinds to a regenerated base", () => {
+  const originalBase = fileLike("base.png", 120, 10);
+  const regeneratedBase = fileLike("base.png", 120, 20);
+  const mask = fileLike("mask.png", 48, 30);
+  const preview = fileLike("mask-preview.webp", 24, 30, "image/webp");
+  const payload = masks.reusableMaskPayload({
+    baseFingerprint: masks.referenceFileFingerprint(originalBase),
+    baseFile: originalBase,
+    maskFile: mask,
+    previewFile: preview,
+    coverage: 0.42,
+    encoding: "compat",
+  });
+
+  assert.equal("baseFile" in payload, false);
+  assert.strictEqual(payload.maskFile, mask);
+  assert.strictEqual(payload.previewFile, preview);
+
+  const restored = masks.restoreReusableMaskAttachment(payload, regeneratedBase);
+  assert.strictEqual(restored.baseFile, regeneratedBase);
+  assert.strictEqual(restored.maskFile, mask);
+  assert.equal(restored.coverage, 0.42);
+  assert.equal(restored.encoding, "compat");
+  assert.strictEqual(masks.activeMaskAttachment(restored, [regeneratedBase]), restored);
+  assert.equal(masks.activeMaskAttachment(restored, [originalBase]), null);
+});
+
 test("mask submission accepts auto or edits and rejects other endpoints", () => {
   assert.equal(masks.resolveMaskEndpoint("auto", true), "/v1/images/edits");
   assert.equal(masks.resolveMaskEndpoint("/v1/images/edits", true), "/v1/images/edits");
@@ -91,4 +118,19 @@ test("mask preview dimensions preserve aspect ratio inside a compact edge", () =
   assert.deepEqual(masks.maskPreviewDimensions(1600, 900, 384), { width: 384, height: 216 });
   assert.deepEqual(masks.maskPreviewDimensions(900, 1600, 384), { width: 216, height: 384 });
   assert.deepEqual(masks.maskPreviewDimensions(240, 180, 384), { width: 240, height: 180 });
+});
+
+test("mask canvas fit scale keeps the complete image inside the real stage", () => {
+  const portraitScale = masks.maskCanvasFitScale(800, 600, 1000, 2000, 12);
+  assert.ok(Math.abs(portraitScale - 0.288) < 0.000001);
+  assert.ok(1000 * portraitScale <= 800 - 24);
+  assert.ok(2000 * portraitScale <= 600 - 24);
+
+  const landscapeScale = masks.maskCanvasFitScale(800, 600, 2000, 1000, 12);
+  assert.ok(Math.abs(landscapeScale - 0.388) < 0.000001);
+  assert.ok(2000 * landscapeScale <= 800 - 24);
+  assert.ok(1000 * landscapeScale <= 600 - 24);
+
+  assert.equal(masks.maskCanvasFitScale(800, 600, 100, 100, 12), 1);
+  assert.equal(masks.maskCanvasFitScale(0, 600, 1000, 1000, 12), 1);
 });

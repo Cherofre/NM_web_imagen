@@ -16,6 +16,13 @@ export type MaskAttachment<FileType extends ReferenceFileIdentity = File> = {
   encoding?: MaskEncoding;
 };
 
+export type ReusableMaskPayload<FileType extends ReferenceFileIdentity = File> = {
+  maskFile: FileType;
+  previewFile?: FileType;
+  coverage?: number;
+  encoding: MaskEncoding;
+};
+
 export function normalizeMaskEncoding(value: unknown): MaskEncoding {
   return value === "compat" ? "compat" : "standard";
 }
@@ -58,6 +65,33 @@ export function maskPreviewDimensions(width: number, height: number, maxEdge = 3
   };
 }
 
+export function maskCanvasFitScale(
+  stageWidth: number,
+  stageHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+  edgePadding = 12,
+) {
+  const safeStageWidth = Number(stageWidth);
+  const safeStageHeight = Number(stageHeight);
+  const safeImageWidth = Number(imageWidth);
+  const safeImageHeight = Number(imageHeight);
+  if (
+    !Number.isFinite(safeStageWidth)
+    || !Number.isFinite(safeStageHeight)
+    || !Number.isFinite(safeImageWidth)
+    || !Number.isFinite(safeImageHeight)
+    || safeStageWidth <= 0
+    || safeStageHeight <= 0
+    || safeImageWidth <= 0
+    || safeImageHeight <= 0
+  ) return 1;
+  const padding = Math.max(0, Number(edgePadding) || 0) * 2;
+  const availableWidth = Math.max(1, safeStageWidth - padding);
+  const availableHeight = Math.max(1, safeStageHeight - padding);
+  return Math.min(1, availableWidth / safeImageWidth, availableHeight / safeImageHeight);
+}
+
 export function referenceFileFingerprint(file: ReferenceFileIdentity | null | undefined) {
   if (!file) return "";
   return [
@@ -66,6 +100,31 @@ export function referenceFileFingerprint(file: ReferenceFileIdentity | null | un
     Number(file.lastModified || 0),
     String(file.type || ""),
   ].join("\u0000");
+}
+
+export function reusableMaskPayload<FileType extends ReferenceFileIdentity>(
+  attachment: MaskAttachment<FileType>,
+): ReusableMaskPayload<FileType> {
+  return {
+    maskFile: attachment.maskFile,
+    previewFile: attachment.previewFile,
+    coverage: attachment.coverage,
+    encoding: normalizeMaskEncoding(attachment.encoding),
+  };
+}
+
+export function restoreReusableMaskAttachment<FileType extends ReferenceFileIdentity>(
+  payload: ReusableMaskPayload<FileType>,
+  baseFile: FileType,
+): MaskAttachment<FileType> {
+  return {
+    baseFingerprint: referenceFileFingerprint(baseFile),
+    baseFile,
+    maskFile: payload.maskFile,
+    previewFile: payload.previewFile,
+    coverage: payload.coverage,
+    encoding: normalizeMaskEncoding(payload.encoding),
+  };
 }
 
 export function referencesWithMaskBase<FileType>(

@@ -24,11 +24,27 @@ test("applied masks create a lightweight review snapshot on the submitted turn",
   assert.match(editorSource, /new File\(\[previewBlob\], "mask-preview\.webp"/);
   assert.match(appSource, /maskSnapshot\?: ReferenceSnapshot/);
   assert.match(appSource, /maskSnapshot:\s*turn\.maskSnapshot/);
-  assert.match(appSource, /currentMask\?\.previewFile/);
+  assert.match(appSource, /currentMask\.previewFile/);
   assert.match(appSource, /className="turn-reference-thumb turn-mask-thumb"/);
   assert.match(appSource, /isMaskSnapshot:\s*true/);
   assert.match(styleSource, /\.turn-mask-thumb/);
   assert.match(i18nSource, /"mask\.snapshot"/);
+});
+
+test("regenerate reuses the current-page mask and refuses a silent unmasked fallback", () => {
+  assert.match(appSource, /maskAttachment\?: MaskAttachment<File> \| null;/);
+  assert.match(appSource, /const turnMaskPayloadsRef = useRef<Map<string, ReusableMaskPayload<File>>>\(new Map\(\)\);/);
+  assert.match(appSource, /const reusableMask = turnMaskPayloadsRef\.current\.get\(turn\.id\);/);
+  assert.match(appSource, /if \(turnUsesMaskGuidance\(turn\) && !reusableMask\) \{[\s\S]*setNotice\(t\("mask\.regenerateUnavailable"\)\);[\s\S]*return;/);
+  assert.match(appSource, /restoreReusableMaskAttachment\(reusableMask, turnReferences\[0\]\)/);
+  assert.match(appSource, /maskAttachment:\s*regeneratedMask/);
+  assert.match(appSource, /maskSnapshot:\s*turn\.maskSnapshot/);
+  assert.match(appSource, /turnMaskPayloadsRef\.current\.set\(turnId, reusableMaskPayload\(currentMask\)\)/);
+  assert.match(appSource, /const requestedMaskAttachment = overrides\.maskAttachment === undefined \? maskAttachment : overrides\.maskAttachment;/);
+  assert.match(appSource, /activeMaskAttachment\(requestedMaskAttachment, currentReferences\)/);
+  assert.match(i18nSource, /"mask\.regenerateWithMask"/);
+  assert.match(i18nSource, /"mask\.regenerateNeedsRedraw"/);
+  assert.match(i18nSource, /"mask\.regenerateUnavailable"/);
 });
 
 test("result preview can become the first reference and open mask editing directly", () => {
@@ -110,6 +126,18 @@ test("mask editor shows the real brush footprint under the pointer", () => {
   assert.match(editorSource, /onPointerLeave=\{hideBrushCursor\}/);
   assert.match(editorSource, /className="mask-editor-brush-cursor"/);
   assert.match(styleSource, /\.mask-editor-brush-cursor\s*\{[\s\S]*?pointer-events:\s*none/);
+});
+
+test("mask editor derives fit from the actual stage instead of viewport subtraction", () => {
+  assert.match(editorSource, /useLayoutEffect/);
+  assert.match(editorSource, /stageRef/);
+  assert.match(editorSource, /maskCanvasFitScale\(\s*stage\.clientWidth,\s*stage\.clientHeight,\s*dimensions\.width,\s*dimensions\.height/);
+  assert.match(editorSource, /new ResizeObserver\(updateFitScale\)/);
+  assert.match(editorSource, /ref=\{stageRef\}/);
+  assert.match(editorSource, /width:\s*fittedWidth/);
+  assert.match(editorSource, /height:\s*fittedHeight/);
+  assert.doesNotMatch(styleSource, /max-height:\s*calc\(100vh - (?:290|275)px\)/);
+  assert.match(styleSource, /\.mask-editor-canvas-stack canvas\s*\{[\s\S]*width:\s*100%;[\s\S]*height:\s*100%;[\s\S]*max-width:\s*none;[\s\S]*max-height:\s*none;/);
 });
 
 test("mask editor follows the existing product vocabulary and remains usable on narrow screens", () => {

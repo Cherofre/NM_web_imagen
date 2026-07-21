@@ -21,11 +21,13 @@ import {
   type PointerEvent,
   type WheelEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import {
   maskAlphaSelectsPixel,
+  maskCanvasFitScale,
   maskPreviewDimensions,
   normalizeMaskEncoding,
   type MaskEncoding,
@@ -60,6 +62,7 @@ type MaskEditorProps = {
 const MAX_MASK_PIXELS = 8_294_400;
 const MAX_MASK_FILE_BYTES = 25 * 1024 * 1024;
 const MASK_COLOR = "rgba(239, 68, 68, 1)";
+const MASK_STAGE_EDGE_PADDING = 12;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -138,6 +141,7 @@ function drawCommand(context: CanvasRenderingContext2D, command: MaskCommand) {
 
 export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel, onApply, onRemove }: MaskEditorProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -158,6 +162,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
   const [tool, setTool] = useState<MaskTool>("brush");
   const [brushSize, setBrushSize] = useState(64);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [fitScale, setFitScale] = useState(1);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [ready, setReady] = useState(false);
@@ -267,6 +272,10 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     let cancelled = false;
     const normalizedInitialEncoding = normalizeMaskEncoding(initialEncoding);
     setReady(false);
+    setDimensions({ width: 0, height: 0 });
+    setFitScale(1);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
     setError("");
     setEncoding(normalizedInitialEncoding);
     commandsRef.current = [];
@@ -339,8 +348,6 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
 
         setDimensions({ width, height });
         setBrushSize(clamp(Math.round(Math.min(width, height) * 0.04), 16, 384));
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
         setReady(true);
         setTimeout(() => dialogRef.current?.focus(), 0);
       } catch (cause) {
@@ -355,6 +362,31 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
       cancelled = true;
     };
   }, [file, initialMaskFile, initialEncoding, t]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !ready || !dimensions.width || !dimensions.height) return undefined;
+
+    const updateFitScale = () => {
+      const nextScale = maskCanvasFitScale(
+        stage.clientWidth,
+        stage.clientHeight,
+        dimensions.width,
+        dimensions.height,
+        MASK_STAGE_EDGE_PADDING,
+      );
+      setFitScale((current) => Math.abs(current - nextScale) < 0.0001 ? current : nextScale);
+    };
+
+    updateFitScale();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateFitScale);
+    observer?.observe(stage);
+    window.addEventListener("resize", updateFitScale);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateFitScale);
+    };
+  }, [ready, dimensions.width, dimensions.height]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(redrawBrushCursor);
@@ -643,6 +675,8 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
 
   const canUndo = commandsRef.current.length > 0;
   const canRedo = redoRef.current.length > 0;
+  const fittedWidth = dimensions.width ? Math.max(1, Math.floor(dimensions.width * fitScale)) : 0;
+  const fittedHeight = dimensions.height ? Math.max(1, Math.floor(dimensions.height * fitScale)) : 0;
   void historyVersion;
 
   return (
@@ -685,12 +719,15 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
           </div>
         </div>
 
-        <div className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
+        <div ref={stageRef} className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
           {!ready && !error && <div className="mask-editor-loading"><Loader2 className="spin" size={22} /> {t("mask.loading")}</div>}
           {error && <div className="mask-editor-error" role="alert"><AlertCircle size={18} /> {error}</div>}
           <div
             className="mask-editor-canvas-stack"
             style={{
+              width: fittedWidth,
+              height: fittedHeight,
+              visibility: ready ? "visible" : "hidden",
               "--mask-zoom": zoom,
               "--mask-pan-x": `${pan.x}px`,
               "--mask-pan-y": `${pan.y}px`,

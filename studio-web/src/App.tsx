@@ -101,9 +101,12 @@ import {
   normalizeMaskEncoding,
   referenceFileFingerprint,
   referencesWithMaskBase,
+  restoreReusableMaskAttachment,
   resolveMaskEndpoint,
+  reusableMaskPayload,
   type MaskAttachment,
   type MaskEncoding,
+  type ReusableMaskPayload,
 } from "./maskEditorModel";
 import {
   historySurfaceAfterEscape,
@@ -200,6 +203,8 @@ type SubmitOverrides = {
   draftOverride?: SubmissionDraftOverride;
   references?: File[];
   referenceSnapshots?: ReferenceSnapshot[];
+  maskAttachment?: MaskAttachment<File> | null;
+  maskSnapshot?: ReferenceSnapshot;
   skipMultiImageConfirm?: boolean;
 };
 
@@ -633,6 +638,10 @@ function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): Conversat
     delete compact.posterText;
   }
   return compact;
+}
+
+function turnUsesMaskGuidance(turn: ConversationTurn) {
+  return Boolean(turn.maskSnapshot || turn.meta?.mask_used || turn.meta?.mask_guidance);
 }
 
 function compactInlineText(value: string, limit = 26) {
@@ -1271,6 +1280,7 @@ function App() {
   const previewMaskRequestRef = useRef(0);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
   const queuePayloadsRef = useRef<Record<string, GenerationQueuePayload>>({});
+  const turnMaskPayloadsRef = useRef<Map<string, ReusableMaskPayload<File>>>(new Map());
   const cancelingQueueJobsRef = useRef<Set<string>>(new Set());
   const queueCancellationSettlementsRef = useRef<Map<string, Promise<unknown>>>(new Map());
   const pendingQueueRemovalsRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -1536,6 +1546,13 @@ function App() {
     setMaskEditorOpen(false);
     setNotice(createTranslator(language)("mask.clearedBaseChanged"));
   }, [language, maskAttachment, references]);
+
+  useEffect(() => {
+    const liveTurnIds = new Set(sessions.flatMap((session) => session.turns.map((turn) => turn.id)));
+    for (const turnId of turnMaskPayloadsRef.current.keys()) {
+      if (!liveTurnIds.has(turnId)) turnMaskPayloadsRef.current.delete(turnId);
+    }
+  }, [sessions]);
 
   useEffect(() => {
     localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
@@ -3137,6 +3154,11 @@ function App() {
   }
 
   async function regenerateFromTurn(turn: ConversationTurn) {
+    const reusableMask = turnMaskPayloadsRef.current.get(turn.id);
+    if (turnUsesMaskGuidance(turn) && !reusableMask) {
+      setNotice(t("mask.regenerateUnavailable"));
+      return;
+    }
     setActiveEngine(turn.engine);
     setSubmitMode("generate");
     updateActiveSessionDrafts((drafts) => {
@@ -3165,9 +3187,16 @@ function App() {
         },
       };
     });
-    const turnReferences = (
-      await Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile))
-    ).filter((file): file is File => Boolean(file));
+    const loadedTurnReferences = await Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile));
+    if (reusableMask && !loadedTurnReferences[0]) {
+      setNotice(t("mask.regenerateBaseUnavailable"));
+      return;
+    }
+    const turnReferences = loadedTurnReferences.filter((file): file is File => Boolean(file));
+    const regeneratedMask = reusableMask
+      ? restoreReusableMaskAttachment(reusableMask, turnReferences[0])
+      : null;
+    if (regeneratedMask) setNotice(t("mask.regenerateWithMask"));
     await submit(undefined, {
       mode: "generate",
       engine: turn.engine,
@@ -3187,7 +3216,16 @@ function App() {
       },
       references: turnReferences,
       referenceSnapshots: turn.referenceSnapshots || [],
+      maskAttachment: regeneratedMask,
+      maskSnapshot: turn.maskSnapshot,
     });
+  }
+
+  function regenerateTurnLabel(turn: ConversationTurn) {
+    if (!turnUsesMaskGuidance(turn)) return t("response.regenerate");
+    return turnMaskPayloadsRef.current.has(turn.id)
+      ? t("mask.regenerateWithMask")
+      : t("mask.regenerateNeedsRedraw");
   }
 
   async function runQueuedGenerationJob(jobId: string) {
@@ -3391,8 +3429,9 @@ function App() {
     const currentGptForm = gptForm;
     const currentBananaForm = bananaForm;
     const currentReferences = referencesForSubmitMode(currentMode, overrides.references || references);
+    const requestedMaskAttachment = overrides.maskAttachment === undefined ? maskAttachment : overrides.maskAttachment;
     const currentMask = currentEngine === "gpt-image-2" && currentMode === "generate"
-      ? activeMaskAttachment(maskAttachment, currentReferences)
+      ? activeMaskAttachment(requestedMaskAttachment, currentReferences)
       : null;
     const currentConfigIssues = configIssues(currentEngine, currentGptForm, currentBananaForm, t);
     const currentModel = currentEngine === "banana" ? currentBananaForm.model_type : currentGptForm.model;
@@ -3595,8 +3634,8 @@ function App() {
       ? [currentMask.baseFile, ...currentReferences.slice(1)]
       : currentReferences;
     const referenceSnapshots = overrides.referenceSnapshots || (await createReferenceSnapshots(submissionReferences));
-    const maskSnapshot = currentMask?.previewFile
-      ? (await createReferenceSnapshots([currentMask.previewFile]))[0]
+    const maskSnapshot = currentMask
+      ? overrides.maskSnapshot || (currentMask.previewFile ? (await createReferenceSnapshots([currentMask.previewFile]))[0] : undefined)
       : undefined;
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
@@ -3623,6 +3662,7 @@ function App() {
         queued_at: createdAt,
       },
     };
+    if (currentMask) turnMaskPayloadsRef.current.set(turnId, reusableMaskPayload(currentMask));
     setSessions((current) =>
       current.map((session) =>
         session.id === targetSessionId
@@ -4439,8 +4479,8 @@ function App() {
                     <button
                       type="button"
                       onClick={() => void regenerateFromTurn(turn)}
-                      title={t("response.regenerate")}
-                      aria-label={t("response.regenerate")}
+                      title={regenerateTurnLabel(turn)}
+                      aria-label={regenerateTurnLabel(turn)}
                       disabled={busy || turn.mode === "chat"}
                     >
                       <RefreshCw size={14} />
