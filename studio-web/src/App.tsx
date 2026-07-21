@@ -5365,9 +5365,9 @@ function App() {
               <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.saveToLocal")}</button>
             </div>
             {activeEngine === "gpt-image-2" ? (
-              <GptSettings form={gptForm} onChange={setGptForm} t={t} optionLabel={optionLabel} />
+              <GptSettings form={gptForm} onChange={setGptForm} t={t} />
             ) : (
-              <BananaSettings form={bananaForm} onChange={setBananaForm} t={t} imageSizeLabel={bananaImageSizeLabel} />
+              <BananaSettings form={bananaForm} onChange={setBananaForm} t={t} />
             )}
           </section>
         </div>
@@ -5908,25 +5908,13 @@ function KeyValueGrid({ value, emptyLabel }: { value: Record<string, unknown>; e
   );
 }
 
-function GptSettings({ form, onChange, t, optionLabel }: { form: GptForm; onChange: (value: GptForm) => void; t: Translator; optionLabel: (value: string) => string }) {
+function GptSettings({ form, onChange, t }: { form: GptForm; onChange: (value: GptForm) => void; t: Translator }) {
   const update = <K extends keyof GptForm>(key: K, value: GptForm[K]) => {
     const next = { ...form, [key]: value };
     onChange(key === "custom_size" ? next : normalizeGptForm(next));
   };
   return (
     <div className="settings-grid">
-      <Field label={t("settings.size")} help={t("settings.sizeHelp", { max: GPT_CUSTOM_SIZE_MAX, ratio: GPT_CUSTOM_SIZE_MAX_RATIO })}>
-        <select value={form.size} onChange={(event) => update("size", event.target.value)}>
-          {gptSizeOptions.map((item) => <option key={item} value={item}>{item === "auto" ? t("option.auto") : item === "custom" ? t("config.custom") : item}</option>)}
-        </select>
-      </Field>
-      <Field label={t("settings.customSize")} help={t("settings.customSizeHelp")}><input value={form.custom_size} onChange={(event) => update("custom_size", event.target.value)} /></Field>
-      <Field label={t("settings.quality")} help={t("settings.qualityHelp")}>
-        <select value={form.quality} onChange={(event) => update("quality", event.target.value)}>
-          {gptQualityOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
-        </select>
-      </Field>
-      <Field label={t("settings.count")} help={t("settings.countHelp")}><input type="number" min={1} max={10} value={form.n} onChange={(event) => update("n", Number(event.target.value))} /></Field>
       <Field label={t("settings.seed")} help={t("settings.seedHelp")}><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
       <Field label={t("settings.stylePreset")} help={t("settings.stylePresetHelp")}>
         <select value={form.style_preset} onChange={(event) => update("style_preset", event.target.value)}>
@@ -5951,21 +5939,10 @@ function GptSettings({ form, onChange, t, optionLabel }: { form: GptForm; onChan
   );
 }
 
-function BananaSettings({ form, onChange, t, imageSizeLabel }: { form: BananaForm; onChange: (value: BananaForm) => void; t: Translator; imageSizeLabel: (value: string) => string }) {
+function BananaSettings({ form, onChange, t }: { form: BananaForm; onChange: (value: BananaForm) => void; t: Translator }) {
   const update = <K extends keyof BananaForm>(key: K, value: BananaForm[K]) => onChange({ ...form, [key]: value });
   return (
     <div className="settings-grid">
-      <Field label={t("settings.batchSize")} help={t("settings.batchSizeHelp")}><input type="number" min={1} max={8} value={form.batch_size} onChange={(event) => update("batch_size", Number(event.target.value))} /></Field>
-      <Field label={t("composer.aspect")} help={t("settings.aspectHelp")}>
-        <select value={form.aspect_ratio} onChange={(event) => update("aspect_ratio", event.target.value)}>
-          {bananaAspectOptions.map((item) => <option key={item}>{item}</option>)}
-        </select>
-      </Field>
-      <Field label={t("composer.resolution")} help={t("settings.imageSizeHelp")}>
-        <select value={form.image_size} onChange={(event) => update("image_size", event.target.value)}>
-          {bananaImageSizeOptions.map((item) => <option key={item} value={item}>{imageSizeLabel(item)}</option>)}
-        </select>
-      </Field>
       <Field label={t("settings.seed")} help={t("settings.bananaSeedHelp")}><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
       <Field label="Top-P" help={t("settings.topPHelp")}><input type="number" min={0} max={1} step={0.01} value={form.top_p} onChange={(event) => update("top_p", Number(event.target.value))} /></Field>
       <Field label={t("settings.timeout")} help={t("settings.bananaTimeoutHelp")}><input type="number" min={60} max={1800} value={form.timeout_seconds} onChange={(event) => update("timeout_seconds", Number(event.target.value))} /></Field>

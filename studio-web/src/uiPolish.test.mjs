@@ -660,6 +660,23 @@ test("composer keeps size directly accessible and groups only quality with count
   assert.match(i18nSource, /"composer\.generationSettings": "Generation settings"/);
 });
 
+test("advanced parameters omit controls already exposed in the composer", () => {
+  const gptSettingsStart = appSource.indexOf("function GptSettings");
+  const bananaSettingsStart = appSource.indexOf("function BananaSettings", gptSettingsStart);
+  const gptSettingsSource = appSource.slice(gptSettingsStart, bananaSettingsStart);
+  const bananaSettingsSource = appSource.slice(bananaSettingsStart, appSource.indexOf("export default App", bananaSettingsStart));
+
+  assert.doesNotMatch(gptSettingsSource, /settings\.size|settings\.customSize|settings\.quality|settings\.count/);
+  assert.match(gptSettingsSource, /settings\.seed/);
+  assert.match(gptSettingsSource, /settings\.stylePreset/);
+  assert.match(gptSettingsSource, /settings\.timeout/);
+
+  assert.doesNotMatch(bananaSettingsSource, /settings\.batchSize|composer\.aspect|composer\.resolution/);
+  assert.match(bananaSettingsSource, /settings\.seed/);
+  assert.match(bananaSettingsSource, /Top-P/);
+  assert.match(bananaSettingsSource, /settings\.timeout/);
+});
+
 test("shape hierarchy keeps pills for switches and regular controls compact", () => {
   assert.match(cssBlock(":root"), /--radius-xl:\s*22px;[\s\S]*--radius-lg:\s*18px;[\s\S]*--radius-md:\s*14px;[\s\S]*--radius-sm:\s*10px;/);
   assert.match(css, /\.icon-button,\s*\.new-session-button,[\s\S]*\.panel-title button\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
