@@ -2526,15 +2526,20 @@ function App() {
     }
   }
 
+  function cancelPendingSessionSwitch() {
+    setPendingSessionSwitch(null);
+  }
+
   function switchToSession(sessionId: string, choice: ReferenceSwitchChoice = "preserve") {
     const resolution = resolveReferenceSwitch(choice, references.map((file) => file.name));
     if (resolution.keepActiveSession) {
+      cancelPendingSessionSwitch();
       return;
     }
     if (choice === "clear") {
       setReferences([]);
     }
-    setPendingSessionSwitch(null);
+    cancelPendingSessionSwitch();
     setActiveSessionId(sessionId);
     setSidebarMode("sessions");
   }
@@ -4945,14 +4950,14 @@ function App() {
 
       {pendingSessionSwitch && (
         <div className="drawer-shell reference-switch-shell">
-          <button className="drawer-backdrop" type="button" aria-label={t("session.switchClose")} onClick={() => setPendingSessionSwitch(null)} />
+          <button className="drawer-backdrop" type="button" aria-label={t("session.switchClose")} onClick={cancelPendingSessionSwitch} />
           <section className="drawer reference-switch-drawer" role="dialog" aria-modal="true" aria-label={t("session.switchReferenceTitle")} tabIndex={-1} onKeyDown={closeOnEscape}>
             <div className="drawer-head">
               <div>
                 <p>{t("session.switchReferenceHint")}</p>
                 <h2>{t("session.switchTo", { title: pendingSessionSwitch.nextSessionTitle })}</h2>
               </div>
-              <button type="button" onClick={() => setPendingSessionSwitch(null)} aria-label={t("session.switchClose")} title={t("common.close")}><X size={18} /></button>
+              <button type="button" onClick={cancelPendingSessionSwitch} aria-label={t("session.switchClose")} title={t("common.close")}><X size={18} /></button>
             </div>
             <div className="config-warning" role="alert">
               <AlertCircle size={16} />
@@ -4961,7 +4966,7 @@ function App() {
             <div className="drawer-actions">
               <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "preserve")}>{t("session.switchKeep")}</button>
               <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "clear")}>{t("session.switchClear")}</button>
-              <button type="button" onClick={() => switchToSession(pendingSessionSwitch.nextSessionId, "cancel")}>{t("common.cancel")}</button>
+              <button type="button" onClick={cancelPendingSessionSwitch}>{t("common.cancel")}</button>
             </div>
           </section>
         </div>

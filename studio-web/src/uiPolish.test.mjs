@@ -63,6 +63,12 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.doesNotMatch(css, /\.composer-textarea-meta\s*\{/);
 });
 
+test("reference switch cancel uses the same dismiss path as backdrop and close", () => {
+  assert.match(appSource, /function cancelPendingSessionSwitch\(\) \{\s*setPendingSessionSwitch\(null\);\s*\}/);
+  assert.equal((appSource.match(/onClick=\{cancelPendingSessionSwitch\}/g) || []).length, 3);
+  assert.doesNotMatch(appSource, /switchToSession\(pendingSessionSwitch\.nextSessionId, "cancel"\)/);
+});
+
 test("release package keeps previous hashed assets as cache fallbacks", () => {
   const assetsDir = path.resolve("..", "static", "studio", "assets");
   assert.ok(fs.existsSync(path.join(assetsDir, "index-8pzV_2va.css")));
