@@ -1012,6 +1012,8 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
 
         for script in (sync_script, preflight_script):
             self.assertIn("Get-CompanyShareRootCandidates", script)
+            self.assertIn("Get-StandaloneShareRoot", script)
+            self.assertIn("@(32593, 39029, 29983, 22270, 31449)", script)
             self.assertIn('Join-Path "G:\\su\\doc\\Tools"', script)
             self.assertIn('Join-Path "G:\\doc\\Tools"', script)
             self.assertIn("Resolve-CompanyShareRoot", script)

@@ -36,6 +36,11 @@ function Get-CompanySharePathSuffix {
   return Join-Path $Segment1 (Join-Path $Segment2 (Join-Path $Segment3 $Segment4))
 }
 
+function Get-StandaloneShareRoot {
+  $FolderName = New-TextFromCodes @(32593, 39029, 29983, 22270, 31449)
+  return Join-Path "G:\doc\Tools" $FolderName
+}
+
 function Get-CompanyShareRootOptions {
   $Suffix = Get-CompanySharePathSuffix
   return @(
@@ -46,6 +51,10 @@ function Get-CompanyShareRootOptions {
     [pscustomobject]@{
       Anchor = "G:\doc\Tools"
       Root = Join-Path "G:\doc\Tools" $Suffix
+    },
+    [pscustomobject]@{
+      Anchor = "G:\doc\Tools"
+      Root = Get-StandaloneShareRoot
     }
   )
 }
