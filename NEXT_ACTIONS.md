@@ -5,16 +5,16 @@
 - [x] When a collapsed multi-image result is expanded, wait for layout and scroll the image grid into the visible area; preserve reduced-motion preferences and add a small top scroll margin. Commit `cd9fad9`.
 - [x] Run the complete v1.0.8 release matrix: 163 Node, 244 Python, 33 release-cache tests, size gate, production build, extracted ZIP/portable-runtime smoke and release preflight all pass.
 - [x] Build `I:\AI\Vibe Coding\NM_web_imagen-v1.0.8.zip` and synchronize the clean package plus versioned ZIP to both approved G: roots; all three ZIPs share SHA256 `ed171c9a1c74579a1a9375aa5e8b4fabf66a731b4764839c7b389d12a2f0046c`.
-- [ ] Commit this release-readiness ledger update, then push `main` to `origin`.
-- [ ] Create and push annotated tag `v1.0.8`, create the formal Chinese GitHub Release, attach the verified ZIP and verify the published metadata.
-- [ ] Record the final Release URL/state in the ledger, commit it and push the final documentation update.
+- [x] Commit this release-readiness ledger update, then push `main` to `origin`.
+- [x] Create and push annotated tag `v1.0.8`, create the formal Chinese GitHub Release, attach the verified ZIP and verify the published metadata.
+- [x] Record the final Release URL/state in the ledger, commit it and push the final documentation update.
 
 ## Handoff Notes
-- Start here: review and commit the three ledger files, push `main`, then publish tag/Release `v1.0.8` with `I:\AI\Vibe Coding\NM_web_imagen-v1.0.8.zip`.
-- Do not redo: the one-click release matrix, portable-runtime smoke, local/G: preflights or G: synchronization. They already passed against HEAD `1c94e5c` and the package hash above.
-- Verify next: `gh release view v1.0.8 --json tagName,name,url,isDraft,isPrerelease`, `git ls-remote --tags origin refs/tags/v1.0.8`, and a clean tracked worktree after the final ledger push.
+- Start here: v1.0.8 is published; use the Release URL and the current `main` ledger as the handoff source for the next change.
+- Do not redo: the one-click release matrix, portable-runtime smoke, local/G: preflights, G: synchronization, GitHub push, tag or Release creation. They all passed and are recorded above.
+- Verify next: for a future change, start with `git status --short --branch`, `check_ledger.py`, and the first unchecked item under `## Now`.
 - Do not claim: automated/manual in-app browser acceptance. Enterprise loopback policy still prevents automated browser verification; the user explicitly accepted this residual risk for publication.
-- Release boundary: the user explicitly authorized package, both G: writes, push, tag and GitHub Release. Branch/worktree deletion was not requested.
+- Release boundary: the user explicitly authorized package, both G: writes, push, tag and GitHub Release. Branch/worktree deletion was not requested and was not performed.
 - Current Studio assets: `index-Dr9OIrAP.js` and `index-CEGbhIKr.css`.
 - Known limits: mask guidance is capped at 8,294,400 pixels; pre-feature records without `maskFileSnapshot` cannot reconstruct exact Alpha; persisted masks support regenerate after refresh but do not reopen as an editable historical brush layer; model-guided masks can still drift slightly outside the selected region.
 

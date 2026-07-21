@@ -1,9 +1,9 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-21 17:41 +08:00
-- Phase: v1.0.8 is fully built, packaged and synchronized to both approved G: distribution roots; GitHub push, annotated tag and formal Release are the remaining publication steps
-- Superpowers Phase: approved direction -> local main integration -> RED/GREEN follow-ups -> full release verification -> package/sync complete -> GitHub publication pending
+- Last Updated: 2026-07-21 17:47 +08:00
+- Phase: v1.0.8 is published on GitHub and synchronized to both approved G: distribution roots; the release handoff is complete
+- Superpowers Phase: approved direction -> local main integration -> RED/GREEN follow-ups -> full release verification -> package/sync -> GitHub publication -> handoff complete
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
 - Branch: `main`; retained feature branch `codex/history-window-refactor-v1.0.8` points to the verified integration commit `cd3b1bd`
@@ -16,7 +16,7 @@
 - User authorization: explicit approval to publish the Release and synchronize both G: destinations; this supersedes the earlier local-only boundary.
 - Package: `I:\AI\Vibe Coding\NM_web_imagen-v1.0.8.zip`, SHA256 `ed171c9a1c74579a1a9375aa5e8b4fabf66a731b4764839c7b389d12a2f0046c`.
 - Synced destinations: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具` and `G:\doc\Tools\网页生图站`; each contains the clean `NM_web_imagen` folder and the matching versioned ZIP.
-- Publication state: `main` is still local-only and ahead of `origin/main`; tag `v1.0.8` and the GitHub Release do not yet exist.
+- Publication state: `main` is pushed, annotated tag `v1.0.8` is pushed, and the formal Release is live at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.8` with asset `NM_web_imagen-v1.0.8.zip` uploaded and SHA256-verified by GitHub.
 
 ## v1.0.8 Pre-Merge Audit
 - Merge shape: `main` is the direct ancestor and the feature branch is 30 commits ahead, so integration can use `git merge --ff-only`. Both worktrees have no tracked local edits before the version fix; only the documented untracked design/local files exist.
