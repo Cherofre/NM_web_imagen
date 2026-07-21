@@ -69,6 +69,19 @@ test("reference switch cancel uses the same dismiss path as backdrop and close",
   assert.doesNotMatch(appSource, /switchToSession\(pendingSessionSwitch\.nextSessionId, "cancel"\)/);
 });
 
+test("turn deletion is guarded, explicit, and visually secondary until hover", () => {
+  assert.match(appSource, /function deleteTurn\(sessionId: string, turn: ConversationTurn\)/);
+  assert.match(appSource, /hasActiveQueueJobForTurn\(queueJobs, sessionId, turn\.id\)/);
+  assert.match(appSource, /confirm\(t\("turn\.deleteConfirm"\)\)/);
+  assert.match(appSource, /resolveTurnDeletion\(current, sessionId, turn\.id, updatedAt\)/);
+  assert.match(appSource, /turnMaskPayloadsRef\.current\.delete\(turn\.id\)/);
+  assert.match(appSource, /className="danger-action"[\s\S]*onClick=\{\(\) => deleteTurn\(activeSession\.id, turn\)\}/);
+  assert.match(cssBlock(".turn-user-actions button.danger-action"), /background:\s*rgba\(255, 255, 255, 0\.72\);[\s\S]*color:\s*var\(--muted-strong\);/);
+  assert.match(css, /\.turn-user-actions button\.danger-action:hover:not\(:disabled\),[\s\S]*color:\s*var\(--danger\);/);
+  assert.match(i18nSource, /"turn\.deleteConfirm": "删除这一轮对话？生成图片仍保留在历史和输出文件夹中。"/);
+  assert.match(i18nSource, /"status\.turnBusy"/);
+});
+
 test("release package keeps previous hashed assets as cache fallbacks", () => {
   const assetsDir = path.resolve("..", "static", "studio", "assets");
   assert.ok(fs.existsSync(path.join(assetsDir, "index-8pzV_2va.css")));

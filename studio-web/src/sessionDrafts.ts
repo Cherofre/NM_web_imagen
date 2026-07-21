@@ -176,3 +176,26 @@ export function resolveSessionDeletion<T extends { id: string }>(
     clearReferences,
   };
 }
+
+export function resolveTurnDeletion<
+  Session extends { id: string; updatedAt: string; turns: Array<{ id: string }> },
+>(
+  sessions: Session[],
+  sessionId: string,
+  turnId: string,
+  updatedAt: string,
+) {
+  const targetSession = sessions.find((session) => session.id === sessionId);
+  if (!targetSession || !targetSession.turns.some((turn) => turn.id === turnId)) {
+    return { sessions, deleted: false };
+  }
+
+  return {
+    sessions: sessions.map((session) => (
+      session.id === sessionId
+        ? { ...session, updatedAt, turns: session.turns.filter((turn) => turn.id !== turnId) }
+        : session
+    )),
+    deleted: true,
+  };
+}

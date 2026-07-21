@@ -1493,6 +1493,24 @@ button.primary-action:focus-visible,
   opacity: 0.38;
 }
 
+.turn-user-actions button.danger-action {
+  border-color: rgba(20, 20, 20, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted-strong);
+}
+
+.turn-user-actions button.danger-action:hover:not(:disabled),
+.turn-user-actions button.danger-action:focus-visible:not(:disabled) {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--danger);
+}
+
+.turn-user-actions button.danger-action:active:not(:disabled) {
+  transform: translateY(0);
+  background: rgba(180, 35, 24, 0.13);
+}
+
 .studio-response {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);

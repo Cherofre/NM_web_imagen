@@ -145,3 +145,43 @@ test("resolveSessionDeletion clears composer references only when deleting the a
   assert.equal(activeDelete.clearReferences, true);
   assert.equal(activeDelete.nextActiveSessionId, "session-2");
 });
+
+test("resolveTurnDeletion removes only the requested turn and updates its session", () => {
+  const sessions = [
+    {
+      id: "session-1",
+      title: "一",
+      createdAt: "2026-07-21T10:00:00.000Z",
+      updatedAt: "2026-07-21T10:00:00.000Z",
+      turns: [{ id: "turn-1" }, { id: "turn-2" }],
+    },
+    {
+      id: "session-2",
+      title: "二",
+      createdAt: "2026-07-21T10:00:00.000Z",
+      updatedAt: "2026-07-21T10:00:00.000Z",
+      turns: [{ id: "turn-3" }],
+    },
+  ];
+
+  const result = drafts.resolveTurnDeletion(
+    sessions,
+    "session-1",
+    "turn-1",
+    "2026-07-21T11:00:00.000Z",
+  );
+
+  assert.equal(result.deleted, true);
+  assert.deepEqual(result.sessions[0].turns, [{ id: "turn-2" }]);
+  assert.equal(result.sessions[0].updatedAt, "2026-07-21T11:00:00.000Z");
+  assert.equal(result.sessions[1], sessions[1]);
+  assert.deepEqual(sessions[0].turns, [{ id: "turn-1" }, { id: "turn-2" }]);
+});
+
+test("resolveTurnDeletion preserves identity when the target does not exist", () => {
+  const sessions = [{ id: "session-1", updatedAt: "old", turns: [{ id: "turn-1" }] }];
+  const result = drafts.resolveTurnDeletion(sessions, "session-1", "missing", "new");
+
+  assert.equal(result.deleted, false);
+  assert.equal(result.sessions, sessions);
+});

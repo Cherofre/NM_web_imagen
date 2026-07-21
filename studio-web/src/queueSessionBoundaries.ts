@@ -34,6 +34,14 @@ export function hasActiveQueueJobForSession(jobs: QueueJobLike[], sessionId: str
   return jobs.some((job) => job.sessionId === sessionId && activeQueueStatuses.has(job.status));
 }
 
+export function hasActiveQueueJobForTurn(jobs: QueueJobLike[], sessionId: string, turnId: string) {
+  return jobs.some((job) => (
+    job.sessionId === sessionId
+    && job.turnId === turnId
+    && activeQueueStatuses.has(job.status)
+  ));
+}
+
 export function queueJobTargetExists(sessions: SessionLike[], job: Pick<QueueJobLike, "sessionId" | "turnId">) {
   return sessions.some((session) => (
     session.id === job.sessionId && session.turns.some((turn) => turn.id === job.turnId)

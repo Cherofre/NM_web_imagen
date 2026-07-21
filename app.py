@@ -1664,6 +1664,9 @@ def studio_turn_snapshot_values(turn: Any) -> List[Dict[str, Any]]:
     mask_snapshot = turn.get("maskSnapshot")
     if isinstance(mask_snapshot, dict):
         values.append(mask_snapshot)
+    mask_file_snapshot = turn.get("maskFileSnapshot")
+    if isinstance(mask_file_snapshot, dict):
+        values.append(mask_file_snapshot)
     return values
 
 
@@ -2020,6 +2023,17 @@ def compact_studio_turn(
         )
         if normalized_mask_snapshot:
             compact["maskSnapshot"] = normalized_mask_snapshot
+    mask_file_snapshot = turn.get("maskFileSnapshot")
+    if isinstance(mask_file_snapshot, dict):
+        normalized_mask_file_snapshot = normalize_studio_reference(
+            mask_file_snapshot,
+            session_id,
+            turn_id,
+            STUDIO_MAX_REFS_PER_TURN + 1,
+            created_paths,
+        )
+        if normalized_mask_file_snapshot:
+            compact["maskFileSnapshot"] = normalized_mask_file_snapshot
     return compact
 
 

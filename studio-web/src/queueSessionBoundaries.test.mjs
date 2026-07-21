@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   hasActiveQueueJobForSession,
+  hasActiveQueueJobForTurn,
   queueJobTargetExists,
   reconcileInterruptedQueueTurns,
 } from "./queueSessionBoundaries.ts";
@@ -45,6 +46,17 @@ test("active queue jobs block deleting or clearing their session", () => {
     hasActiveQueueJobForSession([{ id: "job-1", sessionId: "session-1", turnId: "turn-1", status: "canceled" }], "session-1"),
     false,
   );
+});
+
+test("active queue jobs block deleting only their matching turn", () => {
+  const jobs = [
+    { id: "job-1", sessionId: "session-1", turnId: "turn-1", status: "running" },
+    { id: "job-2", sessionId: "session-1", turnId: "turn-2", status: "success" },
+  ];
+
+  assert.equal(hasActiveQueueJobForTurn(jobs, "session-1", "turn-1"), true);
+  assert.equal(hasActiveQueueJobForTurn(jobs, "session-1", "turn-2"), false);
+  assert.equal(hasActiveQueueJobForTurn(jobs, "session-2", "turn-1"), false);
 });
 
 test("queue job target existence checks both session and turn", () => {

@@ -31,14 +31,20 @@ test("applied masks create a lightweight review snapshot on the submitted turn",
   assert.match(i18nSource, /"mask\.snapshot"/);
 });
 
-test("regenerate reuses the current-page mask and refuses a silent unmasked fallback", () => {
+test("regenerate persists and restores the original alpha mask without a silent unmasked fallback", () => {
   assert.match(appSource, /maskAttachment\?: MaskAttachment<File> \| null;/);
+  assert.match(appSource, /maskFileSnapshot\?: ReferenceSnapshot/);
   assert.match(appSource, /const turnMaskPayloadsRef = useRef<Map<string, ReusableMaskPayload<File>>>\(new Map\(\)\);/);
-  assert.match(appSource, /const reusableMask = turnMaskPayloadsRef\.current\.get\(turn\.id\);/);
+  assert.match(appSource, /let reusableMask = turnMaskPayloadsRef\.current\.get\(turn\.id\);/);
+  assert.match(appSource, /turn\.maskFileSnapshot\?\.src/);
+  assert.match(appSource, /normalizeMaskEncoding\(turn\.meta\?\.mask_encoding\)/);
+  assert.match(appSource, /turnMaskPayloadsRef\.current\.set\(turn\.id, reusableMask\)/);
   assert.match(appSource, /if \(turnUsesMaskGuidance\(turn\) && !reusableMask\) \{[\s\S]*setNotice\(t\("mask\.regenerateUnavailable"\)\);[\s\S]*return;/);
   assert.match(appSource, /restoreReusableMaskAttachment\(reusableMask, turnReferences\[0\]\)/);
   assert.match(appSource, /maskAttachment:\s*regeneratedMask/);
   assert.match(appSource, /maskSnapshot:\s*turn\.maskSnapshot/);
+  assert.match(appSource, /maskFileSnapshot:\s*turn\.maskFileSnapshot/);
+  assert.match(appSource, /createReferenceSnapshots\(\[currentMask\.maskFile\]\)/);
   assert.match(appSource, /turnMaskPayloadsRef\.current\.set\(turnId, reusableMaskPayload\(currentMask\)\)/);
   assert.match(appSource, /const requestedMaskAttachment = overrides\.maskAttachment === undefined \? maskAttachment : overrides\.maskAttachment;/);
   assert.match(appSource, /activeMaskAttachment\(requestedMaskAttachment, currentReferences\)/);
@@ -154,6 +160,8 @@ test("mask editor follows the existing product vocabulary and remains usable on 
   assert.match(i18nSource, /"mask\.paintHint"/);
   assert.match(i18nSource, /"mask\.promptLimit"/);
   assert.match(i18nSource, /"mask\.shortcutHelp"/);
+  assert.match(i18nSource, /可用于再次生成/);
   assert.match(i18nSource, /刷新后不能继续编辑原遮罩/);
+  assert.match(i18nSource, /saved for regeneration/);
   assert.match(i18nSource, /cannot be edited after refresh/);
 });

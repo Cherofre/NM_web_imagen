@@ -22,6 +22,7 @@ type TurnWithReferences = {
   id: string;
   referenceSnapshots?: readonly ReferenceLike[];
   maskSnapshot?: ReferenceLike;
+  maskFileSnapshot?: ReferenceLike;
 };
 
 export type SessionWithReferences = SessionLike & {
@@ -416,10 +417,14 @@ export function applyCanonicalReferenceUpdates<Session extends SessionWithRefere
         ? canonicalReferenceUpdate(currentTurn.maskSnapshot, sentTurn.maskSnapshot, serverTurn.maskSnapshot)
         : currentTurn.maskSnapshot;
       if (maskSnapshot !== currentTurn.maskSnapshot) turnChanged = true;
+      const maskFileSnapshot = currentTurn.maskFileSnapshot
+        ? canonicalReferenceUpdate(currentTurn.maskFileSnapshot, sentTurn.maskFileSnapshot, serverTurn.maskFileSnapshot)
+        : currentTurn.maskFileSnapshot;
+      if (maskFileSnapshot !== currentTurn.maskFileSnapshot) turnChanged = true;
       if (!turnChanged) return currentTurn;
       changed = true;
       sessionChanged = true;
-      return { ...currentTurn, referenceSnapshots, maskSnapshot };
+      return { ...currentTurn, referenceSnapshots, maskSnapshot, maskFileSnapshot };
     });
     return sessionChanged ? { ...currentSession, turns } as Session : currentSession;
   });

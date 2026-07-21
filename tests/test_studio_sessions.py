@@ -33,6 +33,7 @@ def studio_session_payload(
     expected_revision=_MISSING,
     references=None,
     mask_snapshot=None,
+    mask_file_snapshot=None,
 ) -> dict:
     now = "2026-07-10T10:00:00Z"
     turn = {
@@ -48,6 +49,8 @@ def studio_session_payload(
         turn["referenceSnapshots"] = references
     if mask_snapshot is not None:
         turn["maskSnapshot"] = mask_snapshot
+    if mask_file_snapshot is not None:
+        turn["maskFileSnapshot"] = mask_file_snapshot
     payload = {
         "active_session_id": "session-1",
         "sessions": [
@@ -157,6 +160,47 @@ class StudioSessionTests(unittest.TestCase):
         loaded = self.client.get("/api/studio/sessions")
         self.assertEqual(200, loaded.status_code)
         self.assertEqual(snapshot, loaded.json()["sessions"][0]["turns"][0]["maskSnapshot"])
+
+    def test_studio_session_persists_original_alpha_mask_beside_review_snapshot(self) -> None:
+        response = self.client.put(
+            "/api/studio/sessions",
+            json=studio_session_payload(
+                "遮罩持久化",
+                expected_revision=1,
+                mask_snapshot={
+                    "id": "mask-review-1",
+                    "name": "mask-preview.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW),
+                },
+                mask_file_snapshot={
+                    "id": "mask-alpha-1",
+                    "name": "mask-alpha.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW + b"alpha-mask"),
+                },
+            ),
+        )
+
+        self.assertEqual(200, response.status_code)
+        turn = response.json()["sessions"][0]["turns"][0]
+        review = turn["maskSnapshot"]
+        alpha = turn["maskFileSnapshot"]
+        self.assertEqual("mask-review-1", review["id"])
+        self.assertEqual("mask-alpha-1", alpha["id"])
+        self.assertNotEqual(review["src"], alpha["src"])
+        for snapshot in (review, alpha):
+            self.assertTrue(snapshot["src"].startswith("/outputs/session_refs/"))
+            path = webapp.path_from_output_url(snapshot["src"])
+            self.assertIsNotNone(path)
+            assert path is not None
+            self.assertTrue(path.exists())
+
+        persisted_text = (self.outputs / "studio_sessions.json").read_text(encoding="utf-8")
+        self.assertNotIn("data:image", persisted_text)
+        loaded_turn = self.client.get("/api/studio/sessions").json()["sessions"][0]["turns"][0]
+        self.assertEqual(review, loaded_turn["maskSnapshot"])
+        self.assertEqual(alpha, loaded_turn["maskFileSnapshot"])
 
     def test_studio_session_get_defaults_and_legacy_state_use_revision_one(self) -> None:
         empty_response = self.client.get("/api/studio/sessions")
@@ -1270,6 +1314,53 @@ class StudioSessionTests(unittest.TestCase):
 
         self.assertEqual(200, second_response.status_code)
         self.assertFalse(saved_path.exists())
+
+    def test_studio_sessions_prune_deleted_turn_reference_and_mask_files(self) -> None:
+        first_payload = studio_session_payload(
+            "删除单轮附件",
+            expected_revision=1,
+            references=[
+                {
+                    "id": "ref-base",
+                    "name": "base.png",
+                    "mime_type": "image/png",
+                    "src": raster_data_url(PNG_1X1_RAW + b"base"),
+                }
+            ],
+            mask_snapshot={
+                "id": "mask-review",
+                "name": "mask-preview.png",
+                "mime_type": "image/png",
+                "src": raster_data_url(PNG_1X1_RAW + b"review"),
+            },
+            mask_file_snapshot={
+                "id": "mask-alpha",
+                "name": "mask-alpha.png",
+                "mime_type": "image/png",
+                "src": raster_data_url(PNG_1X1_RAW + b"alpha"),
+            },
+        )
+
+        first_response = self.client.put("/api/studio/sessions", json=first_payload)
+
+        self.assertEqual(200, first_response.status_code)
+        saved_turn = first_response.json()["sessions"][0]["turns"][0]
+        saved_urls = [
+            saved_turn["referenceSnapshots"][0]["src"],
+            saved_turn["maskSnapshot"]["src"],
+            saved_turn["maskFileSnapshot"]["src"],
+        ]
+        saved_paths = [webapp.path_from_output_url(url) for url in saved_urls]
+        self.assertTrue(all(path is not None and path.exists() for path in saved_paths))
+
+        second_payload = studio_session_payload("删除单轮附件", expected_revision=2)
+        second_payload["sessions"][0]["turns"] = []
+        second_response = self.client.put("/api/studio/sessions", json=second_payload)
+
+        self.assertEqual(200, second_response.status_code)
+        self.assertEqual(1, len(second_response.json()["sessions"]))
+        self.assertEqual([], second_response.json()["sessions"][0]["turns"])
+        self.assertTrue(all(path is not None and not path.exists() for path in saved_paths))
 
     def test_studio_sessions_preserve_drafts_payload(self) -> None:
         payload = {

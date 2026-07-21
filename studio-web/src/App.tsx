@@ -59,6 +59,7 @@ import {
   normalizeSessionWithDrafts,
   resolveReferenceSwitch,
   resolveSessionDeletion,
+  resolveTurnDeletion,
   resolveSubmissionDrafts,
   shouldPromptReferenceSwitch,
   type ReferenceSwitchChoice,
@@ -79,6 +80,7 @@ import { normalizeStoredQueueJobs, REFRESH_INTERRUPTED_QUEUE_ERROR, serializeQue
 import { appendGenerationQueueJob, nextQueuedGenerationJob } from "./generationQueue";
 import {
   hasActiveQueueJobForSession,
+  hasActiveQueueJobForTurn,
   queueJobTargetExists,
   reconcileInterruptedQueueTurns,
 } from "./queueSessionBoundaries";
@@ -185,6 +187,7 @@ type ConversationTurn = {
   images: GeneratedImage[];
   referenceSnapshots?: ReferenceSnapshot[];
   maskSnapshot?: ReferenceSnapshot;
+  maskFileSnapshot?: ReferenceSnapshot;
   reply?: string;
   error?: string;
   meta?: Record<string, unknown>;
@@ -205,6 +208,7 @@ type SubmitOverrides = {
   referenceSnapshots?: ReferenceSnapshot[];
   maskAttachment?: MaskAttachment<File> | null;
   maskSnapshot?: ReferenceSnapshot;
+  maskFileSnapshot?: ReferenceSnapshot;
   skipMultiImageConfirm?: boolean;
 };
 
@@ -633,6 +637,7 @@ function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): Conversat
     images: turn.images.map(compactGeneratedImage),
     referenceSnapshots: turn.referenceSnapshots?.map((snapshot) => compactReferenceSnapshot(snapshot, keepReferenceSrc)),
     maskSnapshot: turn.maskSnapshot ? compactReferenceSnapshot(turn.maskSnapshot, keepReferenceSrc) : undefined,
+    maskFileSnapshot: turn.maskFileSnapshot ? compactReferenceSnapshot(turn.maskFileSnapshot, keepReferenceSrc) : undefined,
   };
   if (!compact.posterText) {
     delete compact.posterText;
@@ -641,7 +646,7 @@ function compactTurn(turn: ConversationTurn, keepReferenceSrc = true): Conversat
 }
 
 function turnUsesMaskGuidance(turn: ConversationTurn) {
-  return Boolean(turn.maskSnapshot || turn.meta?.mask_used || turn.meta?.mask_guidance);
+  return Boolean(turn.maskSnapshot || turn.maskFileSnapshot || turn.meta?.mask_used || turn.meta?.mask_guidance);
 }
 
 function compactInlineText(value: string, limit = 26) {
@@ -2601,6 +2606,32 @@ function App() {
     });
   }
 
+  function deleteTurn(sessionId: string, turn: ConversationTurn) {
+    if (
+      turn.status === "queued"
+      || turn.status === "running"
+      || hasActiveQueueJobForTurn(queueJobs, sessionId, turn.id)
+    ) {
+      setNotice(t("status.turnBusy"));
+      return;
+    }
+    if (!confirm(t("turn.deleteConfirm"))) return;
+
+    const updatedAt = new Date().toISOString();
+    const matchingJobs = queueJobs.filter((job) => job.sessionId === sessionId && job.turnId === turn.id);
+    matchingJobs.forEach((job) => clearQueueJobRuntime(job.id));
+    setQueueJobs((items) => items.filter((job) => job.sessionId !== sessionId || job.turnId !== turn.id));
+    turnMaskPayloadsRef.current.delete(turn.id);
+    setExpandedTurns((current) => {
+      if (!(turn.id in current)) return current;
+      const next = { ...current };
+      delete next[turn.id];
+      return next;
+    });
+    setSessions((current) => resolveTurnDeletion(current, sessionId, turn.id, updatedAt).sessions);
+    setNotice(t("turn.deleted"));
+  }
+
   function applyHistory(entry: HistoryEntry) {
     const formState = entry.form_state || {};
     if (entry.engine === "banana") {
@@ -3154,9 +3185,36 @@ function App() {
   }
 
   async function regenerateFromTurn(turn: ConversationTurn) {
-    const reusableMask = turnMaskPayloadsRef.current.get(turn.id);
+    let reusableMask = turnMaskPayloadsRef.current.get(turn.id);
+    if (turnUsesMaskGuidance(turn) && !reusableMask && !turn.maskFileSnapshot?.src) {
+      setNotice(t("mask.regenerateUnavailable"));
+      return;
+    }
+    const [loadedTurnReferences, persistedMaskFile, persistedPreviewFile] = await Promise.all([
+      Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile)),
+      !reusableMask && turn.maskFileSnapshot?.src
+        ? referenceSnapshotToFile(turn.maskFileSnapshot, 0)
+        : Promise.resolve(null),
+      !reusableMask && turn.maskSnapshot?.src
+        ? referenceSnapshotToFile(turn.maskSnapshot, 0)
+        : Promise.resolve(null),
+    ]);
+    if (!reusableMask && persistedMaskFile) {
+      const storedCoverage = Number(turn.meta?.mask_coverage);
+      reusableMask = {
+        maskFile: persistedMaskFile,
+        previewFile: persistedPreviewFile || undefined,
+        coverage: Number.isFinite(storedCoverage) ? storedCoverage : undefined,
+        encoding: normalizeMaskEncoding(turn.meta?.mask_encoding),
+      };
+      turnMaskPayloadsRef.current.set(turn.id, reusableMask);
+    }
     if (turnUsesMaskGuidance(turn) && !reusableMask) {
       setNotice(t("mask.regenerateUnavailable"));
+      return;
+    }
+    if (reusableMask && !loadedTurnReferences[0]) {
+      setNotice(t("mask.regenerateBaseUnavailable"));
       return;
     }
     setActiveEngine(turn.engine);
@@ -3187,11 +3245,6 @@ function App() {
         },
       };
     });
-    const loadedTurnReferences = await Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile));
-    if (reusableMask && !loadedTurnReferences[0]) {
-      setNotice(t("mask.regenerateBaseUnavailable"));
-      return;
-    }
     const turnReferences = loadedTurnReferences.filter((file): file is File => Boolean(file));
     const regeneratedMask = reusableMask
       ? restoreReusableMaskAttachment(reusableMask, turnReferences[0])
@@ -3218,12 +3271,13 @@ function App() {
       referenceSnapshots: turn.referenceSnapshots || [],
       maskAttachment: regeneratedMask,
       maskSnapshot: turn.maskSnapshot,
+      maskFileSnapshot: turn.maskFileSnapshot,
     });
   }
 
   function regenerateTurnLabel(turn: ConversationTurn) {
     if (!turnUsesMaskGuidance(turn)) return t("response.regenerate");
-    return turnMaskPayloadsRef.current.has(turn.id)
+    return turnMaskPayloadsRef.current.has(turn.id) || Boolean(turn.maskFileSnapshot?.src)
       ? t("mask.regenerateWithMask")
       : t("mask.regenerateNeedsRedraw");
   }
@@ -3637,6 +3691,9 @@ function App() {
     const maskSnapshot = currentMask
       ? overrides.maskSnapshot || (currentMask.previewFile ? (await createReferenceSnapshots([currentMask.previewFile]))[0] : undefined)
       : undefined;
+    const maskFileSnapshot = currentMask
+      ? overrides.maskFileSnapshot || (await createReferenceSnapshots([currentMask.maskFile]))[0]
+      : undefined;
     const submitNegativePrompt = currentEngine === "gpt-image-2" ? submissionDrafts.negative_prompt : "";
     const submitPosterText = currentEngine === "gpt-image-2" ? submissionDrafts.poster_text : "";
     const submitContextPrompt = submissionDrafts.context_prompt;
@@ -3652,11 +3709,13 @@ function App() {
       images: [],
       referenceSnapshots,
       maskSnapshot,
+      maskFileSnapshot,
       meta: {
         model: currentModel,
         reference_count: submissionReferences.length,
         mask_used: Boolean(currentMask),
         mask_encoding: currentMask?.encoding || "",
+        mask_coverage: currentMask?.coverage,
         mask_guidance: Boolean(currentMask),
         context_prompt: submitContextPrompt,
         queued_at: createdAt,
@@ -4496,6 +4555,15 @@ function App() {
                       disabled={referenceActionsDisabled || !turn.referenceSnapshots?.some((reference) => reference.src)}
                     >
                       <ImagePlus size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-action"
+                      onClick={() => deleteTurn(activeSession.id, turn)}
+                      title={t("turn.delete")}
+                      aria-label={t("turn.delete")}
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
