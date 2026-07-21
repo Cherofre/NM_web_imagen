@@ -24,7 +24,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { maskPreviewDimensions } from "./maskEditorModel";
+import {
+  maskAlphaSelectsPixel,
+  maskPreviewDimensions,
+  normalizeMaskEncoding,
+  type MaskEncoding,
+} from "./maskEditorModel";
 
 type Translator = (key: string, params?: Record<string, string | number>) => string;
 type MaskTool = "brush" | "eraser" | "move";
@@ -39,11 +44,13 @@ export type MaskEditorResult = {
   maskFile: File;
   previewFile: File;
   coverage: number;
+  encoding: MaskEncoding;
 };
 
 type MaskEditorProps = {
   file: File;
   initialMaskFile?: File | null;
+  initialEncoding?: MaskEncoding;
   t: Translator;
   onCancel: () => void;
   onApply: (result: MaskEditorResult) => void;
@@ -129,7 +136,7 @@ function drawCommand(context: CanvasRenderingContext2D, command: MaskCommand) {
   drawStroke(context, command);
 }
 
-export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemove }: MaskEditorProps) {
+export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel, onApply, onRemove }: MaskEditorProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -157,6 +164,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [encoding, setEncoding] = useState<MaskEncoding>(() => normalizeMaskEncoding(initialEncoding));
 
   function rebuildOverlay() {
     const overlay = overlayCanvasRef.current;
@@ -257,8 +265,10 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
 
   useEffect(() => {
     let cancelled = false;
+    const normalizedInitialEncoding = normalizeMaskEncoding(initialEncoding);
     setReady(false);
     setError("");
+    setEncoding(normalizedInitialEncoding);
     commandsRef.current = [];
     redoRef.current = [];
     cursorClientRef.current = null;
@@ -316,7 +326,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
           const pixels = decodeContext.getImageData(0, 0, width, height);
           const selected = baselineContext.createImageData(width, height);
           for (let index = 3; index < pixels.data.length; index += 4) {
-            if (pixels.data[index] < 128) {
+            if (maskAlphaSelectsPixel(pixels.data[index], normalizedInitialEncoding)) {
               selected.data[index - 3] = 239;
               selected.data[index - 2] = 68;
               selected.data[index - 1] = 68;
@@ -344,7 +354,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
     return () => {
       cancelled = true;
     };
-  }, [file, initialMaskFile, t]);
+  }, [file, initialMaskFile, initialEncoding, t]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(redrawBrushCursor);
@@ -508,9 +518,15 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
       const maskContext = maskCanvas.getContext("2d");
       if (!maskContext) throw new Error(t("mask.exportFailed"));
       maskContext.fillStyle = "#ffffff";
-      maskContext.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-      maskContext.globalCompositeOperation = "destination-out";
-      maskContext.drawImage(overlay, 0, 0);
+      if (encoding === "standard") {
+        maskContext.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskContext.globalCompositeOperation = "destination-out";
+        maskContext.drawImage(overlay, 0, 0);
+      } else {
+        maskContext.drawImage(overlay, 0, 0);
+        maskContext.globalCompositeOperation = "source-in";
+        maskContext.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+      }
       maskContext.globalCompositeOperation = "source-over";
 
       const previewCanvas = document.createElement("canvas");
@@ -539,6 +555,7 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
         maskFile: new File([maskBlob], "mask.png", { type: "image/png", lastModified: stamp }),
         previewFile: new File([previewBlob], "mask-preview.webp", { type: "image/webp", lastModified: stamp }),
         coverage: selectedCoverage,
+        encoding,
       });
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : t("mask.exportFailed"));
@@ -556,11 +573,11 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
     }
     if (event.key === "Tab") {
       const dialog = dialogRef.current;
-      const focusable = dialog
-        ? Array.from(dialog.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+        const focusable = dialog
+          ? Array.from(dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
         ))
-        : [];
+          : [];
       if (!focusable.length) {
         event.preventDefault();
         dialog?.focus();
@@ -705,8 +722,22 @@ export function MaskEditor({ file, initialMaskFile, t, onCancel, onApply, onRemo
         </div>
 
         <footer className="mask-editor-footer">
-          <span>{t("mask.onlyFirst")}</span>
-          <div>
+          <div className="mask-editor-footer-meta">
+            <span>{t("mask.onlyFirst")}</span>
+            <label className="mask-editor-encoding" title={t("mask.encodingHelp")}>
+              <span>{t("mask.encodingLabel")}</span>
+              <select
+                value={encoding}
+                onChange={(event) => setEncoding(event.target.value as MaskEncoding)}
+                disabled={saving}
+                aria-label={t("mask.encodingLabel")}
+              >
+                <option value="standard">{t("mask.encodingStandard")}</option>
+                <option value="compat">{t("mask.encodingCompat")}</option>
+              </select>
+            </label>
+          </div>
+          <div className="mask-editor-footer-actions">
             {initialMaskFile && onRemove && <button type="button" className="danger-action" onClick={onRemove}>{t("mask.remove")}</button>}
             <button type="button" onClick={onCancel}>{t("mask.cancel")}</button>
             <button type="button" className="primary-action" onClick={() => void applyMask()} disabled={!ready || saving}>

@@ -56,6 +56,15 @@ test("mask submission accepts auto or edits and rejects other endpoints", () => 
   assert.throws(() => masks.resolveMaskEndpoint("/v1/responses", true), /编辑接口/);
 });
 
+test("mask encoding supports official and reverse-alpha gateway semantics", () => {
+  assert.equal(masks.maskAlphaSelectsPixel(0, "standard"), true);
+  assert.equal(masks.maskAlphaSelectsPixel(255, "standard"), false);
+  assert.equal(masks.maskAlphaSelectsPixel(0, "compat"), false);
+  assert.equal(masks.maskAlphaSelectsPixel(255, "compat"), true);
+  assert.equal(masks.normalizeMaskEncoding("compat"), "compat");
+  assert.equal(masks.normalizeMaskEncoding("unexpected"), "standard");
+});
+
 test("generation file helper appends reference files before the mask snapshot", () => {
   const base = new File(["base"], "base.png", { type: "image/png", lastModified: 1 });
   const second = new File(["second"], "second.png", { type: "image/png", lastModified: 2 });

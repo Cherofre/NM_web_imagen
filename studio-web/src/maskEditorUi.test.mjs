@@ -61,6 +61,20 @@ test("mask editor provides real canvas drawing, PNG export, undo redo and pan co
   assert.match(editorSource, /aria-label=\{t\("mask\.title"\)\}/);
 });
 
+test("mask editor can keep official alpha semantics or opt into a reverse-alpha gateway mode", () => {
+  assert.match(editorSource, /encoding:\s*MaskEncoding/);
+  assert.match(editorSource, /if \(encoding === "standard"\) \{[\s\S]*destination-out[\s\S]*\} else \{[\s\S]*source-in/);
+  assert.match(editorSource, /setEncoding\(event\.target\.value as MaskEncoding\)/);
+  assert.match(editorSource, /select:not\(:disabled\)/);
+  assert.match(editorSource, /mask\.encodingLabel/);
+  assert.match(editorSource, /mask\.encodingCompat/);
+  assert.match(editorSource, /className="mask-editor-footer-actions"/);
+  assert.match(appSource, /encoding:\s*result\.encoding/);
+  assert.match(appSource, /initialEncoding=\{activeComposerMask\?\.encoding\}/);
+  assert.match(styleSource, /\.mask-editor-encoding/);
+  assert.match(i18nSource, /"mask\.encodingHelp"/);
+});
+
 test("mask editor exposes discoverable keyboard shortcuts for tools, brush size and zoom", () => {
   assert.match(editorSource, /case "b":/);
   assert.match(editorSource, /case "e":/);

@@ -2627,11 +2627,12 @@ function App() {
       maskFile: result.maskFile,
       previewFile: result.previewFile,
       coverage: result.coverage,
+      encoding: result.encoding,
     };
     setReferences((current) => current.length ? [result.baseFile, ...current.slice(1)] : current);
     setMaskAttachment(attachment);
     setMaskEditorOpen(false);
-    setNotice(t("mask.applied"));
+    setNotice(t(result.encoding === "compat" ? "mask.appliedCompat" : "mask.applied"));
   }
 
   function removeMask() {
@@ -4614,7 +4615,11 @@ function App() {
                         {index === 0 && maskCapability.available && (
                           <span className="reference-mask-badges">
                             <em className="reference-mask-badge">{t("mask.baseBadge")}</em>
-                            {activeComposerMask && <em className="reference-mask-badge is-applied">{t("mask.appliedBadge")}</em>}
+                            {activeComposerMask && (
+                              <em className="reference-mask-badge is-applied">
+                                {t(activeComposerMask.encoding === "compat" ? "mask.compatBadge" : "mask.appliedBadge")}
+                              </em>
+                            )}
                             <button
                               type="button"
                               className="reference-mask-action"
@@ -5574,6 +5579,7 @@ function App() {
         <MaskEditor
           file={references[0]}
           initialMaskFile={activeComposerMask?.maskFile}
+          initialEncoding={activeComposerMask?.encoding}
           t={t}
           onCancel={() => setMaskEditorOpen(false)}
           onApply={applyMaskResult}

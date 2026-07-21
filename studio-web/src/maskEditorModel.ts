@@ -5,13 +5,25 @@ export type ReferenceFileIdentity = {
   type?: string;
 };
 
+export type MaskEncoding = "standard" | "compat";
+
 export type MaskAttachment<FileType extends ReferenceFileIdentity = File> = {
   baseFingerprint: string;
   baseFile: FileType;
   maskFile: FileType;
   previewFile?: FileType;
   coverage?: number;
+  encoding?: MaskEncoding;
 };
+
+export function normalizeMaskEncoding(value: unknown): MaskEncoding {
+  return value === "compat" ? "compat" : "standard";
+}
+
+export function maskAlphaSelectsPixel(alpha: number, encoding: MaskEncoding) {
+  const normalizedAlpha = Math.max(0, Math.min(255, Number(alpha) || 0));
+  return encoding === "compat" ? normalizedAlpha >= 128 : normalizedAlpha < 128;
+}
 
 export function maskPreviewDimensions(width: number, height: number, maxEdge = 384) {
   const safeWidth = Math.max(0, Number(width) || 0);

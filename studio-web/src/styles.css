@@ -4375,8 +4375,7 @@ button.primary-action:focus-visible,
   font-size: 15px;
 }
 
-.mask-editor-head span,
-.mask-editor-footer > span {
+.mask-editor-head span {
   overflow: hidden;
   color: rgba(255, 255, 255, 0.66);
   font-size: 12px;
@@ -4629,11 +4628,50 @@ button.primary-action:focus-visible,
   min-width: 0;
 }
 
-.mask-editor-footer > span {
+.mask-editor-footer-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  min-width: 0;
+}
+
+.mask-editor-footer-meta > span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
   white-space: normal;
 }
 
-.mask-editor-footer > div {
+.mask-editor-encoding {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.mask-editor-encoding select {
+  min-height: 30px;
+  padding: 0 26px 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9px;
+  background: #262626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.mask-editor-encoding select:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.mask-editor-footer-actions {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 8px;
@@ -4738,7 +4776,7 @@ button.primary-action:focus-visible,
     flex-direction: column;
   }
 
-  .mask-editor-footer > div {
+  .mask-editor-footer-actions {
     justify-content: flex-end;
   }
 }
