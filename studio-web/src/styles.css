@@ -2579,6 +2579,38 @@ button.primary-action:focus-visible,
   padding-bottom: 2px;
 }
 
+.mask-prompt-guidance {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  width: min(280px, 70vw);
+  min-height: 46px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: #f8f8f7;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.mask-prompt-guidance.is-broad {
+  background: #fafaf9;
+  color: var(--ink);
+}
+
+.mask-prompt-guidance svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.mask-prompt-guidance span {
+  min-width: 0;
+  white-space: normal;
+}
+
 .reference-chat-notice {
   display: flex;
   align-items: center;

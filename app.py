@@ -1300,43 +1300,15 @@ def cleanup_generated_image_files(
             image.pop(key, None)
 
 
-def mask_prompt_has_specific_target(prompt: str) -> bool:
-    text = str(prompt or "").strip()
-    if not text:
-        return False
-
-    target_patterns = (
-        r"(?:改成|换成|换为|替换成|替换为|改为|调整为|设置为|变成|变得|做成)([^。！？\n]{2,})",
-        r"(?:添加|增加|删除|移除|擦除|去掉)([^。！？\n]{1,})",
-        r"\b(?:replace|change|turn|convert|transform)\b.+?\b(?:with|to|into)\b\s+([^.!?\n]+)",
-        r"\b(?:add|remove|erase|delete)\b\s+([^.!?\n]+)",
-    )
-    vague_targets = re.compile(
-        r"^(?:(?:(?:另(?:一)?|一|其他|不同|新)?(?:个|种)?(?:的)?(?:风格|样式|效果|内容|画面)(?:一下)?|一下)|"
-        r"(?:a|an)?(?:another|different|new)?(?:style|look|effect|something)?)$",
-        re.IGNORECASE,
-    )
-    for pattern in target_patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            target = re.split(
-                r"[,，;；](?:其余|其他|人物|主体|未涂|遮罩外|选区外)",
-                match.group(1),
-                maxsplit=1,
-            )[0]
-            compact = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", target).lower()
-            if len(compact) >= 2 and not vague_targets.fullmatch(compact):
-                return True
-    return False
-
-
 def harden_mask_prompt(prompt: str) -> str:
     return (
         "这是一次遮罩引导的局部编辑。第一张输入图是完整底图，其中的红色半透明区域只是选区标记，"
         "不是最终画面内容，生成结果中不能保留红色标记。同请求的 Alpha 遮罩与红色区域表达同一选区。"
-        "请生成一张完整、自然连续的最终图：在红色区域完成下面的具体修改；未标红区域尽量保持原图中的人物身份、"
+        "请生成一张完整、自然连续的最终图：在红色区域完成下面的修改；如果用户未指定具体替换对象或属性，"
+        "请结合原图语境在选区内选择合理、明显且自然的变化。未标红区域尽量保持原图中的人物身份、"
         "脸、头发、服装、姿势、构图和细节。遮罩边界是过渡提示，不是裁切线；不要按轮廓裁切或拼贴，"
         "允许在紧邻边缘处做必要的光影、纹理、雾气和透视融合，但不要把整体改动扩散到其他区域。\n\n"
-        f"具体修改要求：{prompt.strip()}"
+        f"用户修改要求：{prompt.strip()}"
     )
 
 
@@ -4528,14 +4500,6 @@ def create_app() -> FastAPI:
         poster_text_clean = poster_text.strip()
         effective_prompt = merge_generation_context_prompt(prompt, context_prompt)
         if mask_asset is not None:
-            if not mask_prompt_has_specific_target(effective_prompt):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "请明确写出涂红区域要改成什么，例如："
-                        "“把涂红的外部背景改成夜晚城市，人物保持不变”。"
-                    ),
-                )
             effective_prompt = harden_mask_prompt(effective_prompt)
         if poster_text_clean:
             effective_prompt = (

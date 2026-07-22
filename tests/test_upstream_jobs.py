@@ -112,21 +112,13 @@ def assert_stable_http_error(test_case, response, status_code, error_code):
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
-    def test_mask_prompt_requires_a_concrete_edit_target(self) -> None:
-        self.assertFalse(
-            webapp.mask_prompt_has_specific_target(
-                "只修改红色遮罩覆盖的部分，让那个区域换一种风格。"
-            )
-        )
-        self.assertFalse(webapp.mask_prompt_has_specific_target("遮罩部分换一下。"))
-        self.assertFalse(webapp.mask_prompt_has_specific_target("把遮罩区域换成另一种风格。"))
-        self.assertFalse(webapp.mask_prompt_has_specific_target("Change the mask to a different style."))
-        self.assertTrue(
-            webapp.mask_prompt_has_specific_target(
-                "把涂红的外部背景改成夜晚城市，人物保持不变。"
-            )
-        )
-        self.assertTrue(webapp.mask_prompt_has_specific_target("Remove the people inside the mask."))
+    def test_harden_mask_prompt_keeps_broad_requests_model_decided(self) -> None:
+        prompt = "涂红的区域换一个物品。"
+        hardened = webapp.harden_mask_prompt(prompt)
+
+        self.assertIn(prompt, hardened)
+        self.assertIn("如果用户未指定具体替换对象或属性", hardened)
+        self.assertIn("不要把整体改动扩散到其他区域", hardened)
 
     def test_mask_guided_edit_base_marks_only_the_selected_region(self) -> None:
         base = png_bytes(
@@ -1181,7 +1173,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("strict_mask", response.json()["meta"])
         self.assertEqual("standard", response.json()["meta"]["mask_encoding"])
 
-    async def test_gpt_mask_rejects_targetless_style_prompt_before_upstream(self) -> None:
+    async def test_gpt_mask_accepts_broad_prompt_with_model_decided_fallback(self) -> None:
         executor = RecordingExecutor()
         with (
             patch.object(webapp, "UPSTREAM_EXECUTOR", executor),
@@ -1190,7 +1182,7 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post(
                 "/api/generate/gpt-image-2",
                 data={
-                    "prompt": "只修改红色遮罩覆盖的部分，让那个区域换一种风格。",
+                    "prompt": "涂红的区域换一个物品。",
                     "api_key": "sk-test",
                     "base_url": "https://example.com/v1",
                     "model": "gpt-image-2",
@@ -1202,9 +1194,12 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
 
-        self.assertEqual(400, response.status_code)
-        self.assertIn("请明确写出涂红区域要改成什么", response.json()["detail"])
-        self.assertEqual([], executor.calls)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(executor.calls))
+        request_prompt = executor.calls[0]["kwargs"]["data"]["prompt"]
+        self.assertIn("涂红的区域换一个物品。", request_prompt)
+        self.assertIn("如果用户未指定具体替换对象或属性", request_prompt)
+        self.assertEqual("visual-alpha", response.json()["meta"]["mask_guidance"])
 
     async def test_production_remote_results_use_download_executor_kind(self) -> None:
         executor = RecordingExecutor()

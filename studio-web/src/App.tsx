@@ -99,7 +99,7 @@ import {
   activeMaskAttachment,
   appendGenerationFiles,
   maskEditorCapability,
-  maskPromptHasSpecificTarget,
+  maskPromptNeedsSoftGuidance,
   normalizeMaskEncoding,
   referenceFileFingerprint,
   referencesWithMaskBase,
@@ -1338,6 +1338,14 @@ function App() {
   const referenceActionsDisabled = !referenceState.canAdd;
   const maskCapability = maskEditorCapability(activeEngine, submitMode, references.length);
   const activeComposerMask = activeMaskAttachment(maskAttachment, references);
+  const activeMaskPromptText = activeComposerMask
+    ? `${activeDrafts.shared.fixed_prompt}\n${activePrompt}`.trim()
+    : "";
+  const maskPromptNeedsGuidance = Boolean(
+    activeComposerMask
+    && activeMaskPromptText
+    && maskPromptNeedsSoftGuidance(activeMaskPromptText),
+  );
   const turns = activeSession.turns;
   const sortedSessions = sortSessionsNewestFirst(sessions);
   const filteredHistory = filteredHistoryEntries(history, historyFavoriteFilter, historyDateFilter, historyEngineFilter);
@@ -3506,12 +3514,6 @@ function App() {
       promptRef.current?.focus();
       return;
     }
-    if (currentMask && !maskPromptHasSpecificTarget(`${submissionDrafts.context_prompt}\n${prompt}`)) {
-      setNotice(t("mask.promptTargetRequired"));
-      promptRef.current?.focus();
-      return;
-    }
-
     if (currentMode !== "chat") {
       if (currentConfigIssues.length > 0) {
         setConnectionOpen(true);
@@ -4793,6 +4795,16 @@ function App() {
                     </div>
                   );
                 })}
+                {activeComposerMask && (
+                  <div
+                    className={`mask-prompt-guidance${maskPromptNeedsGuidance ? " is-broad" : ""}`}
+                    role="note"
+                    title={t(maskPromptNeedsGuidance ? "mask.promptBroadGuidance" : "mask.promptSoftGuidance")}
+                  >
+                    <Sparkles size={14} aria-hidden="true" />
+                    <span>{t(maskPromptNeedsGuidance ? "mask.promptBroadGuidance" : "mask.promptSoftGuidance")}</span>
+                  </div>
+                )}
               </div>
             )}
             {referenceState.noticeKey && (
@@ -5033,7 +5045,11 @@ function App() {
                 ref={promptRef}
                 rows={3}
                 value={activePrompt}
-                placeholder={submitMode === "chat" ? t("composer.chatPlaceholder") : t("composer.generatePlaceholder")}
+                placeholder={submitMode === "chat"
+                  ? t("composer.chatPlaceholder")
+                  : activeComposerMask
+                  ? t("mask.promptPlaceholder")
+                  : t("composer.generatePlaceholder")}
                 onChange={(event) => applyPrompt(event.target.value, activeEngine)}
                 onKeyDown={submitFromComposerKey}
               />

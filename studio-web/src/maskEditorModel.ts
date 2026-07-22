@@ -32,7 +32,12 @@ export function maskAlphaSelectsPixel(alpha: number, encoding: MaskEncoding) {
   return encoding === "compat" ? normalizedAlpha >= 128 : normalizedAlpha < 128;
 }
 
-export function maskPromptHasSpecificTarget(value: unknown) {
+/**
+ * Returns true when a non-empty mask prompt is broad enough that the model
+ * will need to choose some of the concrete visual details. This is advisory
+ * UI state only; it must never block a valid mask submission.
+ */
+export function maskPromptNeedsSoftGuidance(value: unknown) {
   const text = String(value || "").trim();
   if (!text) return false;
   const patterns = [
@@ -47,10 +52,10 @@ export function maskPromptHasSpecificTarget(value: unknown) {
     for (const match of text.matchAll(pattern)) {
       const target = String(match[1] || "").split(/[,，;；](?=其余|其他|人物|主体|未涂|遮罩外|选区外)/u, 1)[0];
       const compact = target.replace(/[^0-9A-Za-z\p{Script=Han}]+/gu, "").toLowerCase();
-      if (compact.length >= 2 && !vagueTarget.test(compact)) return true;
+      if (compact.length >= 2 && !vagueTarget.test(compact)) return false;
     }
   }
-  return false;
+  return true;
 }
 
 export function maskPreviewDimensions(width: number, height: number, maxEdge = 384) {
