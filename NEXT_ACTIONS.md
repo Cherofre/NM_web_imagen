@@ -1,20 +1,21 @@
 # Next Actions
 
 ## Now
-- [x] Compare the local hard gate with OpenAI's documented ChatGPT/image-editing workflow and confirm that specificity should be guidance rather than a syntax requirement.
-- [x] Add RED regressions proving `涂红的区域换一个物品` was blocked in both Studio and FastAPI, then change the expected contract to successful submission with model-decided details.
+- [x] Compare the local hard gate with OpenAI's documented ChatGPT/image-editing workflow, confirm specificity should be guidance rather than a syntax requirement, and add RED regressions for the formerly blocked broad prompt.
 - [x] Remove frontend/backend semantic blocking, add compact neutral guidance plus a mask-specific placeholder, and keep technical validation unchanged.
 - [x] Run 163 Node tests, 244 Python tests, four-module compile, size verification, production build and diff checks; restart `14261` on the new assets.
-- [ ] Hard-refresh `http://127.0.0.1:14261/`, apply a mask and submit `涂红的区域换一个物品`; confirm the neutral hint changes to the broad wording and generation starts without the former top error toast.
+- [x] Review the first real `换一个物品` result. The request reached `/v1/images/edits` with the mask, but the windmill remained; compare it with the prior ice-cream result and identify weak replacement semantics as the cause.
+- [x] Add a non-blocking model-chosen-object expansion that requires complete removal of the selected original and a visibly different replacement; add focused regressions and pass 245 Python tests.
+- [ ] Hard-refresh `http://127.0.0.1:14261/`, reuse the same mask and submit `换一个物品`; confirm the windmill is replaced by a visibly different object rather than redrawn.
 - [ ] After manual acceptance, choose whether to keep the branch local, merge it into `main`, or prepare a later maintenance release. Do not package, sync G:, push, tag or publish without explicit instruction.
 
 ## Handoff Notes
-- Start here: hard-refresh `14261`, apply a mask and submit the exact broad prompt `涂红的区域换一个物品`.
-- Do not redo: official-doc comparison, RED reproduction, full 163/244 test runs, size/build checks or the `14261` restart. They are complete on `codex/soft-mask-prompt-guidance`.
-- Verify next: the hint should say that the model will decide specific changes, the former blocking toast must not appear, and the queued turn must retain its mask snapshot/guidance badge.
-- Do not claim: manual browser acceptance, paid upstream result quality, merge, package/G: sync, push, tag or Release.
+- Start here: hard-refresh `14261`, reuse the windmill mask and submit the exact prompt `换一个物品`.
+- Do not redo: mask-path diagnosis, the first paid comparison, official-doc comparison, RED reproduction, 163 Node tests, 245 Python tests, size/build checks or the `14261` restart.
+- Verify next: the hint remains non-blocking, the queued turn retains its mask snapshot/guidance badge, and the generated result fully replaces the windmill with a visibly different object while keeping the dog's grip natural.
+- Do not claim: the strengthened prompt has passed a second paid upstream result, manual browser acceptance, merge, package/G: sync, push, tag or Release.
 - Release boundary: v1.0.8 remains the published baseline. This follow-up is a local branch only.
-- Current Studio assets: `index-B2GPwNFn.js` and `index-BWB4gA76.css`; live `14261` PID `60920`.
+- Current Studio assets: `index-B2GPwNFn.js` and `index-BWB4gA76.css`; live `14261` PID `24672`.
 - Known limits: soft guidance does not make a broad prompt deterministic; mask guidance remains prompt-based and can drift slightly outside the selected region.
 
 ## Prior Release Context

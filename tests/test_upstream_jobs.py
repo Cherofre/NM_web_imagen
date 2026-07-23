@@ -118,7 +118,16 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(prompt, hardened)
         self.assertIn("如果用户未指定具体替换对象或属性", hardened)
+        self.assertIn("将它完整移除", hardened)
+        self.assertIn("不能保留、复原或只重新绘制原物体", hardened)
+        self.assertIn("人物的抓握、遮挡、光影和接触关系要自然", hardened)
         self.assertIn("不要把整体改动扩散到其他区域", hardened)
+
+    def test_harden_mask_prompt_does_not_force_object_replacement_for_other_edits(self) -> None:
+        hardened = webapp.harden_mask_prompt("把涂红区域的颜色改得更鲜艳。")
+
+        self.assertNotIn("将它完整移除", hardened)
+        self.assertNotIn("不能保留、复原或只重新绘制原物体", hardened)
 
     def test_mask_guided_edit_base_marks_only_the_selected_region(self) -> None:
         base = png_bytes(
@@ -1199,6 +1208,8 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         request_prompt = executor.calls[0]["kwargs"]["data"]["prompt"]
         self.assertIn("涂红的区域换一个物品。", request_prompt)
         self.assertIn("如果用户未指定具体替换对象或属性", request_prompt)
+        self.assertIn("将它完整移除", request_prompt)
+        self.assertIn("不能保留、复原或只重新绘制原物体", request_prompt)
         self.assertEqual("visual-alpha", response.json()["meta"]["mask_guidance"])
 
     async def test_production_remote_results_use_download_executor_kind(self) -> None:
