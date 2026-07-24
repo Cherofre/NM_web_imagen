@@ -1307,7 +1307,7 @@ def mask_prompt_model_chosen_object_guidance(prompt: str) -> str:
 
     chinese_pattern = re.compile(
         r"(?:替换|更换|换|改)(?:成|为)?"
-        r"(?:另(?:一)?|其他|别的|不同的|新的|新)?(?:一)?(?:个|件|种)?"
+        r"(?:另(?:外|一)?|其他|别的|不同的|新的|新)?(?:一)?(?:个|件|种)?"
         r"(?:物品|东西|物件|对象)"
     )
     for match in chinese_pattern.finditer(text):
@@ -1315,7 +1315,7 @@ def mask_prompt_model_chosen_object_guidance(prompt: str) -> str:
         if re.search(r"(?:不要|别|不必|禁止|避免)$", prefix):
             continue
         return (
-            "用户要求由模型自行决定替换成什么物品：先识别红色选区内的原物体，将它完整移除，"
+            "用户要求由模型自行决定替换成什么物品：先识别当前 Alpha 遮罩区域内的原物体，将它完整移除，"
             "再替换为一个类别和轮廓都明显不同、但符合场景的新物品。必须产生肉眼可见的物体替换，"
             "不能保留、复原或只重新绘制原物体；人物的抓握、遮挡、光影和接触关系要自然。"
         )
@@ -1328,7 +1328,7 @@ def mask_prompt_model_chosen_object_guidance(prompt: str) -> str:
     ):
         return (
             "The user wants the model to choose the replacement object. Identify and fully remove the original object "
-            "inside the red selection, then replace it with a context-appropriate object whose category and silhouette "
+            "inside the current alpha-mask area, then replace it with a context-appropriate object whose category and silhouette "
             "are clearly different. The replacement must be visibly different; do not preserve, restore, or merely "
             "redraw the original object. Keep grasping, occlusion, lighting, and contact physically natural."
         )
@@ -1338,10 +1338,10 @@ def mask_prompt_model_chosen_object_guidance(prompt: str) -> str:
 def harden_mask_prompt(prompt: str) -> str:
     model_chosen_object_guidance = mask_prompt_model_chosen_object_guidance(prompt)
     return (
-        "这是一次遮罩引导的局部编辑。第一张输入图是完整底图，其中的红色半透明区域只是选区标记，"
-        "不是最终画面内容，生成结果中不能保留红色标记。同请求的 Alpha 遮罩与红色区域表达同一选区。"
-        "请生成一张完整、自然连续的最终图：在红色区域完成下面的修改；如果用户未指定具体替换对象或属性，"
-        "请结合原图语境在选区内选择合理、明显且自然的变化。"
+        "这是一次 Alpha 遮罩引导的局部编辑。第一张输入图是完整底图，其中的红色半透明区域只是遮罩区域的可视标记，"
+        "不是最终画面内容，生成结果中不能保留红色标记。用户提示中的“选区”“涂红区域”或“遮罩区域”"
+        "都指同一个 Alpha 遮罩区域。请生成一张完整、自然连续的最终图：在该遮罩区域完成下面的修改；"
+        "如果用户未指定具体替换对象或属性，请结合原图语境在遮罩区域内选择合理、明显且自然的变化。"
         f"{model_chosen_object_guidance}"
         "未标红区域尽量保持原图中的人物身份、"
         "脸、头发、服装、姿势、构图和细节。遮罩边界是过渡提示，不是裁切线；不要按轮廓裁切或拼贴，"

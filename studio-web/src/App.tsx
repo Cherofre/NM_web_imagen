@@ -14,6 +14,7 @@ import {
   ExternalLink,
   FolderOpen,
   Heart,
+  Info,
   Images,
   ImagePlus,
   ListX,
@@ -4775,6 +4776,7 @@ function App() {
                             {activeComposerMask && (
                               <em className="reference-mask-badge is-applied" title={t("mask.strictProtection")}>
                                 {t(activeComposerMask.encoding === "compat" ? "mask.compatBadge" : "mask.appliedBadge")}
+                                <Info size={11} aria-hidden="true" />
                               </em>
                             )}
                             <button
@@ -4795,16 +4797,6 @@ function App() {
                     </div>
                   );
                 })}
-                {activeComposerMask && (
-                  <div
-                    className={`mask-prompt-guidance${maskPromptNeedsGuidance ? " is-broad" : ""}`}
-                    role="note"
-                    title={t(maskPromptNeedsGuidance ? "mask.promptBroadGuidance" : "mask.promptSoftGuidance")}
-                  >
-                    <Sparkles size={14} aria-hidden="true" />
-                    <span>{t(maskPromptNeedsGuidance ? "mask.promptBroadGuidance" : "mask.promptSoftGuidance")}</span>
-                  </div>
-                )}
               </div>
             )}
             {referenceState.noticeKey && (
@@ -5040,7 +5032,10 @@ function App() {
             </div>
           </div>
           <div className="composer-input">
-            <div className="composer-textarea-wrap" ref={promptWrapRef}>
+            <div
+              className={maskPromptNeedsGuidance ? "composer-textarea-wrap has-mask-guidance" : "composer-textarea-wrap"}
+              ref={promptWrapRef}
+            >
               <textarea
                 ref={promptRef}
                 rows={3}
@@ -5050,9 +5045,16 @@ function App() {
                   : activeComposerMask
                   ? t("mask.promptPlaceholder")
                   : t("composer.generatePlaceholder")}
+                aria-describedby={maskPromptNeedsGuidance ? "mask-prompt-guidance-inline" : undefined}
                 onChange={(event) => applyPrompt(event.target.value, activeEngine)}
                 onKeyDown={submitFromComposerKey}
               />
+              {maskPromptNeedsGuidance && (
+                <div id="mask-prompt-guidance-inline" className="mask-prompt-guidance-inline" role="note">
+                  <Sparkles size={13} aria-hidden="true" />
+                  <span>{t("mask.promptBroadGuidance")}</span>
+                </div>
+              )}
               <div className="composer-prompt-actions">
                 <button
                   type="button"

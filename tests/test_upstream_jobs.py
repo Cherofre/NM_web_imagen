@@ -113,15 +113,25 @@ def assert_stable_http_error(test_case, response, status_code, error_code):
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
     def test_harden_mask_prompt_keeps_broad_requests_model_decided(self) -> None:
-        prompt = "涂红的区域换一个物品。"
+        prompt = "遮罩部分换成另外一个物品。"
         hardened = webapp.harden_mask_prompt(prompt)
 
         self.assertIn(prompt, hardened)
+        self.assertIn("用户提示中的“选区”“涂红区域”或“遮罩区域”", hardened)
+        self.assertIn("同一个 Alpha 遮罩区域", hardened)
         self.assertIn("如果用户未指定具体替换对象或属性", hardened)
         self.assertIn("将它完整移除", hardened)
         self.assertIn("不能保留、复原或只重新绘制原物体", hardened)
         self.assertIn("人物的抓握、遮挡、光影和接触关系要自然", hardened)
         self.assertIn("不要把整体改动扩散到其他区域", hardened)
+
+    def test_model_chosen_object_guidance_treats_selection_and_mask_wording_equally(self) -> None:
+        selection_guidance = webapp.mask_prompt_model_chosen_object_guidance("选区部分换成另外一个物品。")
+        mask_guidance = webapp.mask_prompt_model_chosen_object_guidance("遮罩部分换成另外一个物品。")
+
+        self.assertTrue(selection_guidance)
+        self.assertEqual(selection_guidance, mask_guidance)
+        self.assertEqual("", webapp.mask_prompt_model_chosen_object_guidance("不要换成另外一个物品。"))
 
     def test_harden_mask_prompt_does_not_force_object_replacement_for_other_edits(self) -> None:
         hardened = webapp.harden_mask_prompt("把涂红区域的颜色改得更鲜艳。")
@@ -1175,7 +1185,8 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("image/png", files[1][1][2])
         request_data = executor.calls[0]["kwargs"]["data"]
         self.assertFalse(request_data["enhance_prompt"])
-        self.assertIn("红色半透明区域只是选区标记", request_data["prompt"])
+        self.assertIn("红色半透明区域只是遮罩区域的可视标记", request_data["prompt"])
+        self.assertIn("同一个 Alpha 遮罩区域", request_data["prompt"])
         self.assertIn("不要按轮廓裁切或拼贴", request_data["prompt"])
         self.assertNotIn("唯一修改范围", request_data["prompt"])
         self.assertEqual("visual-alpha", response.json()["meta"]["mask_guidance"])

@@ -1,22 +1,22 @@
 # Next Actions
 
 ## Now
-- [x] Compare the local hard gate with OpenAI's documented ChatGPT/image-editing workflow, confirm specificity should be guidance rather than a syntax requirement, and add RED regressions for the formerly blocked broad prompt.
-- [x] Remove frontend/backend semantic blocking, add compact neutral guidance plus a mask-specific placeholder, and keep technical validation unchanged.
-- [x] Run 163 Node tests, 244 Python tests, four-module compile, size verification, production build and diff checks; restart `14261` on the new assets.
-- [x] Review the first real `换一个物品` result. The request reached `/v1/images/edits` with the mask, but the windmill remained; compare it with the prior ice-cream result and identify weak replacement semantics as the cause.
-- [x] Add a non-blocking model-chosen-object expansion that requires complete removal of the selected original and a visibly different replacement; keep it inside the single `/v1/images/edits` request, add focused regressions and pass 245 Python tests.
-- [ ] Hard-refresh `http://127.0.0.1:14261/`, reuse the same mask and submit `换一个物品`; confirm the windmill is replaced by a visibly different object rather than redrawn.
-- [x] Re-run 163 Node tests, 245 Python tests, size/compile checks, fast-forward the verified branch into local `main`, restart `14261`, and leave publishing actions untouched.
+- [x] Review the screenshot and remove the card-like mask hint from the horizontal reference-file strip.
+- [x] Put persistent mask state on the applied-mask badge and mask-specific textarea placeholder; show broad-prompt guidance as one unboxed line inside the textarea.
+- [x] Update Chinese and English copy together, including the applied badge, tooltip, placeholder and broad-prompt note.
+- [x] Reproduce and fix the missed `换成另外一个物品` wording so `选区` and `遮罩` variants receive identical single-request enhancement.
+- [x] Pass 163 Node tests, 246 Python tests, size/compile/build checks, and browser layout checks at 1280×900 and 517×632; restart `14261`.
+- [ ] Hard-refresh `http://127.0.0.1:14261/` and visually accept the new placement in normal use.
+- [ ] After acceptance, decide whether to fast-forward this branch into local `main`; do not push, package, sync G:, tag or publish without explicit instruction.
 
 ## Handoff Notes
-- Start here: hard-refresh `14261`, reuse the windmill mask and submit the exact prompt `换一个物品`.
-- Do not redo: mask-path diagnosis, the first paid comparison, official-doc comparison, RED reproduction, 163 Node tests, 245 Python tests, size/build checks or the `14261` restart.
+- Start here: hard-refresh `14261` and inspect the composer with an applied mask and a broad prompt such as `遮罩部分换成另外一个物品`.
+- Do not redo: placement analysis, the `另外一个` reproduction, 163 Node tests, 246 Python tests, build, desktop/narrow browser checks or the `14261` restart.
 - Do not add: a preliminary chat/Responses/vision request for mask-intent parsing. Keep the solution single-call.
-- Verify next: the hint remains non-blocking, the queued turn retains its mask snapshot/guidance badge, and the generated result fully replaces the windmill with a visibly different object while keeping the dog's grip natural.
-- Do not claim: the strengthened prompt has passed a second paid upstream result, manual browser acceptance, package/G: sync, push, tag or Release.
-- Release boundary: v1.0.8 remains the published baseline. The follow-up is merged only into local `main`, which is four commits ahead of `origin/main` after the integration-status record.
-- Current Studio assets: `index-B2GPwNFn.js` and `index-BWB4gA76.css`; live `14261` PID `63964`.
+- Verify next: the reference strip contains only files, the applied badge exposes its explanation, the mask placeholder uses the active language, and the inline note never overlaps prompt actions.
+- Do not claim: user visual acceptance, a new paid upstream result, merge, package/G: sync, push, tag or Release.
+- Release boundary: v1.0.8 remains the published baseline. Local `main` is four commits ahead of `origin/main`; this follow-up remains on `codex/mask-guidance-placement`.
+- Current Studio assets: `index-_I1zQtFS.js` and `index-D4y-SHev.css`; live `14261` PID `72464`.
 - Known limits: soft guidance does not make a broad prompt deterministic; mask guidance remains prompt-based and can drift slightly outside the selected region.
 
 ## Prior Release Context

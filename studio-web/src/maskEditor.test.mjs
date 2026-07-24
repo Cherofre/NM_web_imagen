@@ -97,6 +97,8 @@ test("mask prompt specificity is advisory instead of a submission gate", () => {
   assert.equal(masks.maskPromptNeedsSoftGuidance("只修改红色遮罩覆盖的部分，让那个区域换一种风格。"), true);
   assert.equal(masks.maskPromptNeedsSoftGuidance("遮罩部分换一下。"), true);
   assert.equal(masks.maskPromptNeedsSoftGuidance("涂红的区域换一个物品。"), true);
+  assert.equal(masks.maskPromptNeedsSoftGuidance("选区部分换成另外一个物品。"), true);
+  assert.equal(masks.maskPromptNeedsSoftGuidance("遮罩部分换成另外一个物品。"), true);
   assert.equal(masks.maskPromptNeedsSoftGuidance("Change the mask to a different style."), true);
   assert.equal(masks.maskPromptNeedsSoftGuidance("把涂红的外部背景改成夜晚城市，人物保持不变。"), false);
   assert.equal(masks.maskPromptNeedsSoftGuidance("Remove the people inside the mask."), false);

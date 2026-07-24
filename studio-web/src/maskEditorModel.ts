@@ -46,7 +46,7 @@ export function maskPromptNeedsSoftGuidance(value: unknown) {
     "\\b(?:replace|change|turn|convert|transform)\\b.+?\\b(?:with|to|into)\\b\\s+([^.!?\\n]+)",
     "\\b(?:add|remove|erase|delete)\\b\\s+([^.!?\\n]+)",
   ];
-  const vagueTarget = /^(?:(?:(?:另(?:一)?|一|其他|不同|新)?(?:个|种)?(?:的)?(?:风格|样式|效果|内容|画面)(?:一下)?|一下)|(?:a|an)?(?:another|different|new)?(?:style|look|effect|something)?)$/iu;
+  const vagueTarget = /^(?:(?:(?:另(?:外|一)?|一|其他|不同|新)?(?:一)?(?:个|件|种)?(?:的)?(?:风格|样式|效果|内容|画面|物品|东西|物件|对象)(?:一下)?|一下)|(?:a|an)?(?:another|different|new|other)?(?:style|look|effect|something|object|item|thing)?)$/iu;
   for (const source of patterns) {
     const pattern = new RegExp(source, "giu");
     for (const match of text.matchAll(pattern)) {

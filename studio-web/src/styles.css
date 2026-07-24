@@ -2445,6 +2445,39 @@ button.primary-action:focus-visible,
   grid-column: 1;
 }
 
+.composer-textarea-wrap.has-mask-guidance textarea {
+  padding-bottom: 82px;
+}
+
+.mask-prompt-guidance-inline {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 58px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.mask-prompt-guidance-inline svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.mask-prompt-guidance-inline span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-input textarea {
   width: 100%;
   height: 100%;
@@ -2577,38 +2610,6 @@ button.primary-action:focus-visible,
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 2px;
-}
-
-.mask-prompt-guidance {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  width: min(280px, 70vw);
-  min-height: 46px;
-  padding: 6px 11px;
-  border: 1px solid var(--line);
-  border-radius: 15px;
-  background: #f8f8f7;
-  color: var(--muted-strong);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.mask-prompt-guidance.is-broad {
-  background: #fafaf9;
-  color: var(--ink);
-}
-
-.mask-prompt-guidance svg {
-  flex: 0 0 auto;
-  color: var(--muted);
-}
-
-.mask-prompt-guidance span {
-  min-width: 0;
-  white-space: normal;
 }
 
 .reference-chat-notice {
@@ -4755,6 +4756,9 @@ button.primary-action:focus-visible,
 }
 
 .reference-mask-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   background: rgba(17, 17, 17, 0.08);
@@ -4763,6 +4767,11 @@ button.primary-action:focus-visible,
   font-style: normal;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.reference-mask-badge svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
 }
 
 .reference-mask-badge.is-applied {
@@ -5148,6 +5157,14 @@ button.primary-action:focus-visible,
 
   .composer-input textarea {
     padding-bottom: 98px;
+  }
+
+  .composer-textarea-wrap.has-mask-guidance textarea {
+    padding-bottom: 98px;
+  }
+
+  .mask-prompt-guidance-inline {
+    display: none;
   }
 
   .composer-prompt-actions {

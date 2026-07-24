@@ -99,9 +99,11 @@ test("mask editor can keep official alpha semantics or opt into a reverse-alpha 
 
 test("masked submissions use model-side guidance and keep broad prompts non-blocking", () => {
   assert.match(appSource, /maskPromptNeedsSoftGuidance/);
-  assert.match(appSource, /mask\.promptSoftGuidance/);
   assert.match(appSource, /mask\.promptBroadGuidance/);
-  assert.match(appSource, /className=\{`mask-prompt-guidance/);
+  assert.match(appSource, /composer-textarea-wrap has-mask-guidance/);
+  assert.match(appSource, /className="mask-prompt-guidance-inline"/);
+  assert.doesNotMatch(appSource, /className=\{`mask-prompt-guidance\$\{/);
+  assert.match(appSource, /<Info size=\{11\} aria-hidden="true" \/>/);
   assert.doesNotMatch(appSource, /mask\.promptTargetRequired/);
   assert.match(appSource, /data\.append\("mask_encoding"/);
   assert.doesNotMatch(appSource, /data\.append\("strict_mask"/);
@@ -110,8 +112,15 @@ test("masked submissions use model-side guidance and keep broad prompts non-bloc
   assert.match(appSource, /turn\.meta\?\.mask_guidance/);
   assert.match(i18nSource, /"mask\.strictProtection"/);
   assert.match(i18nSource, /"mask\.promptPlaceholder"/);
+  assert.match(i18nSource, /描述遮罩区域要怎么改，例如：换成一束花/);
+  assert.match(i18nSource, /Describe how the masked area should change, for example: replace it with a bouquet/);
+  assert.match(i18nSource, /未指定具体结果，将由模型结合画面自行选择/);
+  assert.match(i18nSource, /No specific result was provided; the model will choose from the image context/);
   assert.match(i18nSource, /不做本地硬切拼接/);
-  assert.match(styleSource, /\.mask-prompt-guidance/);
+  assert.match(styleSource, /\.mask-prompt-guidance-inline/);
+  assert.match(styleSource, /\.composer-textarea-wrap\.has-mask-guidance textarea/);
+  assert.match(styleSource, /@media \(max-width: 560px\)[\s\S]*\.mask-prompt-guidance-inline\s*\{[\s\S]*display: none;/);
+  assert.doesNotMatch(styleSource, /\.mask-prompt-guidance\s*\{/);
 });
 
 test("mask editor exposes discoverable keyboard shortcuts for tools, brush size and zoom", () => {
