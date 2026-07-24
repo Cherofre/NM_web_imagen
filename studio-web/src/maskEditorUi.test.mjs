@@ -35,11 +35,13 @@ test("regenerate persists and restores the original alpha mask without a silent 
   assert.match(appSource, /maskAttachment\?: MaskAttachment<File> \| null;/);
   assert.match(appSource, /maskFileSnapshot\?: ReferenceSnapshot/);
   assert.match(appSource, /const turnMaskPayloadsRef = useRef<Map<string, ReusableMaskPayload<File>>>\(new Map\(\)\);/);
-  assert.match(appSource, /let reusableMask = turnMaskPayloadsRef\.current\.get\(turn\.id\);/);
+  assert.match(appSource, /async function loadReusableMaskPayloadFromTurn/);
+  assert.match(appSource, /const cached = turnMaskPayloadsRef\.current\.get\(turn\.id\);/);
   assert.match(appSource, /turn\.maskFileSnapshot\?\.src/);
   assert.match(appSource, /normalizeMaskEncoding\(turn\.meta\?\.mask_encoding\)/);
-  assert.match(appSource, /turnMaskPayloadsRef\.current\.set\(turn\.id, reusableMask\)/);
-  assert.match(appSource, /if \(turnUsesMaskGuidance\(turn\) && !reusableMask\) \{[\s\S]*setNotice\(t\("mask\.regenerateUnavailable"\)\);[\s\S]*return;/);
+  assert.match(appSource, /turnMaskPayloadsRef\.current\.set\(turn\.id, payload\)/);
+  assert.match(appSource, /sourceUsesMask \? loadReusableMaskPayloadFromTurn\(turn\) : Promise\.resolve\(null\)/);
+  assert.match(appSource, /if \(sourceUsesMask && !reusableMask\) \{[\s\S]*setNotice\(t\("mask\.regenerateUnavailable"\)\);[\s\S]*return;/);
   assert.match(appSource, /restoreReusableMaskAttachment\(reusableMask, turnReferences\[0\]\)/);
   assert.match(appSource, /maskAttachment:\s*regeneratedMask/);
   assert.match(appSource, /maskSnapshot:\s*turn\.maskSnapshot/);
@@ -51,6 +53,25 @@ test("regenerate persists and restores the original alpha mask without a silent 
   assert.match(i18nSource, /"mask\.regenerateWithMask"/);
   assert.match(i18nSource, /"mask\.regenerateNeedsRedraw"/);
   assert.match(i18nSource, /"mask\.regenerateUnavailable"/);
+});
+
+test("copying turn references also restores the reusable mask when available", () => {
+  const copyStart = appSource.indexOf("async function copyReferencesFromTurn");
+  const copyEnd = appSource.indexOf("async function regenerateFromTurn", copyStart);
+  const copySource = appSource.slice(copyStart, copyEnd);
+
+  assert.match(copySource, /loadReusableMaskPayloadFromTurn\(turn\)/);
+  assert.match(copySource, /restoreReusableMaskAttachment\(reusableMask, baseFile\)/);
+  assert.match(copySource, /referencesWithMaskBase\(\[\.\.\.filesToAdd, \.\.\.current\], baseFile, limit\)/);
+  assert.match(copySource, /setMaskAttachment\(copiedMask\)/);
+  assert.match(copySource, /setActiveEngine\("gpt-image-2"\)/);
+  assert.match(copySource, /mask\.copyUnavailable/);
+  assert.match(copySource, /mask\.copyBaseUnavailable/);
+  assert.match(appSource, /function copyReferencesTurnLabel/);
+  assert.match(appSource, /copyReferencesTurnLabel\(turn\)/);
+  assert.match(i18nSource, /"reference\.copyWithMask"/);
+  assert.match(i18nSource, /"mask\.copiedWithReferences"/);
+  assert.match(i18nSource, /"mask\.copiedWithReferencesLimited"/);
 });
 
 test("result preview can become the first reference and open mask editing directly", () => {

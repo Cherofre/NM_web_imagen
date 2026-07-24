@@ -3177,11 +3177,40 @@ function App() {
     }
   }
 
+  async function loadReusableMaskPayloadFromTurn(turn: ConversationTurn): Promise<ReusableMaskPayload<File> | null> {
+    const cached = turnMaskPayloadsRef.current.get(turn.id);
+    if (cached) return cached;
+    if (!turn.maskFileSnapshot?.src) return null;
+
+    const [persistedMaskFile, persistedPreviewFile] = await Promise.all([
+      referenceSnapshotToFile(turn.maskFileSnapshot, 0),
+      turn.maskSnapshot?.src
+        ? referenceSnapshotToFile(turn.maskSnapshot, 0)
+        : Promise.resolve(null),
+    ]);
+    if (!persistedMaskFile) return null;
+
+    const storedCoverage = Number(turn.meta?.mask_coverage);
+    const payload: ReusableMaskPayload<File> = {
+      maskFile: persistedMaskFile,
+      previewFile: persistedPreviewFile || undefined,
+      coverage: Number.isFinite(storedCoverage) ? storedCoverage : undefined,
+      encoding: normalizeMaskEncoding(turn.meta?.mask_encoding),
+    };
+    turnMaskPayloadsRef.current.set(turn.id, payload);
+    return payload;
+  }
+
   async function copyReferencesFromTurn(turn: ConversationTurn) {
+    const sourceUsesMask = turnUsesMaskGuidance(turn);
     const outcome = await loadReferenceForCurrentMode(() => submitModeRef.current, async () => {
       const snapshots = turn.referenceSnapshots || [];
-      const files = (await Promise.all(snapshots.map(referenceSnapshotToFile))).filter((file): file is File => Boolean(file));
-      return { snapshotCount: snapshots.length, files };
+      const [loadedReferences, reusableMask] = await Promise.all([
+        Promise.all(snapshots.map(referenceSnapshotToFile)),
+        sourceUsesMask ? loadReusableMaskPayloadFromTurn(turn) : Promise.resolve(null),
+      ]);
+      const files = loadedReferences.filter((file): file is File => Boolean(file));
+      return { snapshotCount: snapshots.length, loadedReferences, files, reusableMask };
     });
     if (outcome.blocked) {
       setNotice(t("reference.chatNotSent"));
@@ -3195,35 +3224,54 @@ function App() {
       setNotice(t("status.referenceOnlyNames"));
       return false;
     }
-    return appendReferenceFiles(outcome.result.files, t("reference.turnSource"));
+    if (!sourceUsesMask) {
+      return appendReferenceFiles(outcome.result.files, t("reference.turnSource"));
+    }
+
+    const reusableMask = outcome.result.reusableMask;
+    if (!reusableMask) {
+      const copied = appendReferenceFiles(outcome.result.files, t("reference.turnSource"));
+      if (copied) setNotice(t("mask.copyUnavailable"));
+      return copied;
+    }
+
+    const baseFile = outcome.result.loadedReferences[0];
+    if (!baseFile) {
+      const copied = appendReferenceFiles(outcome.result.files, t("reference.turnSource"));
+      if (copied) setNotice(t("mask.copyBaseUnavailable"));
+      return copied;
+    }
+
+    const limit = 16;
+    const available = Math.max(0, limit - references.length);
+    const filesToAdd = outcome.result.files.slice(0, available);
+    if (!filesToAdd.length) {
+      setNotice(t("status.referenceLimit", { limit }));
+      return false;
+    }
+
+    const copiedMask = restoreReusableMaskAttachment(reusableMask, baseFile);
+    setActiveEngine("gpt-image-2");
+    setSubmitMode("generate");
+    setReferences((current) => referencesWithMaskBase([...filesToAdd, ...current], baseFile, limit));
+    setMaskAttachment(copiedMask);
+    setNotice(filesToAdd.length < outcome.result.files.length
+      ? t("mask.copiedWithReferencesLimited", { count: filesToAdd.length, limit })
+      : t("mask.copiedWithReferences", { count: filesToAdd.length }));
+    return true;
   }
 
   async function regenerateFromTurn(turn: ConversationTurn) {
-    let reusableMask = turnMaskPayloadsRef.current.get(turn.id);
-    if (turnUsesMaskGuidance(turn) && !reusableMask && !turn.maskFileSnapshot?.src) {
+    const sourceUsesMask = turnUsesMaskGuidance(turn);
+    if (sourceUsesMask && !turnMaskPayloadsRef.current.has(turn.id) && !turn.maskFileSnapshot?.src) {
       setNotice(t("mask.regenerateUnavailable"));
       return;
     }
-    const [loadedTurnReferences, persistedMaskFile, persistedPreviewFile] = await Promise.all([
+    const [loadedTurnReferences, reusableMask] = await Promise.all([
       Promise.all((turn.referenceSnapshots || []).map(referenceSnapshotToFile)),
-      !reusableMask && turn.maskFileSnapshot?.src
-        ? referenceSnapshotToFile(turn.maskFileSnapshot, 0)
-        : Promise.resolve(null),
-      !reusableMask && turn.maskSnapshot?.src
-        ? referenceSnapshotToFile(turn.maskSnapshot, 0)
-        : Promise.resolve(null),
+      sourceUsesMask ? loadReusableMaskPayloadFromTurn(turn) : Promise.resolve(null),
     ]);
-    if (!reusableMask && persistedMaskFile) {
-      const storedCoverage = Number(turn.meta?.mask_coverage);
-      reusableMask = {
-        maskFile: persistedMaskFile,
-        previewFile: persistedPreviewFile || undefined,
-        coverage: Number.isFinite(storedCoverage) ? storedCoverage : undefined,
-        encoding: normalizeMaskEncoding(turn.meta?.mask_encoding),
-      };
-      turnMaskPayloadsRef.current.set(turn.id, reusableMask);
-    }
-    if (turnUsesMaskGuidance(turn) && !reusableMask) {
+    if (sourceUsesMask && !reusableMask) {
       setNotice(t("mask.regenerateUnavailable"));
       return;
     }
@@ -3289,9 +3337,19 @@ function App() {
     });
   }
 
+  function turnCanRestoreMask(turn: ConversationTurn) {
+    return turnMaskPayloadsRef.current.has(turn.id) || Boolean(turn.maskFileSnapshot?.src);
+  }
+
+  function copyReferencesTurnLabel(turn: ConversationTurn) {
+    return turnUsesMaskGuidance(turn) && turnCanRestoreMask(turn)
+      ? t("reference.copyWithMask")
+      : t("reference.copy");
+  }
+
   function regenerateTurnLabel(turn: ConversationTurn) {
     if (!turnUsesMaskGuidance(turn)) return t("response.regenerate");
-    return turnMaskPayloadsRef.current.has(turn.id) || Boolean(turn.maskFileSnapshot?.src)
+    return turnCanRestoreMask(turn)
       ? t("mask.regenerateWithMask")
       : t("mask.regenerateNeedsRedraw");
   }
@@ -4572,8 +4630,8 @@ function App() {
                     <button
                       type="button"
                       onClick={() => void copyReferencesFromTurn(turn)}
-                      title={t("reference.copy")}
-                      aria-label={t("reference.copy")}
+                      title={copyReferencesTurnLabel(turn)}
+                      aria-label={copyReferencesTurnLabel(turn)}
                       disabled={referenceActionsDisabled || !turn.referenceSnapshots?.some((reference) => reference.src)}
                     >
                       <ImagePlus size={14} />

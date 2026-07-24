@@ -1,23 +1,22 @@
 # Next Actions
 
 ## Now
-- [x] Review the screenshot and remove the card-like mask hint from the horizontal reference-file strip.
-- [x] Put persistent mask state on the applied-mask badge and mask-specific textarea placeholder; show broad-prompt guidance as one unboxed line inside the textarea.
-- [x] Update Chinese and English copy together, including the applied badge, tooltip, placeholder and broad-prompt note.
-- [x] Reproduce and fix the missed `换成另外一个物品` wording so `选区` and `遮罩` variants receive identical single-request enhancement.
-- [x] Pass 163 Node tests, 246 Python tests, size/compile/build checks, and browser layout checks at 1280×900 and 517×632; restart `14261`.
-- [ ] Hard-refresh `http://127.0.0.1:14261/` and visually accept the new placement in normal use.
+- [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
+- [x] Keep the copied mask base as reference 1, preserve existing composer references behind it, respect the GPT 16-image limit, and switch to GPT Image 2 generation mode.
+- [x] Add Chinese and English action labels plus explicit success, limited-copy, missing-Alpha and missing-base notices.
+- [x] Pass 164 Node tests, Studio size rules, TypeScript/Vite build and a real-browser copy click without issuing a paid generation request.
+- [ ] Hard-refresh `http://127.0.0.1:14261/` and visually accept copying a recent masked turn into the composer.
 - [ ] After acceptance, decide whether to fast-forward this branch into local `main`; do not push, package, sync G:, tag or publish without explicit instruction.
 
 ## Handoff Notes
-- Start here: hard-refresh `14261` and inspect the composer with an applied mask and a broad prompt such as `遮罩部分换成另外一个物品`.
-- Do not redo: placement analysis, the `另外一个` reproduction, 163 Node tests, 246 Python tests, build, desktop/narrow browser checks or the `14261` restart.
+- Start here: hard-refresh `14261`, open the `生成一张风车小狗。` session and click `复制参考图和遮罩` on one of the latest masked turns.
+- Do not redo: mask payload persistence, regeneration restore, guidance placement, the `另外一个` reproduction, 164 Node tests, build, or the automated browser copy check.
 - Do not add: a preliminary chat/Responses/vision request for mask-intent parsing. Keep the solution single-call.
-- Verify next: the reference strip contains only files, the applied badge exposes its explanation, the mask placeholder uses the active language, and the inline note never overlaps prompt actions.
+- Verify next: the copied base appears first, `底图` and `遮罩已应用` are visible, prior composer references remain behind the copied set, and removing/reordering the first base still invalidates the mask normally.
 - Do not claim: user visual acceptance, a new paid upstream result, merge, package/G: sync, push, tag or Release.
 - Release boundary: v1.0.8 remains the published baseline. Local `main` is four commits ahead of `origin/main`; this follow-up remains on `codex/mask-guidance-placement`.
-- Current Studio assets: `index-_I1zQtFS.js` and `index-D4y-SHev.css`; live `14261` PID `72464`.
-- Known limits: soft guidance does not make a broad prompt deterministic; mask guidance remains prompt-based and can drift slightly outside the selected region.
+- Current Studio assets: `index-D1YkSMM3.js` and `index-D4y-SHev.css`; live `14261` serves static files directly from this branch.
+- Known limits: pre-persistence records without `maskFileSnapshot` can copy images but cannot reconstruct the original Alpha; mask guidance remains prompt-based and can drift slightly outside the selected region.
 
 ## Prior Release Context
 - Historical start point: `I:\AI\Vibe Coding\NM_web_imagen`, branch `main`.
