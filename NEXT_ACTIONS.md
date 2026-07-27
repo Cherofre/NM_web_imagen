@@ -4,18 +4,18 @@
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
 - [x] Keep the copied mask base as reference 1, preserve existing composer references behind it, respect the GPT 16-image limit, and switch to GPT Image 2 generation mode.
 - [x] Add Chinese and English action labels plus explicit success, limited-copy, missing-Alpha and missing-base notices.
-- [x] Pass 164 Node tests, Studio size rules, TypeScript/Vite build and a real-browser copy click without issuing a paid generation request.
-- [ ] Hard-refresh `http://127.0.0.1:14261/` and visually accept copying a recent masked turn into the composer.
-- [ ] After acceptance, decide whether to fast-forward this branch into local `main`; do not push, package, sync G:, tag or publish without explicit instruction.
+- [x] Pass 164 Node tests, 247 Python tests, Studio size rules, Python compilation, TypeScript/Vite build, real narrow-screen browser checks and clean-package smoke.
+- [x] Fast-forward the verified branch into `main`, publish GitHub Release `v1.0.9`, and synchronize both approved G: roots.
+- [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: hard-refresh `14261`, open the `生成一张风车小狗。` session and click `复制参考图和遮罩` on one of the latest masked turns.
-- Do not redo: mask payload persistence, regeneration restore, guidance placement, the `另外一个` reproduction, 164 Node tests, build, or the automated browser copy check.
+- Start here: use `main` / `v1.0.9` as the published baseline and review new user feedback before selecting the next change.
+- Do not redo: mask payload persistence, regeneration/copy restoration, single-call guidance, v1.0.9 build/package smoke, GitHub publication, or either G: synchronization.
 - Do not add: a preliminary chat/Responses/vision request for mask-intent parsing. Keep the solution single-call.
-- Verify next: the copied base appears first, `底图` and `遮罩已应用` are visible, prior composer references remain behind the copied set, and removing/reordering the first base still invalidates the mask normally.
-- Do not claim: user visual acceptance, a new paid upstream result, merge, package/G: sync, push, tag or Release.
-- Release boundary: v1.0.8 remains the published baseline. Local `main` is four commits ahead of `origin/main`; this follow-up remains on `codex/mask-guidance-placement`.
-- Current Studio assets: `index-D1YkSMM3.js` and `index-D4y-SHev.css`; live `14261` serves static files directly from this branch.
+- Verify next: for any follow-up, rerun the smallest relevant tests plus the release matrix before replacing either distribution folder.
+- Do not claim: a paid upstream generation was run during the v1.0.9 release gate; browser acceptance covered UI interaction and layering only.
+- Release boundary: v1.0.9 is live at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.9`; both G: destinations passed manifest and SHA256 verification.
+- Current Studio assets: `index-CIdUE-oK.js` and `index-DjxhBbZl.css`.
 - Known limits: pre-persistence records without `maskFileSnapshot` can copy images but cannot reconstruct the original Alpha; mask guidance remains prompt-based and can drift slightly outside the selected region.
 
 ## Prior Release Context

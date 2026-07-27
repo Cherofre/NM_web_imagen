@@ -1,16 +1,22 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-07-24 11:26 +08:00
-- Phase: copying references from a masked turn now restores its reusable mask on `codex/mask-guidance-placement`; user visual acceptance remains pending
-- Superpowers Phase: published v1.0.8 baseline -> mask-guidance placement -> masked-reference restoration -> full verification -> manual browser gate
+- Last Updated: 2026-07-27 18:09 +08:00
+- Phase: v1.0.9 is published and synchronized to both approved G: distribution roots
+- Superpowers Phase: published v1.0.8 baseline -> mask-guidance placement -> masked-reference restoration -> release hardening -> v1.0.9 publication
 - Superpowers Spec: `docs/superpowers/specs/2026-07-20-history-window-refactor-v1.0.8-design.md`
 - Superpowers Plan: `docs/superpowers/plans/2026-07-20-history-window-refactor-v1.0.8.md`
-- Branch: `codex/mask-guidance-placement`, created from local `main` at `5bfeb48`; local `main` remains four commits ahead of `origin/main`, `codex/soft-mask-prompt-guidance` remains at `5061971`, and `codex/history-window-refactor-v1.0.8` remains at `cd3b1bd`
+- Branch: `main` at `57f38dc`, pushed to `origin/main`; annotated tag `v1.0.9` points to the same release commit
 - Product Commits: `25b2915` (base refactor), `312a8d9` (recent-record popover), `1d9d1f5` (sidebar batch previews), `8a972c4` (responsive header/model controls), `2d8a263` (compact header grid and explicit GPT-5.6 tiers), `ac3926c` (stable narrow header plus persisted composer height), `41a34a5` (composer-edge resize affordance), `6af8700` (stable session-card hit targets), `41f0b2d` (mask review snapshots plus source-aware history navigation), `7a6c528` (preview focus/action order plus quick-history internal-scroll guard), `e5a2bc1` (standard/reverse-alpha gateway modes), `ccc6fdc` (superseded strict restoration experiment), `8ff25c9` (model-guided red selection with natural boundaries), `eccb1b8` (reference-switch Cancel dismissal), `e59dbac` (current-page mask regenerate plus true editor fit), `a87a8c5` (persisted Alpha plus per-turn deletion), `cd3b1bd` (v1.0.8 identity), `fd3c83b` (remove duplicated advanced controls), `33fce1c` (confirm whole-session deletion), `cd9fad9` (focus expanded multi-image results), `1c94e5c` (allow standalone share sync), `a4bf2df` (make mask specificity advisory), `4a5ef52` (strengthen model-chosen replacements), and `f7b1948` (refine mask guidance placement and wording)
 - Goal: Keep the current Studio layout while making mask use reviewable and making compact/sidebar/full history behave as one predictable layered surface.
-- Current Focus: the user should hard-refresh `14261`, click `复制参考图和遮罩` on a recent masked turn, and confirm the first reference, applied-mask badge and prompt guidance restore together.
-- Latest Verification: 164/164 Node tests, Studio size rules, TypeScript and Vite production build passed. A real-browser click on the 2026-07-24 masked turn restored its base as reference 1, displayed `底图` and `遮罩已应用`, changed the action label to `复制参考图和遮罩`, and activated the mask-specific prompt guidance without submitting a generation request. Pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched.
+- Current Focus: monitor v1.0.9 user feedback; future feature work should branch from the published `main` baseline.
+- Latest Verification: 164/164 Node tests, Studio size rules, 247/247 Python tests, Python compilation, TypeScript/Vite production build, real 417x632 browser checks, clean-package smoke and local/destination preflights passed. The Release ZIP SHA256 is `dbee126d89e9919a5310981af0f3f66f2d26b6839625f703997e3fca0955e9d7`. Pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched.
+
+## v1.0.9 Release
+- Publication: `main` and annotated tag `v1.0.9` are pushed; the Chinese GitHub Release is live at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.0.9` with `NM_web_imagen-v1.0.9.zip`.
+- Distribution: both `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具` and `G:\doc\Tools\网页生图站` contain the matching clean `NM_web_imagen` folder and versioned ZIP.
+- Scope: softer single-request mask guidance, restored mask when copying turn references, narrow-screen composer popovers above the fixed header, v1.0.9 cache identity, and Playwright CLI artifact exclusion.
+- Compatibility: no new API route or history/session file-format migration was introduced; Classic files remain unchanged relative to the feature work, and existing config/history/session compatibility remains covered by the release tests.
 
 ## Masked Reference Copy Follow-up
 - Action contract: a turn with a restorable Alpha now labels its action `复制参考图和遮罩 / Copy references and mask`; ordinary turns retain `复制参考图 / Copy references`.
