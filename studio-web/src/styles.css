@@ -5063,7 +5063,7 @@ button.primary-action:focus-visible,
   .composer {
     position: sticky;
     bottom: 0;
-    z-index: 20;
+    z-index: 35;
   }
 
   .composer-toolbar {

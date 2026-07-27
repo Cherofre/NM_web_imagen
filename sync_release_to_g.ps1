@@ -261,6 +261,7 @@ function Assert-CleanPackageZip {
     "^$AppName/\.runtime/",
     "^$AppName/\.venv/",
     "^$AppName/\.playwright-mcp/",
+    "^$AppName/\.playwright-cli/",
     "^$AppName/_release/",
     "^$AppName/__pycache__/",
     "^$AppName/dist/",

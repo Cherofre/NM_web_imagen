@@ -7,6 +7,8 @@ outputs/
 *.png
 .chrome-debug/
 .playwright-mcp/
+.playwright-cli/
+output/playwright/
 .runtime/
 __pycache__/
 *.pyc

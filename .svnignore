@@ -6,6 +6,8 @@ logs
 saved_images
 .chrome-debug
 .playwright-mcp
+.playwright-cli
+output/playwright
 .venv
 .runtime
 __pycache__

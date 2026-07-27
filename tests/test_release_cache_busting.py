@@ -427,7 +427,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.0.8", version)
+        self.assertEqual("1.0.9", version)
 
     def test_start_script_opens_versioned_url(self) -> None:
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
@@ -712,6 +712,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('"^$AppName/output/"', script)
         self.assertIn("outputs", script)
         self.assertIn(".runtime", script)
+        self.assertIn(".playwright-cli", script)
         self.assertIn("PROJECT_STATUS|NEXT_ACTIONS|DECISIONS", script)
         self.assertIn("release_one_click", script)
         self.assertIn("sync_release_to_g", script)
@@ -725,6 +726,19 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn("Package contains release batch launcher", script)
         self.assertIn("Package text contains development or local token", script)
         self.assertIn("[switch]$LocalOnly", script)
+
+    def test_playwright_cli_artifacts_are_ignored_and_rejected(self) -> None:
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertIn(".playwright-cli/", gitignore)
+        self.assertIn("output/playwright/", gitignore)
+        for name in (
+            "package_web_tool.ps1",
+            "release_preflight.ps1",
+            "sync_release_to_g.ps1",
+        ):
+            script = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(".playwright-cli", script)
 
     def test_local_only_preflight_does_not_resolve_destination(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
