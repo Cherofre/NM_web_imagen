@@ -8,6 +8,7 @@ const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const i18nSource = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
 const tauriMainSource = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
 const tauriLibSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const windowsRuntimeSource = readFileSync(new URL("../src-tauri/src/windows_runtime.rs", import.meta.url), "utf8");
 
 test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /outputsRoot: string;/);
@@ -41,6 +42,17 @@ test("release desktop builds hide the shell console while backend diagnostics st
   assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_CONSOLE/);
   assert.match(tauriLibSource, /creation_flags\(0x00000010\)/);
   assert.match(tauriLibSource, /creation_flags\(0x08000000\)/);
+});
+
+test("Windows desktop runtime enforces one shell and crash-cleans the backend", () => {
+  assert.match(windowsRuntimeSource, /CreateMutexW/);
+  assert.match(windowsRuntimeSource, /ERROR_ALREADY_EXISTS/);
+  assert.match(windowsRuntimeSource, /EnumWindows/);
+  assert.match(windowsRuntimeSource, /SetForegroundWindow/);
+  assert.match(windowsRuntimeSource, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(windowsRuntimeSource, /AssignProcessToJobObject/);
+  assert.match(tauriLibSource, /SingleInstanceGuard::acquire\(\)/);
+  assert.match(tauriLibSource, /backend_job\.assign\(&child\)/);
 });
 
 test("desktop styling removes the outer web cards without changing web mode", () => {

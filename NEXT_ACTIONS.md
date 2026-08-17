@@ -1,13 +1,12 @@
 # Next Actions
 
 ## Now
-- [x] Build the Tauri 2 shell, project toolchain and tokenized PyInstaller `onedir` sidecar from the verified spike.
-- [x] Add full-window settings, desktop shortcuts, header quick actions and desktop-only shell chrome while keeping web mode intact.
-- [x] Add allowlisted path/log commands plus persisted/restorable window geometry.
-- [x] Remove the unsupported `gpt-5.6` menu alias, migrate old values to `gpt-5.6-sol`, and change backend/frontend defaults.
-- [x] Hide the release shell console and retain an opt-in backend console through `NM_IMAGE_STUDIO_BACKEND_CONSOLE=1`.
-- [x] Pass Python 249/249, Node 168/168, size/build/compiler checks, full Tauri release build and normal/debug window-handle smoke.
-- [ ] Later slice: evaluate single-instance, Job Object cleanup, tray behavior, DPAPI/migration and installer/portable packaging.
+- [x] Build the Tauri shell and tokenized PyInstaller `onedir` sidecar, then add desktop settings, shortcuts, path actions and window-state persistence.
+- [x] Hide the normal release console, retain `NM_IMAGE_STUDIO_BACKEND_CONSOLE=1` debugging, and migrate unsupported `gpt-5.6` values to Sol.
+- [x] Enforce one Windows shell with a named mutex and restore/activate the existing `NM Image Studio` window on duplicate launch.
+- [x] Bind the FastAPI sidecar to a `KILL_ON_JOB_CLOSE` Job Object so forced shell termination cannot leave the backend running.
+- [x] Pass Python 249/249, Node 169/169, size/compiler/release checks plus duplicate-launch, forced-kill and debug-console smoke.
+- [ ] Next slice: choose DPAPI plus old-data migration, or installer/portable packaging and WebView2 prerequisite handling.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -19,9 +18,9 @@
 
 ## Handoff Notes
 - Start here: continue on `codex/desktop-v1.1.0` from the latest local commit and read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
-- Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, PyInstaller `onedir` decision or basic lifecycle smoke.
-- Verify next: add Job Object crash cleanup and single-instance behavior before tray, DPAPI/migration, updater or installers.
-- Do not claim: the spike is a production installer, a true single-file app, crash-safe under forced termination, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
+- Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
+- Verify next: preserve the single-instance/Job Object runtime smoke while implementing DPAPI/migration or packaging.
+- Do not claim: the branch is a production installer, a true single-file app, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this branch.

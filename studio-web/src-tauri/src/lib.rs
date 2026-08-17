@@ -14,6 +14,10 @@ use uuid::Uuid;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+mod windows_runtime;
+#[cfg(windows)]
+use windows_runtime::{BackendJob, SingleInstanceGuard};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +57,8 @@ struct DesktopRuntimeState {
     info: DesktopRuntimeInfo,
     child: Mutex<Option<Child>>,
     window: Mutex<SavedWindowState>,
+    #[cfg(windows)]
+    _backend_job: BackendJob,
 }
 
 #[tauri::command]
@@ -283,6 +289,13 @@ fn stop_backend(app: &tauri::AppHandle) {
 }
 
 pub fn run() {
+    #[cfg(windows)]
+    let _single_instance = match SingleInstanceGuard::acquire() {
+        Ok(Some(guard)) => guard,
+        Ok(None) => return,
+        Err(error) => panic!("{error}"),
+    };
+
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
@@ -314,6 +327,8 @@ pub fn run() {
                     .join("backend")
                     .join("nm-image-studio-backend.exe")
             };
+            #[cfg(windows)]
+            let backend_job = BackendJob::new().map_err(std::io::Error::other)?;
             let port_text = port.to_string();
             let mut command = Command::new(&backend_path);
             command
@@ -360,6 +375,13 @@ pub fn run() {
                 ))
             })?;
 
+            #[cfg(windows)]
+            if let Err(error) = backend_job.assign(&child) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::other(error).into());
+            }
+
             if !backend_is_ready(port, &token) {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -378,6 +400,8 @@ pub fn run() {
                 },
                 child: Mutex::new(Some(child)),
                 window: Mutex::new(saved_window),
+                #[cfg(windows)]
+                _backend_job: backend_job,
             });
             Ok(())
         })
