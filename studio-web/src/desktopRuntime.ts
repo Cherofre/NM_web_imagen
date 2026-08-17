@@ -1,19 +1,27 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type RuntimeMode = "web" | "desktop-spike";
+export type RuntimeMode = "web" | "desktop";
 
 export type DesktopRuntimeInfo = {
   mode: RuntimeMode;
   apiBase: string;
   token: string;
   dataRoot: string;
+  outputsRoot: string;
+  logPath: string;
+  version: string;
 };
+
+export type DesktopPathKind = "outputs" | "data" | "log";
 
 let runtimeInfo: DesktopRuntimeInfo = {
   mode: "web",
   apiBase: "",
   token: "",
   dataRoot: "",
+  outputsRoot: "",
+  logPath: "",
+  version: "",
 };
 
 function hasTauriRuntime() {
@@ -21,12 +29,41 @@ function hasTauriRuntime() {
 }
 
 export async function initializeDesktopRuntime() {
-  if (!hasTauriRuntime()) return runtimeInfo;
+  if (!hasTauriRuntime()) {
+    document.documentElement.dataset.runtime = "web";
+    return runtimeInfo;
+  }
   runtimeInfo = await invoke<DesktopRuntimeInfo>("desktop_runtime_info");
   if (!runtimeInfo.apiBase || !runtimeInfo.token) {
     throw new Error("Desktop backend runtime information is incomplete");
   }
+  document.documentElement.dataset.runtime = "desktop";
   return runtimeInfo;
+}
+
+export function getDesktopRuntimeInfo() {
+  return { ...runtimeInfo };
+}
+
+export function isDesktopRuntime() {
+  return runtimeInfo.mode !== "web";
+}
+
+export async function openDesktopPath(kind: DesktopPathKind) {
+  if (!isDesktopRuntime()) return false;
+  const command = {
+    outputs: "desktop_open_outputs_directory",
+    data: "desktop_open_data_directory",
+    log: "desktop_open_backend_log",
+  }[kind];
+  await invoke(command);
+  return true;
+}
+
+export async function resetDesktopWindow() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_reset_window_state");
+  return true;
 }
 
 function runtimePath(value: string) {

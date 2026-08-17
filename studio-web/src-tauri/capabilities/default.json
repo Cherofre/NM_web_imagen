@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default desktop capability for the NM Image Studio spike",
+  "description": "Default desktop capability for NM Image Studio",
   "windows": ["main"],
   "permissions": ["core:default"]
 }

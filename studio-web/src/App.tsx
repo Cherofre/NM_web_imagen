@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowUp,
   ChevronDown,
   ChevronLeft,
@@ -12,21 +13,26 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  FileText,
   FolderOpen,
+  HardDrive,
   Heart,
   Info,
   Images,
   ImagePlus,
+  Keyboard,
   ListX,
   Loader2,
   Maximize2,
   MessageSquarePlus,
+  Monitor,
   PanelLeftClose,
   PanelLeftOpen,
   PencilLine,
   Plus,
   RefreshCw,
   RotateCcw,
+  Settings,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -68,7 +74,15 @@ import {
   type SessionDrafts,
 } from "./sessionDrafts";
 import { buildSubmissionFields } from "./submissionPayload";
-import { apiFetch, isRuntimeOutputUrl, resolveRuntimeUrl } from "./desktopRuntime";
+import {
+  apiFetch,
+  getDesktopRuntimeInfo,
+  isDesktopRuntime,
+  isRuntimeOutputUrl,
+  openDesktopPath,
+  resetDesktopWindow,
+  resolveRuntimeUrl,
+} from "./desktopRuntime";
 import {
   activeProfileForEngine,
   buildConfigPayload,
@@ -377,6 +391,7 @@ type PreviewHistoryContext = {
 type HistoryFavoriteFilter = "all" | "favorite";
 type HistoryDateFilter = "all" | "today" | "7d" | "30d";
 type HistoryEngineFilter = "all" | Engine;
+type DesktopSettingsSection = "general" | "storage" | "shortcuts" | "about";
 type HistoryActionMenuSource = "sidebar" | "browser";
 type HistoryActionMenuState = {
   entryId: string;
@@ -1201,6 +1216,8 @@ function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
   const initialComposerPromptHeight = useRef(readStoredComposerPromptHeight());
+  const desktopRuntime = useMemo(() => getDesktopRuntimeInfo(), []);
+  const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
@@ -1223,6 +1240,8 @@ function App() {
   const [historyCollapsed, setHistoryCollapsed] = useState(() => shouldStartHistoryCollapsed());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(false);
+  const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
   const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
   const [activeProfileIds, setActiveProfileIds] = useState<ActiveProfileIds>({
     "gpt-image-2": "gpt-image-2-default",
@@ -1278,6 +1297,7 @@ function App() {
   const composerPromptHeightPreferenceRef = useRef(initialComposerPromptHeight.current);
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
   const previewDialogRef = useRef<HTMLDivElement | null>(null);
+  const desktopSettingsRef = useRef<HTMLElement | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
   const previewMaskRequestRef = useRef(0);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
@@ -1633,6 +1653,12 @@ function App() {
   }, [connectionOpen]);
 
   useEffect(() => {
+    if (!desktopSettingsOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => desktopSettingsRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [desktopSettingsOpen]);
+
+  useEffect(() => {
     if (composerPopover === "size") return;
     const parsed = parseCustomImageSize(gptForm.custom_size);
     const nextDraft = { width: String(parsed.width), height: String(parsed.height) };
@@ -1905,6 +1931,7 @@ function App() {
       }
       const hasSecondarySurface = advancedOpen
         || connectionOpen
+        || desktopSettingsOpen
         || renameOpen
         || promptEditorOpen
         || sessionPromptOpen
@@ -1915,6 +1942,7 @@ function App() {
         event.preventDefault();
         setAdvancedOpen(false);
         closeConnectionDrawer();
+        setDesktopSettingsOpen(false);
         setRenameOpen(false);
         setPromptEditorOpen(false);
         setSessionPromptOpen(false);
@@ -1933,6 +1961,7 @@ function App() {
     advancedOpen,
     composerPopover,
     connectionOpen,
+    desktopSettingsOpen,
     historyActionMenu,
     historySurface,
     pendingMultiImageConfirm,
@@ -1941,6 +1970,68 @@ function App() {
     promptEditorOpen,
     renameOpen,
     sessionPromptOpen,
+  ]);
+
+  useEffect(() => {
+    if (!desktopMode) return undefined;
+    function onDesktopShortcut(event: globalThis.KeyboardEvent) {
+      if (event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      const hasBlockingSurface = advancedOpen
+        || connectionOpen
+        || renameOpen
+        || promptEditorOpen
+        || sessionPromptOpen
+        || Boolean(pendingSessionSwitch)
+        || Boolean(pendingMultiImageConfirm)
+        || Boolean(previewImage);
+
+      if (event.code === "Comma" || key === ",") {
+        event.preventDefault();
+        setDesktopSettingsSection("general");
+        setDesktopSettingsOpen(true);
+        return;
+      }
+      if (event.code === "Slash" || key === "/") {
+        event.preventDefault();
+        setDesktopSettingsSection("shortcuts");
+        setDesktopSettingsOpen(true);
+        return;
+      }
+      if (hasBlockingSurface || desktopSettingsOpen) return;
+      if (event.code === "KeyN" || key === "n") {
+        event.preventDefault();
+        startFreshSession();
+      } else if (event.code === "KeyB" || key === "b") {
+        event.preventDefault();
+        setHistoryCollapsed((value) => !value);
+      } else if ((event.code === "KeyO" || key === "o") && event.shiftKey) {
+        event.preventDefault();
+        void openOutputs();
+      } else if (event.code === "KeyO" || key === "o") {
+        event.preventDefault();
+        if (referenceState.canAdd) {
+          fileInputRef.current?.click();
+        } else {
+          setNotice(t("reference.chatNotSent"));
+        }
+      }
+    }
+    window.addEventListener("keydown", onDesktopShortcut);
+    return () => window.removeEventListener("keydown", onDesktopShortcut);
+  }, [
+    advancedOpen,
+    connectionOpen,
+    desktopMode,
+    desktopSettingsOpen,
+    pendingMultiImageConfirm,
+    pendingSessionSwitch,
+    previewImage,
+    promptEditorOpen,
+    referenceState.canAdd,
+    renameOpen,
+    sessionPromptOpen,
+    t,
   ]);
 
   useEffect(() => {
@@ -3829,11 +3920,47 @@ function App() {
 
   async function openOutputs() {
     try {
+      if (await openDesktopPath("outputs")) {
+        setNotice(t("status.openOutputsRequested"));
+        return;
+      }
       const response = await apiFetch("/api/open-outputs", { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
       setNotice(t("status.openOutputsRequested"));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("status.openOutputsFailed"));
+    }
+  }
+
+  function openDesktopSettings(section: DesktopSettingsSection = "general") {
+    setDesktopSettingsSection(section);
+    setDesktopSettingsOpen(true);
+  }
+
+  async function openDesktopUtility(kind: "data" | "log") {
+    try {
+      await openDesktopPath(kind);
+      setNotice(t(kind === "data" ? "desktop.dataOpened" : "desktop.logOpened"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.openFailed"));
+    }
+  }
+
+  async function copyDesktopPath(path: string) {
+    try {
+      await navigator.clipboard.writeText(path);
+      setNotice(t("desktop.pathCopied"));
+    } catch {
+      setNotice(t("desktop.copyFailed"));
+    }
+  }
+
+  async function resetWindowLayout() {
+    try {
+      await resetDesktopWindow();
+      setNotice(t("desktop.windowReset"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.windowResetFailed"));
     }
   }
 
@@ -4251,7 +4378,7 @@ function App() {
           onClick={() => setHistoryCollapsed(true)}
         />
       )}
-      <aside className={`history-sidebar ${historyCollapsed ? "is-collapsed" : ""}`}>
+      <aside className={`history-sidebar ${historyCollapsed ? "is-collapsed" : ""}`} aria-hidden={desktopSettingsOpen || undefined}>
         <div className="sidebar-top">
           <button className="icon-button" type="button" onClick={() => setHistoryCollapsed(!historyCollapsed)} aria-label={t("app.toggleSidebar")}>
             {historyCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
@@ -4393,7 +4520,7 @@ function App() {
         )}
       </aside>
 
-      <section className="workspace">
+      <section className="workspace" aria-hidden={desktopSettingsOpen || undefined}>
         <header className="workspace-header">
           <div className="workspace-title">
             <div className="workspace-kicker">
@@ -4439,6 +4566,38 @@ function App() {
                   <Ellipsis size={18} />
                 </summary>
                 <div className="header-more-panel">
+                  {desktopMode && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          openDesktopSettings("general");
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                      >
+                        <Settings size={15} /> <span>{t("desktop.settings")}</span><kbd>Ctrl+,</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          void openOutputs();
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                      >
+                        <FolderOpen size={15} /> <span>{t("app.outputFolder")}</span><kbd>Ctrl+Shift+O</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          openDesktopSettings("shortcuts");
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                      >
+                        <Keyboard size={15} /> <span>{t("desktop.shortcuts")}</span><kbd>Ctrl+/</kbd>
+                      </button>
+                      <div className="header-menu-separator" />
+                    </>
+                  )}
                   <button
                     type="button"
                     className="danger-action"
@@ -5151,6 +5310,146 @@ function App() {
           </div>
         </form>
       </section>
+
+      {desktopMode && desktopSettingsOpen && (
+        <section
+          className="desktop-settings-surface"
+          ref={desktopSettingsRef}
+          tabIndex={-1}
+          aria-label={t("desktop.settings")}
+        >
+          <header className="desktop-settings-header">
+            <button type="button" className="desktop-settings-back" onClick={() => setDesktopSettingsOpen(false)}>
+              <ArrowLeft size={17} /> {t("desktop.backToStudio")}
+            </button>
+            <div>
+              <h1>{t("desktop.settings")}</h1>
+              <p>{t("desktop.settingsHint")}</p>
+            </div>
+          </header>
+          <div className="desktop-settings-layout">
+            <nav className="desktop-settings-nav" aria-label={t("desktop.settingsSections")}>
+              {([
+                ["general", Monitor, t("desktop.general")],
+                ["storage", HardDrive, t("desktop.storage")],
+                ["shortcuts", Keyboard, t("desktop.shortcuts")],
+                ["about", Info, t("desktop.about")],
+              ] as const).map(([section, Icon, label]) => (
+                <button
+                  type="button"
+                  key={section}
+                  className={desktopSettingsSection === section ? "active" : ""}
+                  aria-current={desktopSettingsSection === section ? "page" : undefined}
+                  onClick={() => setDesktopSettingsSection(section)}
+                >
+                  <Icon size={17} /> {label}
+                </button>
+              ))}
+            </nav>
+            <div className="desktop-settings-content">
+              {desktopSettingsSection === "general" && (
+                <div className="desktop-settings-pane">
+                  <div className="desktop-settings-title">
+                    <h2>{t("desktop.general")}</h2>
+                    <p>{t("desktop.generalHint")}</p>
+                  </div>
+                  <section className="desktop-setting-row">
+                    <div>
+                      <strong>{t("language.label")}</strong>
+                      <span>{t("desktop.languageHint")}</span>
+                    </div>
+                    <div className="desktop-language-switcher" role="group" aria-label={t("language.switcher")}>
+                      <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
+                      <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
+                    </div>
+                  </section>
+                  <section className="desktop-setting-row">
+                    <div>
+                      <strong>{t("desktop.windowLayout")}</strong>
+                      <span>{t("desktop.windowLayoutHint")}</span>
+                    </div>
+                    <button type="button" onClick={() => void resetWindowLayout()}>{t("desktop.resetWindow")}</button>
+                  </section>
+                  <div className="desktop-settings-note">
+                    <Monitor size={17} />
+                    <span>{t("desktop.windowSavedAutomatically")}</span>
+                  </div>
+                </div>
+              )}
+
+              {desktopSettingsSection === "storage" && (
+                <div className="desktop-settings-pane">
+                  <div className="desktop-settings-title">
+                    <h2>{t("desktop.storage")}</h2>
+                    <p>{t("desktop.storageHint")}</p>
+                  </div>
+                  {([
+                    ["outputs", FolderOpen, t("desktop.outputsDirectory"), desktopRuntime.outputsRoot],
+                    ["data", HardDrive, t("desktop.dataDirectory"), desktopRuntime.dataRoot],
+                    ["log", FileText, t("desktop.backendLog"), desktopRuntime.logPath],
+                  ] as const).map(([kind, Icon, label, path]) => (
+                    <section className="desktop-path-row" key={kind}>
+                      <Icon size={18} />
+                      <div>
+                        <strong>{label}</strong>
+                        <code title={path}>{path}</code>
+                      </div>
+                      <div className="desktop-path-actions">
+                        <button type="button" onClick={() => kind === "outputs" ? void openOutputs() : void openDesktopUtility(kind)}>{t("desktop.open")}</button>
+                        <button type="button" onClick={() => void copyDesktopPath(path)}>{t("desktop.copyPath")}</button>
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+
+              {desktopSettingsSection === "shortcuts" && (
+                <div className="desktop-settings-pane">
+                  <div className="desktop-settings-title">
+                    <h2>{t("desktop.shortcuts")}</h2>
+                    <p>{t("desktop.shortcutsHint")}</p>
+                  </div>
+                  <div className="desktop-shortcut-list">
+                    {([
+                      [t("desktop.shortcutNewSession"), "Ctrl+N"],
+                      [t("desktop.shortcutAddReference"), "Ctrl+O"],
+                      [t("desktop.shortcutOpenOutputs"), "Ctrl+Shift+O"],
+                      [t("desktop.shortcutToggleSidebar"), "Ctrl+B"],
+                      [t("desktop.shortcutSettings"), "Ctrl+,"],
+                      [t("desktop.shortcutHelp"), "Ctrl+/"],
+                      [t("desktop.shortcutSubmit"), "Enter"],
+                      [t("desktop.shortcutNewline"), "Shift+Enter"],
+                    ] as const).map(([label, keys]) => (
+                      <div className="desktop-shortcut-row" key={keys}>
+                        <span>{label}</span>
+                        <kbd>{keys}</kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {desktopSettingsSection === "about" && (
+                <div className="desktop-settings-pane">
+                  <div className="desktop-settings-title">
+                    <h2>{t("desktop.about")}</h2>
+                    <p>{t("desktop.aboutHint")}</p>
+                  </div>
+                  <dl className="desktop-about-list">
+                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.0"}</dd></div>
+                    <div><dt>{t("desktop.runtime")}</dt><dd>Tauri 2 + FastAPI</dd></div>
+                    <div><dt>{t("desktop.dataDirectory")}</dt><dd><code>{desktopRuntime.dataRoot}</code></dd></div>
+                  </dl>
+                  <div className="desktop-settings-note">
+                    <Info size={17} />
+                    <span>{t("desktop.aboutPrivacy")}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {pendingSessionSwitch && (
         <div className="drawer-shell reference-switch-shell">

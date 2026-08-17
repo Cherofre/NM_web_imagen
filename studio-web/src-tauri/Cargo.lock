@@ -1819,6 +1819,7 @@ name = "nm-image-studio-desktop"
 version = "1.1.0-alpha.1"
 dependencies = [
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "uuid",

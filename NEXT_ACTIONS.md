@@ -1,13 +1,13 @@
 # Next Actions
 
 ## Now
-- [x] Build the Tauri 2 shell and project-level Rust/npm toolchain on `codex/desktop-spike-v1.1.0`.
-- [x] Package FastAPI as PyInstaller `onedir`, add random loopback port and per-run desktop-token enforcement, and adapt frontend API/output URLs.
-- [x] Fix the Tauri white screen caused by the existing classic-script compatibility transform plus a dynamic import.
-- [x] Verify real desktop rendering, tokenized config/history/session requests, isolated data, unauthorized 401 behavior and process/port cleanup on exit.
-- [x] Pass Python 248/248, Node 164/164, size rules, Vite build, cargo check, sidecar smoke and Tauri release build.
-- [x] Record the packaging and technology-stack recommendation in `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
-- [ ] Wait for user authorization before creating the formal `codex/desktop-v1.1.0` implementation branch.
+- [x] Build the Tauri 2 shell and project-level Rust/npm toolchain from the verified spike.
+- [x] Add full-window desktop settings for language, paths/logs, shortcuts, about and window reset.
+- [x] Add desktop-native shortcut handling, header quick actions and desktop-only shell chrome changes while keeping web mode intact.
+- [x] Add allowlisted Rust commands for opening outputs/data/log paths and persisting/restoring window geometry.
+- [x] Pass Python 248/248, Node 167/167, size rules, Vite build, Python compilation, cargo fmt/check and prior real-window smoke.
+- [x] Commit the reviewed desktop UX slice on `codex/desktop-v1.1.0`.
+- [ ] Later slice: evaluate single-instance, Job Object cleanup, tray behavior, DPAPI/migration and installer/portable packaging.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.

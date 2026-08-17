@@ -1,14 +1,15 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Manager, State};
+use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -21,16 +22,214 @@ struct DesktopRuntimeInfo {
     api_base: String,
     token: String,
     data_root: String,
+    outputs_root: String,
+    log_path: String,
+    version: String,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedWindowState {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    maximized: bool,
+}
+
+impl Default for SavedWindowState {
+    fn default() -> Self {
+        Self {
+            x: 120,
+            y: 80,
+            width: 1440,
+            height: 900,
+            maximized: false,
+        }
+    }
 }
 
 struct DesktopRuntimeState {
     info: DesktopRuntimeInfo,
     child: Mutex<Option<Child>>,
+    window: Mutex<SavedWindowState>,
 }
 
 #[tauri::command]
 fn desktop_runtime_info(state: State<'_, DesktopRuntimeState>) -> DesktopRuntimeInfo {
     state.info.clone()
+}
+
+fn window_state_path(data_root: &Path) -> PathBuf {
+    data_root.join("desktop-window.json")
+}
+
+fn normalized_window_state(state: SavedWindowState) -> SavedWindowState {
+    SavedWindowState {
+        width: state.width.clamp(760, 7680),
+        height: state.height.clamp(640, 4320),
+        ..state
+    }
+}
+
+fn load_window_state(data_root: &Path) -> SavedWindowState {
+    fs::read_to_string(window_state_path(data_root))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<SavedWindowState>(&raw).ok())
+        .map(normalized_window_state)
+        .unwrap_or_default()
+}
+
+fn window_state_intersects_monitor(window: &WebviewWindow, state: SavedWindowState) -> bool {
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+    let left = i64::from(state.x);
+    let top = i64::from(state.y);
+    let right = left + i64::from(state.width);
+    let bottom = top + i64::from(state.height);
+    monitors.iter().any(|monitor| {
+        let position = monitor.position();
+        let size = monitor.size();
+        let monitor_left = i64::from(position.x);
+        let monitor_top = i64::from(position.y);
+        let monitor_right = monitor_left + i64::from(size.width);
+        let monitor_bottom = monitor_top + i64::from(size.height);
+        right > monitor_left + 80
+            && left < monitor_right - 80
+            && bottom > monitor_top + 48
+            && top < monitor_bottom - 48
+    })
+}
+
+fn restore_window_state(window: &WebviewWindow, state: SavedWindowState) -> Result<(), String> {
+    let state = normalized_window_state(state);
+    window
+        .set_size(PhysicalSize::new(state.width, state.height))
+        .map_err(|error| format!("failed to restore window size: {error}"))?;
+    if window_state_intersects_monitor(window, state) {
+        window
+            .set_position(PhysicalPosition::new(state.x, state.y))
+            .map_err(|error| format!("failed to restore window position: {error}"))?;
+    } else {
+        window
+            .center()
+            .map_err(|error| format!("failed to center the window: {error}"))?;
+    }
+    if state.maximized {
+        window
+            .maximize()
+            .map_err(|error| format!("failed to restore maximized state: {error}"))?;
+    }
+    Ok(())
+}
+
+fn capture_window_state(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Some(state) = app.try_state::<DesktopRuntimeState>() else {
+        return;
+    };
+    let maximized = window.is_maximized().unwrap_or(false);
+    let Ok(mut saved) = state.window.lock() else {
+        return;
+    };
+    saved.maximized = maximized;
+    if maximized {
+        return;
+    }
+    if let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) {
+        saved.x = position.x;
+        saved.y = position.y;
+        saved.width = size.width;
+        saved.height = size.height;
+        *saved = normalized_window_state(*saved);
+    }
+}
+
+fn save_window_state(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<DesktopRuntimeState>() else {
+        return;
+    };
+    let Ok(saved) = state.window.lock() else {
+        return;
+    };
+    let Ok(serialized) = serde_json::to_string_pretty(&*saved) else {
+        return;
+    };
+    let _ = fs::write(
+        window_state_path(Path::new(&state.info.data_root)),
+        serialized,
+    );
+}
+
+#[cfg(windows)]
+fn open_in_explorer(path: &Path, select_file: bool) -> Result<(), String> {
+    let mut command = Command::new("explorer.exe");
+    if select_file {
+        command.arg("/select,");
+    }
+    command.arg(path);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))
+}
+
+#[cfg(not(windows))]
+fn open_in_explorer(path: &Path, _select_file: bool) -> Result<(), String> {
+    Err(format!(
+        "opening local folders is only supported on Windows: {}",
+        path.display()
+    ))
+}
+
+#[tauri::command]
+fn desktop_open_outputs_directory(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
+    let path = Path::new(&state.info.outputs_root);
+    fs::create_dir_all(path)
+        .map_err(|error| format!("failed to create outputs directory: {error}"))?;
+    open_in_explorer(path, false)
+}
+
+#[tauri::command]
+fn desktop_open_data_directory(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
+    open_in_explorer(Path::new(&state.info.data_root), false)
+}
+
+#[tauri::command]
+fn desktop_open_backend_log(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
+    open_in_explorer(Path::new(&state.info.log_path), true)
+}
+
+#[tauri::command]
+fn desktop_reset_window_state(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window
+        .unmaximize()
+        .map_err(|error| format!("failed to leave maximized mode: {error}"))?;
+    let defaults = SavedWindowState::default();
+    window
+        .set_size(PhysicalSize::new(defaults.width, defaults.height))
+        .map_err(|error| format!("failed to reset window size: {error}"))?;
+    window
+        .center()
+        .map_err(|error| format!("failed to center the window: {error}"))?;
+    if let (Ok(position), Ok(mut saved)) = (window.outer_position(), state.window.lock()) {
+        *saved = SavedWindowState {
+            x: position.x,
+            y: position.y,
+            ..defaults
+        };
+    }
+    save_window_state(&app);
+    Ok(())
 }
 
 fn reserve_loopback_port() -> Result<u16, String> {
@@ -85,12 +284,25 @@ fn stop_backend(app: &tauri::AppHandle) {
 
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![desktop_runtime_info])
+        .invoke_handler(tauri::generate_handler![
+            desktop_runtime_info,
+            desktop_open_outputs_directory,
+            desktop_open_data_directory,
+            desktop_open_backend_log,
+            desktop_reset_window_state
+        ])
         .setup(|app| {
             let port = reserve_loopback_port().map_err(std::io::Error::other)?;
             let token = Uuid::new_v4().simple().to_string();
             let data_root = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&data_root)?;
+            let outputs_root = data_root.join("outputs");
+            std::fs::create_dir_all(&outputs_root)?;
+            let log_path = data_root.join("desktop-backend.log");
+            let saved_window = load_window_state(&data_root);
+            if let Some(window) = app.get_webview_window("main") {
+                restore_window_state(&window, saved_window).map_err(std::io::Error::other)?;
+            }
 
             let backend_path = if cfg!(debug_assertions) {
                 std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -105,7 +317,7 @@ pub fn run() {
             let stdout = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(data_root.join("desktop-backend.log"))?;
+                .open(&log_path)?;
             let stderr = stdout.try_clone()?;
             let port_text = port.to_string();
             let mut command = Command::new(&backend_path);
@@ -138,21 +350,37 @@ pub fn run() {
 
             app.manage(DesktopRuntimeState {
                 info: DesktopRuntimeInfo {
-                    mode: "desktop-spike",
+                    mode: "desktop",
                     api_base: format!("http://127.0.0.1:{port}"),
                     token,
                     data_root: data_root.to_string_lossy().into_owned(),
+                    outputs_root: outputs_root.to_string_lossy().into_owned(),
+                    log_path: log_path.to_string_lossy().into_owned(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
                 },
                 child: Mutex::new(Some(child)),
+                window: Mutex::new(saved_window),
             });
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("failed to build NM Image Studio desktop shell");
 
-    app.run(|handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
+    app.run(|handle, event| match event {
+        tauri::RunEvent::WindowEvent { label, event, .. } if label == "main" => match event {
+            tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::ScaleFactorChanged { .. } => capture_window_state(handle),
+            tauri::WindowEvent::CloseRequested { .. } => {
+                capture_window_state(handle);
+                save_window_state(handle);
+            }
+            _ => {}
+        },
+        tauri::RunEvent::Exit => {
+            save_window_state(handle);
             stop_backend(handle);
         }
+        _ => {}
     });
 }
