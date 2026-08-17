@@ -354,6 +354,39 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 webapp.dev_cors_origins(),
             )
 
+    def test_desktop_token_protects_api_and_outputs_without_changing_web_mode(self) -> None:
+        self.outputs.mkdir(parents=True, exist_ok=True)
+        (self.outputs / "desktop.png").write_bytes(PNG_RAW)
+        origin = "http://tauri.localhost"
+        with patch.dict(
+            os.environ,
+            {
+                "IMAGE_TOOL_DESKTOP_TOKEN": "desktop-secret",
+                "IMAGE_TOOL_DEV_CORS_ORIGINS": origin,
+            },
+        ):
+            with TestClient(webapp.create_app()) as desktop_client:
+                unauthorized_api = desktop_client.get("/api/health")
+                authorized_api = desktop_client.get(
+                    "/api/health",
+                    headers={"X-NM-Desktop-Token": "desktop-secret", "Origin": origin},
+                )
+                unauthorized_output = desktop_client.get("/outputs/desktop.png")
+                authorized_output = desktop_client.get(
+                    "/outputs/desktop.png?desktop_token=desktop-secret",
+                    headers={"Origin": origin},
+                )
+                preflight = self.cors_preflight(desktop_client, origin)
+
+        self.assertEqual(401, unauthorized_api.status_code)
+        self.assertEqual(200, authorized_api.status_code)
+        self.assertEqual(origin, authorized_api.headers.get("access-control-allow-origin"))
+        self.assertEqual(401, unauthorized_output.status_code)
+        self.assertEqual(200, authorized_output.status_code)
+        self.assertEqual(200, preflight.status_code)
+
+        self.assertEqual(200, self.client.get("/api/health").status_code)
+
     def test_foreign_host_and_origin_reject_config_before_defaults_read(self) -> None:
         with patch.object(webapp, "build_runtime_defaults", return_value={}) as defaults:
             response = self.client.get(

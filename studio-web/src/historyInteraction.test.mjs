@@ -48,7 +48,7 @@ test("preview actions follow workflow priority and keep close at the far right",
     toolbar.indexOf("preview-history-action"),
     toolbar.indexOf("preview-mask-action"),
     toolbar.indexOf("addOutputAsReference(previewImage.src"),
-    toolbar.indexOf("<a href={previewImage.src}"),
+    toolbar.indexOf("<a href={resolveRuntimeUrl(previewImage.src)}"),
     toolbar.indexOf('<button type="button" onClick={closePreviewImage} aria-label={t("preview.close")}'),
   ];
   assert.ok(positions.every((value) => value >= 0), positions);

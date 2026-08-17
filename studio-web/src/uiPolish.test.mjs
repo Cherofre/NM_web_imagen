@@ -235,7 +235,7 @@ test("queue and chat requests share backend job cancellation protocol", () => {
   assert.match(appSource, /function settleQueueJobCancellation\(job: QueueJob\)[\s\S]*return settleQueueCancellation\(\{/);
   assert.match(cancelSource, /await settleQueueJobCancellation\(job\)/);
   assert.match(cancelSource, /cancellationNotice\(language\)/);
-  assert.match(appSource, /requestCancel:\s*async \(\) => \{[\s\S]*await fetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
+  assert.match(appSource, /requestCancel:\s*async \(\) => \{[\s\S]*await apiFetch\(cancelJobUrl\(job\.id\),\s*\{\s*method:\s*"POST"\s*\}\)[\s\S]*if \(!response\.ok\) throw new Error[\s\S]*return response\.json/);
   assert.match(appSource, /abort:\s*\(\) => abortController\?\.abort\(\)/);
   assert.match(appSource, /cleanup:\s*\(\) => \{[\s\S]*delete queueAbortControllersRef\.current\[job\.id\];[\s\S]*delete queuePayloadsRef\.current\[job\.id\];/);
   assert.match(appSource, /onClick=\{\(\) => void cancelQueueJob\(job\)\}/);
@@ -458,7 +458,7 @@ test("config drawer exposes separate generation and chat diagnostics", () => {
   assert.match(appSource, /setDiagnosticsResult\(null\);[\s\S]*setConnectionOpen\(false\);/);
   assert.match(appSource, /function clearDiagnosticsResult\(\)/);
   assert.match(appSource, /selectConfigProfile\(profile: ConfigProfile\)[\s\S]*clearDiagnosticsResult\(\);/);
-  assert.match(appSource, /fetch\("\/api\/diagnostics"/);
+  assert.match(appSource, /apiFetch\("\/api\/diagnostics"/);
   assert.match(appSource, /t\("config\.testConnection"\)/);
   assert.match(appSource, /className=\{diagnosticsResult\.ok \? "diagnostics-panel ok" : "diagnostics-panel warning"\}/);
   assert.match(appSource, /diagnosticsResult\.results\.map\(\(item\) =>/);
@@ -472,13 +472,13 @@ test("config drawer exposes separate generation and chat diagnostics", () => {
 });
 
 test("image previews expose download and canvas zoom controls", () => {
-  assert.match(appSource, /<a href=\{previewImage\.src\} download=\{previewImage\.name\}/);
+  assert.match(appSource, /<a href=\{resolveRuntimeUrl\(previewImage\.src\)\} download=\{previewImage\.name\}/);
   assert.match(appSource, /<div className="lightbox-zoom-tools" aria-label=\{t\("preview\.zoomControls"\)\}>/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomIn"\)\}/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomOut"\)\}/);
   assert.match(appSource, /title=\{t\("preview\.fit"\)\}/);
   assert.match(appSource, /\{Math\.round\(previewZoom \* 100\)\}%/);
-  const headerStart = appSource.indexOf("<a href={previewImage.src} download={previewImage.name}");
+  const headerStart = appSource.indexOf("<a href={resolveRuntimeUrl(previewImage.src)} download={previewImage.name}");
   const headerEnd = appSource.indexOf("</span>", headerStart);
   assert.notEqual(headerStart, -1, "Missing preview header action area");
   assert.notEqual(headerEnd, -1, "Missing preview header action close");

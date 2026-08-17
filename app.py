@@ -12,6 +12,7 @@ import mimetypes
 import os
 import random
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -54,12 +55,13 @@ from upstream import (
 )
 
 
-ROOT_DIR = Path(__file__).resolve().parent
-STATIC_DIR = ROOT_DIR / "static"
+APP_ASSET_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
+ROOT_DIR = Path(os.getenv("IMAGE_TOOL_DATA_ROOT") or APP_ASSET_ROOT).expanduser().resolve()
+STATIC_DIR = APP_ASSET_ROOT / "static"
 STUDIO_STATIC_DIR = STATIC_DIR / "studio"
 OUTPUTS_DIR = ROOT_DIR / "outputs"
 OUTPUTS_URL_PREFIX = "/outputs"
-VERSION_FILE = ROOT_DIR / "VERSION"
+VERSION_FILE = APP_ASSET_ROOT / "VERSION"
 HISTORY_FILE = OUTPUTS_DIR / "history.json"
 HISTORY_MAX_ENTRIES = 300
 STUDIO_SESSIONS_FILE = OUTPUTS_DIR / "studio_sessions.json"
@@ -79,7 +81,7 @@ STUDIO_META_MAX_BYTES = 64 * 1024
 STUDIO_SESSION_JSON_MAX_BYTES = 32 * 1024 * 1024
 CONFIG_FILE_CANDIDATES = [
     ROOT_DIR / "config.local.json",
-    ROOT_DIR / "config.defaults.json",
+    APP_ASSET_ROOT / "config.defaults.json",
 ]
 PRIMARY_CONFIG_FILE = ROOT_DIR / "config.local.json"
 
@@ -341,6 +343,41 @@ class TrustedLocalHostMiddleware:
             status_code=403,
             content={"detail": "不允许的请求主机"},
             headers=response_headers,
+        )(scope, receive, send)
+
+
+class DesktopTokenMiddleware:
+    def __init__(self, app: Any, *, token: str) -> None:
+        self.app = app
+        self.token = str(token or "").strip()
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or not self.token:
+            await self.app(scope, receive, send)
+            return
+
+        method = str(scope.get("method") or "GET").upper()
+        path = str(scope.get("path") or "")
+        if method == "OPTIONS" or not path.startswith(("/api/", "/outputs/")):
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        supplied = headers.get("x-nm-desktop-token") or ""
+        if path.startswith("/outputs/") and not supplied:
+            query = str(scope.get("query_string", b"").decode("latin-1"))
+            for pair in query.split("&"):
+                name, separator, value = pair.partition("=")
+                if separator and unquote(name) == "desktop_token":
+                    supplied = unquote(value)
+                    break
+        if supplied and secrets.compare_digest(supplied, self.token):
+            await self.app(scope, receive, send)
+            return
+
+        await JSONResponse(
+            status_code=401,
+            content={"detail": "桌面运行时令牌无效"},
         )(scope, receive, send)
 
 
@@ -3822,6 +3859,10 @@ def create_app() -> FastAPI:
             allow_credentials=False,
         )
     app.add_middleware(TrustedLocalHostMiddleware, allowed_origins=origins)
+    app.add_middleware(
+        DesktopTokenMiddleware,
+        token=os.getenv("IMAGE_TOOL_DESKTOP_TOKEN", ""),
+    )
     app.router.route_class = LimitedGenerationMultipartRoute
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

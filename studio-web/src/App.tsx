@@ -68,6 +68,7 @@ import {
   type SessionDrafts,
 } from "./sessionDrafts";
 import { buildSubmissionFields } from "./submissionPayload";
+import { apiFetch, isRuntimeOutputUrl, resolveRuntimeUrl } from "./desktopRuntime";
 import {
   activeProfileForEngine,
   buildConfigPayload,
@@ -520,8 +521,8 @@ function formatTime(value?: string, language: AppLanguage = "zh-CN") {
 
 function imageSrc(image?: GeneratedImage) {
   if (!image) return "";
-  if (image.saved_url) return image.saved_url;
-  if (image.url) return image.url;
+  if (image.saved_url) return resolveRuntimeUrl(image.saved_url);
+  if (image.url) return resolveRuntimeUrl(image.url);
   if (image.data_url) return image.data_url;
   if (image.b64_json) return `data:${image.mime_type || "image/png"};base64,${image.b64_json}`;
   return "";
@@ -1189,12 +1190,7 @@ async function readError(response: Response) {
 }
 
 function isSameOriginOutput(src: string) {
-  try {
-    const url = new URL(src, window.location.origin);
-    return url.origin === window.location.origin && url.pathname.startsWith("/outputs/");
-  } catch {
-    return false;
-  }
+  return isRuntimeOutputUrl(src);
 }
 
 function isPreviewControlTarget(target: EventTarget | null) {
@@ -1446,7 +1442,7 @@ function App() {
     const result = await runSessionSaveWithRetry({
       initialState: { sessions: localSessions, activeSessionId: activeId },
       send: async (state, _attempt) => {
-        const response = await fetch("/api/studio/sessions", {
+        const response = await apiFetch("/api/studio/sessions", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildSessionSavePayload(sessionServerBaselineRef.current.revision, state.activeSessionId, state.sessions)),
@@ -1652,7 +1648,7 @@ function App() {
     let cancelled = false;
     async function loadServerSessions() {
       try {
-        const response = await fetch("/api/studio/sessions");
+        const response = await apiFetch("/api/studio/sessions");
         if (!response.ok) throw new Error(await readError(response));
         const payload = await response.json();
         const normalized = normalizeSessionStatePayload(payload, initialQueueJobs.current);
@@ -1976,7 +1972,7 @@ function App() {
   async function loadDefaults() {
     try {
       clearDiagnosticsResult();
-      const response = await fetch("/api/config/defaults");
+      const response = await apiFetch("/api/config/defaults");
       if (!response.ok) throw new Error(await readError(response));
       const payload = (await response.json()) as ConfigPayload;
       const nextGpt = normalizeGptForm({ ...gptForm, ...(payload.forms?.["gpt-image-2-form"] || {}) });
@@ -2107,7 +2103,7 @@ function App() {
     setDiagnosticsRunning(true);
     setDiagnosticsResult(null);
     try {
-      const response = await fetch("/api/diagnostics", {
+      const response = await apiFetch("/api/diagnostics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createDiagnosticPayload(activeEngine, gptForm, bananaForm)),
@@ -2197,7 +2193,7 @@ function App() {
         setNotice(fallbackNotice);
       },
       requestCancel: async () => {
-        const response = await fetch(cancelJobUrl(job.id), { method: "POST" });
+        const response = await apiFetch(cancelJobUrl(job.id), { method: "POST" });
         if (!response.ok) throw new Error("cancel request failed");
         return response.json().catch(() => ({}));
       },
@@ -2296,7 +2292,7 @@ function App() {
 
   async function saveConfig() {
     try {
-      const response = await fetch("/api/config/local-file", {
+      const response = await apiFetch("/api/config/local-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildConfigPayload(
@@ -2328,7 +2324,7 @@ function App() {
   async function loadHistory() {
     setHistoryLoading(true);
     try {
-      const response = await fetch("/api/history?limit=160");
+      const response = await apiFetch("/api/history?limit=160");
       if (!response.ok) throw new Error(await readError(response));
       const payload = await response.json();
       setHistory(Array.isArray(payload.entries) ? payload.entries : []);
@@ -2342,7 +2338,7 @@ function App() {
   async function toggleFavorite(entry: HistoryEntry) {
     if (entry.legacy) return;
     try {
-      const response = await fetch(`/api/history/${encodeURIComponent(entry.id)}?limit=160`, {
+      const response = await apiFetch(`/api/history/${encodeURIComponent(entry.id)}?limit=160`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ favorite: !entry.favorite }),
@@ -2414,7 +2410,7 @@ function App() {
       const query = new URLSearchParams({ limit: "160" });
       if (deleteFiles) query.set("delete_files", "true");
       if (legacyPath) query.set("legacy_path", legacyPath);
-      const response = await fetch(`/api/history/${encodeURIComponent(entry.id)}?${query.toString()}`, {
+      const response = await apiFetch(`/api/history/${encodeURIComponent(entry.id)}?${query.toString()}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -3074,7 +3070,7 @@ function App() {
 
   async function outputReferenceFile(src: string, name: string) {
     if (!isSameOriginOutput(src)) throw new Error(t("status.outputOnly"));
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await apiFetch(src, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
     const mimeType = blob.type || "image/png";
@@ -3165,7 +3161,7 @@ function App() {
       return null;
     }
     try {
-      const response = await fetch(snapshot.src);
+      const response = await apiFetch(snapshot.src);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       return new File([blob], snapshot.name.replace(/[\\/:*?"<>|]+/g, "-") || `reference-${index + 1}.png`, {
@@ -3395,7 +3391,7 @@ function App() {
     setStatus(t("status.generationRunning", { engine: engineLabel(payload.engine) }));
 
     try {
-      const response = await fetch(`/api/generate/${payload.engine}`, {
+      const response = await apiFetch(`/api/generate/${payload.engine}`, {
         method: "POST",
         signal: abortController.signal,
         body: createFormData(
@@ -3632,7 +3628,7 @@ function App() {
       try {
         const targetSession = sessions.find((session) => session.id === targetSessionId);
         const chatContextMessages = buildChatContextMessages([...(targetSession?.turns || []), turn], turnId, t);
-        const response = await fetch(`/api/chat/${currentEngine}`, {
+        const response = await apiFetch(`/api/chat/${currentEngine}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(createChatPayload(
@@ -3833,7 +3829,7 @@ function App() {
 
   async function openOutputs() {
     try {
-      const response = await fetch("/api/open-outputs", { method: "POST" });
+      const response = await apiFetch("/api/open-outputs", { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
       setNotice(t("status.openOutputsRequested"));
     } catch (error) {
@@ -4587,7 +4583,7 @@ function App() {
                             onClick={() => openPreviewImage({ src: reference.src || "", name: reference.name })}
                             title={reference.name}
                           >
-                            <img src={reference.src} alt={reference.name} loading="lazy" />
+                            <img src={resolveRuntimeUrl(reference.src)} alt={reference.name} loading="lazy" />
                           </button>
                         ) : (
                           <span className="turn-reference-file" key={reference.id || `${turn.id}-reference-${index}`} title={reference.name}>
@@ -4608,7 +4604,7 @@ function App() {
                           title={t("mask.viewSnapshot")}
                           aria-label={t("mask.viewSnapshot")}
                         >
-                          <img src={turn.maskSnapshot.src} alt="" loading="lazy" />
+                          <img src={resolveRuntimeUrl(turn.maskSnapshot.src)} alt="" loading="lazy" />
                           <span>{t("mask.snapshot")}</span>
                         </button>
                       )}
@@ -5862,7 +5858,7 @@ function App() {
                 {!previewImage.isMaskSnapshot && (
                   <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
                 )}
-                <a href={previewImage.src} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
+                <a href={resolveRuntimeUrl(previewImage.src)} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>
@@ -5888,7 +5884,7 @@ function App() {
                 <span>{Math.round(previewZoom * 100)}%</span>
               </div>
               <img
-                src={previewImage.src}
+                src={resolveRuntimeUrl(previewImage.src)}
                 alt={previewImage.name}
                 style={{
                   "--preview-zoom": previewZoom,

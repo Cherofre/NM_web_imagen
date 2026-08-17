@@ -1,6 +1,15 @@
 # Next Actions
 
 ## Now
+- [x] Build the Tauri 2 shell and project-level Rust/npm toolchain on `codex/desktop-spike-v1.1.0`.
+- [x] Package FastAPI as PyInstaller `onedir`, add random loopback port and per-run desktop-token enforcement, and adapt frontend API/output URLs.
+- [x] Fix the Tauri white screen caused by the existing classic-script compatibility transform plus a dynamic import.
+- [x] Verify real desktop rendering, tokenized config/history/session requests, isolated data, unauthorized 401 behavior and process/port cleanup on exit.
+- [x] Pass Python 248/248, Node 164/164, size rules, Vite build, cargo check, sidecar smoke and Tauri release build.
+- [x] Record the packaging and technology-stack recommendation in `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
+- [ ] Wait for user authorization before creating the formal `codex/desktop-v1.1.0` implementation branch.
+
+## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
 - [x] Keep the copied mask base as reference 1, preserve existing composer references behind it, respect the GPT 16-image limit, and switch to GPT Image 2 generation mode.
 - [x] Add Chinese and English action labels plus explicit success, limited-copy, missing-Alpha and missing-base notices.
@@ -9,6 +18,16 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
+- Start here: read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`, then inspect branch `codex/desktop-spike-v1.1.0`.
+- Do not redo: Tauri toolchain setup, icon generation, static runtime adapter, desktop-token middleware, PyInstaller `onedir` decision, white-screen fix, sidecar smoke or basic real-window lifecycle smoke.
+- Verify next: if formal work is authorized, create `codex/desktop-v1.1.0` from the approved baseline and rerun the current matrix before adding Job Object, single-instance, DPAPI, migration, tray/update or installers.
+- Do not claim: the spike is a production installer, a true single-file app, crash-safe under forced termination, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
+- Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
+- Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
+- Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this spike.
+- Dirty worktree: all desktop-spike implementation and ledger/doc updates are intentional; `.impeccable/` and `PRODUCT.md` are unrelated user files and must remain untouched.
+
+## Previous v1.0.9 Handoff Notes
 - Start here: use `main` / `v1.0.9` as the published baseline and review new user feedback before selecting the next change.
 - Do not redo: mask payload persistence, regeneration/copy restoration, single-call guidance, v1.0.9 build/package smoke, GitHub publication, or either G: synchronization.
 - Do not add: a preliminary chat/Responses/vision request for mask-intent parsing. Keep the solution single-call.
