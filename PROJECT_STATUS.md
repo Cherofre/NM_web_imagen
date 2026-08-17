@@ -1,15 +1,15 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-08-17 16:04 +08:00
-- Phase: first formal desktop UX slice implemented and locally verified
+- Last Updated: 2026-08-17 16:31 +08:00
+- Phase: first formal desktop UX slice plus console/model follow-up implemented and locally verified
 - Branch: `codex/desktop-v1.1.0`, based on the verified Tauri spike commit `05d2c2b`
 - Goal: make the Windows desktop shell feel native and practical while preserving web-mode compatibility and the existing Studio workflow
 - Current Focus: preserve the committed desktop UX slice and leave the next native-hardening slices ready for a later session
-- Implemented: full-window desktop settings, bilingual path/log actions, desktop shortcuts, header more-menu entries, window state persistence and reset, desktop-only card chrome removal, Tauri allowlisted path/window commands, runtime metadata/version exposure, and regression coverage
-- Runtime Evidence: real NM Image Studio window rendered; first-run config UI opened; config/defaults, history and Studio session reads/writes returned 200 through the tokenized client; unauthenticated health returned 401; closing the window removed both processes and released the random port
+- Implemented: full-window desktop settings, bilingual path/log actions, desktop shortcuts, header more-menu entries, window state persistence/reset, desktop-only card chrome removal, allowlisted Tauri commands, release GUI subsystem with no default console, opt-in backend debug console, and `gpt-5.6` to `gpt-5.6-sol` migration
+- Runtime Evidence: normal release launch rendered only the NM Image Studio window (`backend MainWindowHandle=0`); debug-env launch exposed the backend console; closing either mode removed shell/backend processes and released the random port. Earlier tokenized config/history/session and unauthorized-401 checks remain valid
 - Build Evidence: Tauri shell 8.14 MiB; backend directory 58 MiB / 708 files; combined runtime payload 66.14 MiB before WebView2
-- Latest Verification: Python 248/248, Node 167/167, Studio size rules, Python compilation, TypeScript/Vite production build, `cargo fmt --check`, `cargo check --offline`, and the previously completed Tauri release/real-window smoke passed
+- Latest Verification: Python 249/249, Node 168/168, Studio size rules, Python compilation, TypeScript/Vite production build, `cargo fmt --check`, `cargo check --offline`, full PyInstaller/Tauri release build, and PE subsystem inspection (`2`, Windows GUI) passed
 - Residual Risks: no Job Object crash cleanup, single-instance, tray, updater, DPAPI, migration, installer/portable package, fixed/offline WebView2 or full DPI/drag/clipboard/mask manual matrix yet; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
 - Boundary: local commit only; no push, merge, tag, GitHub Release or G: synchronization is authorized; pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched
 

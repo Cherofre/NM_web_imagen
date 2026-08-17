@@ -314,11 +314,6 @@ pub fn run() {
                     .join("backend")
                     .join("nm-image-studio-backend.exe")
             };
-            let stdout = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)?;
-            let stderr = stdout.try_clone()?;
             let port_text = port.to_string();
             let mut command = Command::new(&backend_path);
             command
@@ -329,12 +324,35 @@ pub fn run() {
                 .env(
                     "IMAGE_TOOL_DEV_CORS_ORIGINS",
                     "http://localhost:1420,http://tauri.localhost",
-                )
-                .stdin(Stdio::null())
-                .stdout(Stdio::from(stdout))
-                .stderr(Stdio::from(stderr));
-            #[cfg(windows)]
-            command.creation_flags(0x08000000);
+                );
+            let show_backend_console = std::env::var("NM_IMAGE_STUDIO_BACKEND_CONSOLE")
+                .map(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes"
+                    )
+                })
+                .unwrap_or(false);
+            if show_backend_console {
+                command
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit());
+                #[cfg(windows)]
+                command.creation_flags(0x00000010);
+            } else {
+                let stdout = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)?;
+                let stderr = stdout.try_clone()?;
+                command
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::from(stdout))
+                    .stderr(Stdio::from(stderr));
+                #[cfg(windows)]
+                command.creation_flags(0x08000000);
+            }
             let mut child = command.spawn().map_err(|error| {
                 std::io::Error::other(format!(
                     "failed to start desktop backend {}: {error}",

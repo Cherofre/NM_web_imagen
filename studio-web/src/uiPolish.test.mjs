@@ -703,17 +703,19 @@ test("shape hierarchy keeps pills for switches and regular controls compact", ()
 });
 
 test("header distinguishes image and chat models with current reasoning controls", () => {
-  assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6", "gpt-5\.6-sol", "gpt-5\.6-terra", "gpt-5\.6-luna", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
+  assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6-sol", "gpt-5\.6-terra", "gpt-5\.6-luna", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
   assert.match(appSource, /const gptReasoningOptions = \["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"\];/);
-  assert.match(appSource, /chat_model: "gpt-5\.6",\s*reasoning_effort: "auto",/);
-  assert.match(appSource, /function chatModelOptionLabel\(value: string\)[\s\S]*config\.chatModelAlias[\s\S]*config\.chatModelSol[\s\S]*config\.chatModelTerra[\s\S]*config\.chatModelLuna/);
+  assert.match(appSource, /chat_model: "gpt-5\.6-sol",\s*reasoning_effort: "auto",/);
+  assert.match(appSource, /chat_model: value\.chat_model === "gpt-5\.6" \? "gpt-5\.6-sol"/);
+  assert.match(appSource, /function chatModelOptionLabel\(value: string\)[\s\S]*config\.chatModelSol[\s\S]*config\.chatModelTerra[\s\S]*config\.chatModelLuna/);
+  assert.doesNotMatch(appSource, /gptChatModelOptions = \[[^\]]*"gpt-5\.6"/);
   assert.match(appSource, /const activeModelSummary = activeEngine === "gpt-image-2"[\s\S]*t\("config\.gptModelSummary", \{ image: gptForm\.model, chat: gptForm\.chat_model \}\)/);
   assert.match(appSource, /<small>\{activeModelSummary \|\| t\("config\.modelName"\)\}<\/small>/);
   assert.match(appSource, /<Field label=\{t\("config\.chatModel"\)\} help=\{t\("config\.chatModelHelp"\)\}>/);
   assert.match(appSource, /<Field label=\{t\("config\.reasoning"\)\} help=\{t\("config\.reasoningHelp"\)\}>/);
   assert.match(i18nSource, /"config\.gptModelSummary": "生图 \{image\} · 聊天 \{chat\}"/);
-  assert.match(i18nSource, /"config\.chatModelHelp": "GPT-5\.6 是当前指向 Sol 的官方别名；也可明确选择 Sol、Terra 或 Luna。这里只影响聊天，不会替换生图模型。"/);
-  assert.match(i18nSource, /"config\.chatModelAlias": "gpt-5\.6（官方别名，当前指向 Sol）"/);
+  assert.match(i18nSource, /"config\.chatModelHelp": "请选择实际聊天模型。Sol、Terra 和 Luna 的速度、质量与成本取向不同；这里只影响聊天，不会替换生图模型。"/);
+  assert.doesNotMatch(i18nSource, /config\.chatModelAlias/);
   assert.match(i18nSource, /"config\.chatModelSol": "gpt-5\.6-sol（旗舰）"/);
   assert.match(i18nSource, /"config\.chatModelTerra": "gpt-5\.6-terra（质量与成本均衡）"/);
   assert.match(i18nSource, /"config\.chatModelLuna": "gpt-5\.6-luna（速度与成本优先）"/);

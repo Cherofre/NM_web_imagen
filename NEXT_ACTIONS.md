@@ -1,12 +1,12 @@
 # Next Actions
 
 ## Now
-- [x] Build the Tauri 2 shell and project-level Rust/npm toolchain from the verified spike.
-- [x] Add full-window desktop settings for language, paths/logs, shortcuts, about and window reset.
-- [x] Add desktop-native shortcut handling, header quick actions and desktop-only shell chrome changes while keeping web mode intact.
-- [x] Add allowlisted Rust commands for opening outputs/data/log paths and persisting/restoring window geometry.
-- [x] Pass Python 248/248, Node 167/167, size rules, Vite build, Python compilation, cargo fmt/check and prior real-window smoke.
-- [x] Commit the reviewed desktop UX slice on `codex/desktop-v1.1.0`.
+- [x] Build the Tauri 2 shell, project toolchain and tokenized PyInstaller `onedir` sidecar from the verified spike.
+- [x] Add full-window settings, desktop shortcuts, header quick actions and desktop-only shell chrome while keeping web mode intact.
+- [x] Add allowlisted path/log commands plus persisted/restorable window geometry.
+- [x] Remove the unsupported `gpt-5.6` menu alias, migrate old values to `gpt-5.6-sol`, and change backend/frontend defaults.
+- [x] Hide the release shell console and retain an opt-in backend console through `NM_IMAGE_STUDIO_BACKEND_CONSOLE=1`.
+- [x] Pass Python 249/249, Node 168/168, size/build/compiler checks, full Tauri release build and normal/debug window-handle smoke.
 - [ ] Later slice: evaluate single-instance, Job Object cleanup, tray behavior, DPAPI/migration and installer/portable packaging.
 
 ## Previous v1.0.9 Checklist
@@ -18,14 +18,14 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`, then inspect branch `codex/desktop-spike-v1.1.0`.
-- Do not redo: Tauri toolchain setup, icon generation, static runtime adapter, desktop-token middleware, PyInstaller `onedir` decision, white-screen fix, sidecar smoke or basic real-window lifecycle smoke.
-- Verify next: if formal work is authorized, create `codex/desktop-v1.1.0` from the approved baseline and rerun the current matrix before adding Job Object, single-instance, DPAPI, migration, tray/update or installers.
+- Start here: continue on `codex/desktop-v1.1.0` from the latest local commit and read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
+- Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, PyInstaller `onedir` decision or basic lifecycle smoke.
+- Verify next: add Job Object crash cleanup and single-instance behavior before tray, DPAPI/migration, updater or installers.
 - Do not claim: the spike is a production installer, a true single-file app, crash-safe under forced termination, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
-- Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this spike.
-- Dirty worktree: all desktop-spike implementation and ledger/doc updates are intentional; `.impeccable/` and `PRODUCT.md` are unrelated user files and must remain untouched.
+- Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this branch.
+- Dirty worktree: current console/model follow-up and generated Studio assets are intentional; `.impeccable/` and `PRODUCT.md` are unrelated user files and must remain untouched.
 
 ## Previous v1.0.9 Handoff Notes
 - Start here: use `main` / `v1.0.9` as the published baseline and review new user feedback before selecting the next change.

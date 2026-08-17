@@ -6,6 +6,8 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const runtimeSource = readFileSync(new URL("./desktopRuntime.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const i18nSource = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
+const tauriMainSource = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
+const tauriLibSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 
 test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /outputsRoot: string;/);
@@ -32,6 +34,13 @@ test("desktop app provides a full-window settings surface and standard shortcuts
   assert.match(appSource, /desktopRuntime\.logPath/);
   assert.match(i18nSource, /"desktop\.settings": "桌面设置"/);
   assert.match(i18nSource, /"desktop\.settings": "Desktop settings"/);
+});
+
+test("release desktop builds hide the shell console while backend diagnostics stay opt-in", () => {
+  assert.match(tauriMainSource, /cfg_attr\(not\(debug_assertions\), windows_subsystem = "windows"\)/);
+  assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_CONSOLE/);
+  assert.match(tauriLibSource, /creation_flags\(0x00000010\)/);
+  assert.match(tauriLibSource, /creation_flags\(0x08000000\)/);
 });
 
 test("desktop styling removes the outer web cards without changing web mode", () => {

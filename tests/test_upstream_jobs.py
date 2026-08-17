@@ -112,6 +112,10 @@ def assert_stable_http_error(test_case, response, status_code, error_code):
 
 
 class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_gpt_5_6_alias_normalizes_to_sol(self) -> None:
+        self.assertEqual("gpt-5.6-sol", webapp.normalize_gpt_chat_model("gpt-5.6"))
+        self.assertEqual("gpt-5.6-sol", webapp.normalize_gpt_chat_model("gpt-5.6-sol"))
+
     def test_harden_mask_prompt_keeps_broad_requests_model_decided(self) -> None:
         prompt = "遮罩部分换成另外一个物品。"
         hardened = webapp.harden_mask_prompt(prompt)

@@ -1,6 +1,8 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-17 — Status: active: Release desktop builds use the Windows GUI subsystem, so opening the normal EXE never creates a shell console. The FastAPI sidecar still runs without a window and writes `desktop-backend.log`. Developers can explicitly set `NM_IMAGE_STUDIO_BACKEND_CONSOLE=1` to spawn the backend in a separate console for live diagnostics; this is not a normal-user setting.
+- 2026-08-17 — Status: active: Remove `gpt-5.6` from the chat model menu because the configured gateway cannot test the alias successfully. New defaults use `gpt-5.6-sol`; frontend profile normalization and backend request normalization map legacy stored `gpt-5.6` values to Sol so old configurations remain usable.
 - 2026-08-17 — Status: active: The first formal desktop UX slice keeps the existing Studio information architecture and adds native affordances around it: a full-window settings surface, header quick actions, keyboard shortcuts, allowlisted path opening, and remembered window geometry. Settings are not a blocking modal, and the web runtime keeps its existing card shell and browser behavior.
 - 2026-08-17 — Status: active: Desktop path commands accept only fixed semantic kinds (`outputs`, `data`, `backend-log`) from the frontend. Rust resolves the paths from the desktop runtime context and opens them with Windows Explorer, preventing arbitrary path injection while keeping the common maintenance actions one click away.
 - 2026-08-17 — Status: active: Window geometry is persisted as `desktop-window.json` with x/y/width/height/maximized. On restore, off-screen geometry is centered instead of blindly applied. Reset remains available from desktop settings; this is a local shell preference and does not alter Studio session data.
