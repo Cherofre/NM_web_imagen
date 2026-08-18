@@ -17,8 +17,11 @@ test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /desktop_open_outputs_directory/);
   assert.match(runtimeSource, /desktop_open_data_directory/);
   assert.match(runtimeSource, /desktop_open_backend_log/);
+  assert.match(runtimeSource, /openBackendDebugConsole\(\)/);
+  assert.match(runtimeSource, /invoke\("desktop_open_backend_console"\)/);
   assert.match(runtimeSource, /desktop_reset_window_state/);
   assert.doesNotMatch(runtimeSource, /openDesktopPath\(path:/);
+  assert.doesNotMatch(runtimeSource, /openBackendDebugConsole\([^)]/);
   assert.match(runtimeSource, /document\.documentElement\.dataset\.runtime = "desktop"/);
 });
 
@@ -33,8 +36,12 @@ test("desktop app provides a full-window settings surface and standard shortcuts
   assert.match(appSource, /desktopRuntime\.outputsRoot/);
   assert.match(appSource, /desktopRuntime\.dataRoot/);
   assert.match(appSource, /desktopRuntime\.logPath/);
+  assert.match(appSource, /desktop\.openDebugConsole/);
+  assert.match(appSource, /desktop\.debugConsoleHint/);
   assert.match(i18nSource, /"desktop\.settings": "桌面设置"/);
   assert.match(i18nSource, /"desktop\.settings": "Desktop settings"/);
+  assert.match(i18nSource, /"desktop\.openDebugConsole": "打开调试窗口"/);
+  assert.match(i18nSource, /"desktop\.openDebugConsole": "Open debug console"/);
 });
 
 test("release desktop builds hide the shell console while backend diagnostics stay opt-in", () => {
@@ -42,6 +49,12 @@ test("release desktop builds hide the shell console while backend diagnostics st
   assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_CONSOLE/);
   assert.match(tauriLibSource, /creation_flags\(0x00000010\)/);
   assert.match(tauriLibSource, /creation_flags\(0x08000000\)/);
+  assert.match(tauriLibSource, /fn desktop_open_backend_console\(state: State<'_, DesktopRuntimeState>\)/);
+  assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_LOG/);
+  assert.match(tauriLibSource, /Get-Content -LiteralPath \$logPath -Tail 200 -Wait/);
+  assert.match(tauriLibSource, /state\._backend_job\.assign\(&child\)/);
+  assert.match(tauriLibSource, /\.env\("PYTHONUNBUFFERED", "1"\)/);
+  assert.match(tauriLibSource, /desktop_open_backend_console,/);
 });
 
 test("Windows desktop runtime enforces one shell and crash-cleans the backend", () => {

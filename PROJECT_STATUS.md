@@ -1,15 +1,15 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-08-17 17:16 +08:00
-- Phase: desktop UX and first Windows process-hardening slices implemented and locally verified
+- Last Updated: 2026-08-18 00:00 +08:00
+- Phase: desktop UX, lifecycle hardening, and opt-in backend debug console implemented and locally verified
 - Branch: `codex/desktop-v1.1.0`, based on the verified Tauri spike commit `05d2c2b`
 - Goal: make the Windows desktop shell feel native and practical while preserving web-mode compatibility and the existing Studio workflow
-- Current Focus: preserve the verified single-instance/Job Object slice and move next to data security/migration or packaging
-- Implemented: desktop settings/shortcuts/path actions/window state, default no-console launch plus opt-in backend console, `gpt-5.6` migration, Windows named-mutex single instance with existing-window activation, and a `KILL_ON_JOB_CLOSE` Job Object around the FastAPI sidecar
-- Runtime Evidence: a second EXE launch exited while the original window remained, with exactly one shell and one backend; forcibly terminating the shell also terminated the backend; normal and debug-console launches both closed without residual processes. Earlier tokenized API and unauthorized-401 checks remain valid
+- Current Focus: preserve the verified desktop lifecycle slice and choose the next independent slice, either DPAPI/data migration or installer/portable packaging
+- Implemented: desktop settings/shortcuts/path actions/window state, default no-console launch, opt-in startup backend console, settings-launched live backend debug console, `gpt-5.6` migration, Windows named-mutex single instance with existing-window activation, and a `KILL_ON_JOB_CLOSE` Job Object around the FastAPI sidecar plus debug console
+- Runtime Evidence: a second EXE launch exited while the original window remained, with exactly one shell and one backend; forcibly terminating the shell also terminated the backend; the user manually verified the settings path `桌面设置 → 存储与日志 → 打开调试窗口`; the debug console follows `desktop-backend.log` without restarting the backend, and its sidecar uses unbuffered output. Earlier tokenized API and unauthorized-401 checks remain valid
 - Build Evidence: Tauri shell 8.14 MiB; backend directory 58 MiB / 708 files; combined runtime payload 66.14 MiB before WebView2
-- Latest Verification: Python 249/249, Node 169/169, Studio size rules, Python compilation, `cargo fmt --check`, `cargo check --offline`, Tauri release build, duplicate-launch smoke, forced-shell-termination smoke and debug-console smoke passed
+- Latest Verification: Python 249/249, Node 169/169, Studio size rules, Python compilation, `cargo fmt --check`, `cargo check --offline`, Tauri release build after the debug-console/unbuffered-output fix, duplicate-launch smoke, forced-shell-termination smoke and prior debug-console smoke passed; user manual verification completed on 2026-08-18
 - Residual Risks: no tray, updater, DPAPI, migration, installer/portable package, fixed/offline WebView2 or full DPI/drag/clipboard/mask manual matrix yet; single-instance window lookup currently relies on the unique `NM Image Studio` title; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
 - Boundary: local commit only; no push, merge, tag, GitHub Release or G: synchronization is authorized; pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched
 

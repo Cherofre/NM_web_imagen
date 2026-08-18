@@ -4671,8 +4671,16 @@ button.primary-action:focus-visible,
   white-space: nowrap;
 }
 
+.desktop-path-hint {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .desktop-path-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 7px;
 }
 
@@ -4765,6 +4773,10 @@ button.primary-action:focus-visible,
   .desktop-language-switcher,
   .desktop-path-actions {
     justify-self: start;
+  }
+
+  .desktop-path-actions {
+    justify-content: flex-start;
   }
 }
 

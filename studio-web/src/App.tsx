@@ -79,6 +79,7 @@ import {
   getDesktopRuntimeInfo,
   isDesktopRuntime,
   isRuntimeOutputUrl,
+  openBackendDebugConsole,
   openDesktopPath,
   resetDesktopWindow,
   resolveRuntimeUrl,
@@ -3946,6 +3947,15 @@ function App() {
     }
   }
 
+  async function openDesktopBackendConsole() {
+    try {
+      await openBackendDebugConsole();
+      setNotice(t("desktop.debugConsoleOpened"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.debugConsoleFailed"));
+    }
+  }
+
   async function copyDesktopPath(path: string) {
     try {
       await navigator.clipboard.writeText(path);
@@ -5392,9 +5402,11 @@ function App() {
                       <div>
                         <strong>{label}</strong>
                         <code title={path}>{path}</code>
+                        {kind === "log" && <span className="desktop-path-hint">{t("desktop.debugConsoleHint")}</span>}
                       </div>
                       <div className="desktop-path-actions">
-                        <button type="button" onClick={() => kind === "outputs" ? void openOutputs() : void openDesktopUtility(kind)}>{t("desktop.open")}</button>
+                        {kind === "log" && <button type="button" onClick={() => void openDesktopBackendConsole()}>{t("desktop.openDebugConsole")}</button>}
+                        <button type="button" onClick={() => kind === "outputs" ? void openOutputs() : void openDesktopUtility(kind)}>{t(kind === "log" ? "desktop.locateLog" : "desktop.open")}</button>
                         <button type="button" onClick={() => void copyDesktopPath(path)}>{t("desktop.copyPath")}</button>
                       </div>
                     </section>

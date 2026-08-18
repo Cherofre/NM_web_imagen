@@ -209,6 +209,62 @@ fn desktop_open_backend_log(state: State<'_, DesktopRuntimeState>) -> Result<(),
     open_in_explorer(Path::new(&state.info.log_path), true)
 }
 
+#[cfg(windows)]
+fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
+    const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$logPath = $env:NM_IMAGE_STUDIO_BACKEND_LOG
+if ([string]::IsNullOrWhiteSpace($logPath)) {
+    throw 'Backend log path is unavailable.'
+}
+if (-not (Test-Path -LiteralPath $logPath)) {
+    New-Item -ItemType File -Path $logPath -Force | Out-Null
+}
+$Host.UI.RawUI.WindowTitle = 'NM Image Studio - Backend Debug'
+Write-Host 'NM Image Studio 后台调试日志' -ForegroundColor Cyan
+Write-Host ('日志文件: ' + $logPath)
+Write-Host '关闭此窗口不会关闭应用或后端。' -ForegroundColor DarkGray
+Write-Host ''
+Get-Content -LiteralPath $logPath -Tail 200 -Wait
+"#;
+
+    Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-NoExit",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("NM_IMAGE_STUDIO_BACKEND_LOG", log_path)
+        .stdin(Stdio::null())
+        .creation_flags(0x00000010)
+        .spawn()
+        .map_err(|error| format!("failed to open backend debug console: {error}"))
+}
+
+#[cfg(not(windows))]
+fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
+    Err(format!(
+        "opening the backend debug console is only supported on Windows: {}",
+        log_path.display()
+    ))
+}
+
+#[tauri::command]
+fn desktop_open_backend_console(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
+    let mut child = open_backend_debug_console(Path::new(&state.info.log_path))?;
+    #[cfg(windows)]
+    if let Err(error) = state._backend_job.assign(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn desktop_reset_window_state(
     app: tauri::AppHandle,
@@ -302,6 +358,7 @@ pub fn run() {
             desktop_open_outputs_directory,
             desktop_open_data_directory,
             desktop_open_backend_log,
+            desktop_open_backend_console,
             desktop_reset_window_state
         ])
         .setup(|app| {
@@ -336,6 +393,7 @@ pub fn run() {
                 .current_dir(&data_root)
                 .env("IMAGE_TOOL_DATA_ROOT", &data_root)
                 .env("IMAGE_TOOL_DESKTOP_TOKEN", &token)
+                .env("PYTHONUNBUFFERED", "1")
                 .env(
                     "IMAGE_TOOL_DEV_CORS_ORIGINS",
                     "http://localhost:1420,http://tauri.localhost",

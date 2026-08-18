@@ -60,6 +60,12 @@ export async function openDesktopPath(kind: DesktopPathKind) {
   return true;
 }
 
+export async function openBackendDebugConsole() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_open_backend_console");
+  return true;
+}
+
 export async function resetDesktopWindow() {
   if (!isDesktopRuntime()) return false;
   await invoke("desktop_reset_window_state");
