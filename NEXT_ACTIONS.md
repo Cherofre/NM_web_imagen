@@ -1,14 +1,10 @@
 # Next Actions
 
 ## Now
-- [x] Build the Tauri shell and tokenized PyInstaller `onedir` sidecar, then add desktop settings, shortcuts, path actions and window-state persistence.
-- [x] Hide the normal release console, retain `NM_IMAGE_STUDIO_BACKEND_CONSOLE=1` debugging, and migrate unsupported `gpt-5.6` values to Sol.
-- [x] Enforce one Windows shell with a named mutex and restore/activate the existing `NM Image Studio` window on duplicate launch.
-- [x] Bind the FastAPI sidecar to a `KILL_ON_JOB_CLOSE` Job Object so forced shell termination cannot leave the backend running.
-- [x] Add a settings-only backend debug console that tails the fixed `desktop-backend.log`, keeps backend output unbuffered, and joins the desktop Job Object lifecycle.
-- [x] Pass Python 249/249, Node 169/169, size/compiler/release checks plus duplicate-launch, forced-kill and debug-console checks; user manually verified the final settings flow.
+- [x] Build the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, and Job Object cleanup.
+- [x] Add the settings-only backend debug console, unbuffered backend output, and Job Object lifecycle cleanup; user manually verified the final settings flow.
 - [x] Protect desktop `api_key` values with Windows DPAPI, migrate existing plaintext desktop config on first read, and replace plaintext `.bak` content with encrypted payloads.
-- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the DPAPI sidecar changes.
+- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the debug-console and DPAPI changes.
 - [ ] Next slice: implement installer/portable packaging and WebView2 prerequisite handling.
 
 ## Previous v1.0.9 Checklist
