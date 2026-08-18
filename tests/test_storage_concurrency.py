@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -299,6 +300,35 @@ class AppStorageIntegrationTests(unittest.TestCase):
         self.assertEqual({"ok": True, "path": "config.local.json"}, second_response.json())
         self.assertEqual(first_saved, read_json(self.root / "config.local.json.bak", {}))
         self.assertEqual("second-key", read_json(self.config_file, {})["forms"]["banana-form"]["api_key"])
+
+    def test_desktop_config_route_encrypts_and_migrates_api_keys(self) -> None:
+        with patch.dict(os.environ, {"IMAGE_TOOL_DESKTOP_MODE": "1"}):
+            response = self.client.post("/api/config/local-file", json=self._config_payload("desktop-key"))
+
+            self.assertEqual(200, response.status_code)
+            stored = read_json(self.config_file, {})
+            self.assertTrue(
+                stored["forms"]["banana-form"]["api_key"].startswith(
+                    webapp.DESKTOP_CONFIG_SECRET_PREFIX
+                )
+            )
+            self.assertNotIn("desktop-key", self.config_file.read_text(encoding="utf-8"))
+
+            defaults = self.client.get("/api/config/defaults")
+            self.assertEqual(200, defaults.status_code)
+            self.assertEqual("desktop-key", defaults.json()["forms"]["banana-form"]["api_key"])
+
+            self.config_file.write_text(json.dumps(self._config_payload("legacy-key")), encoding="utf-8")
+            migrated_defaults = self.client.get("/api/config/defaults")
+            self.assertEqual(200, migrated_defaults.status_code)
+            self.assertEqual("legacy-key", migrated_defaults.json()["forms"]["banana-form"]["api_key"])
+            migrated = read_json(self.config_file, {})
+            self.assertTrue(
+                migrated["forms"]["banana-form"]["api_key"].startswith(
+                    webapp.DESKTOP_CONFIG_SECRET_PREFIX
+                )
+            )
+            self.assertNotIn("legacy-key", self.config_file.read_text(encoding="utf-8"))
 
     def test_forty_concurrent_history_appends_are_parseable_and_lossless(self) -> None:
         with ThreadPoolExecutor(max_workers=8) as pool:

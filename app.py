@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import base64
+import ctypes
 from datetime import datetime
 import hashlib
 from io import BytesIO
@@ -84,6 +85,7 @@ CONFIG_FILE_CANDIDATES = [
     APP_ASSET_ROOT / "config.defaults.json",
 ]
 PRIMARY_CONFIG_FILE = ROOT_DIR / "config.local.json"
+DESKTOP_CONFIG_SECRET_PREFIX = "dpapi:v1:"
 
 
 def compute_instance_id(root: Path = ROOT_DIR) -> str:
@@ -1132,6 +1134,100 @@ def pick_env_value(*names: str) -> str:
     return ""
 
 
+def desktop_mode_enabled() -> bool:
+    return os.getenv("IMAGE_TOOL_DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
+
+
+class ConfigSecretError(ValueError):
+    pass
+
+
+def _dpapi_transform(value: bytes, *, protect: bool) -> bytes:
+    if os.name != "nt":
+        raise ConfigSecretError("Windows DPAPI is unavailable")
+
+    from ctypes import wintypes
+
+    class DataBlob(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_ubyte)),
+        ]
+
+    input_buffer = (ctypes.c_ubyte * len(value)).from_buffer_copy(value)
+    input_blob = DataBlob(len(value), ctypes.cast(input_buffer, ctypes.POINTER(ctypes.c_ubyte)))
+    output_blob = DataBlob()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if protect:
+        ok = crypt32.CryptProtectData(
+            ctypes.byref(input_blob),
+            "NM Image Studio configuration",
+            None,
+            None,
+            None,
+            0x1,
+            ctypes.byref(output_blob),
+        )
+        description = None
+    else:
+        description = ctypes.c_wchar_p()
+        ok = crypt32.CryptUnprotectData(
+            ctypes.byref(input_blob),
+            ctypes.byref(description),
+            None,
+            None,
+            None,
+            0,
+            ctypes.byref(output_blob),
+        )
+    if not ok:
+        raise ConfigSecretError(f"Windows DPAPI failed: {ctypes.WinError(ctypes.get_last_error())}")
+    try:
+        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
+    finally:
+        if output_blob.pbData:
+            kernel32.LocalFree(output_blob.pbData)
+        if description:
+            kernel32.LocalFree(description)
+
+
+def transform_config_secrets(payload: Dict[str, Any], *, decrypt: bool) -> Tuple[Dict[str, Any], bool]:
+    migrated_plaintext = False
+
+    def visit(value: Any) -> Any:
+        nonlocal migrated_plaintext
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        transformed: Dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "api_key" and isinstance(item, str) and item.strip():
+                if decrypt:
+                    if item.startswith(DESKTOP_CONFIG_SECRET_PREFIX):
+                        encoded = item[len(DESKTOP_CONFIG_SECRET_PREFIX):]
+                        try:
+                            transformed[key] = _dpapi_transform(base64.b64decode(encoded, validate=True), protect=False).decode("utf-8")
+                        except (ValueError, UnicodeError, OSError) as exc:
+                            raise ConfigSecretError("无法解密桌面配置中的 API Key") from exc
+                    else:
+                        transformed[key] = item
+                        migrated_plaintext = True
+                elif desktop_mode_enabled():
+                    transformed[key] = DESKTOP_CONFIG_SECRET_PREFIX + base64.b64encode(
+                        _dpapi_transform(item.encode("utf-8"), protect=True)
+                    ).decode("ascii")
+                else:
+                    transformed[key] = item
+            else:
+                transformed[key] = visit(item)
+        return transformed
+
+    result = visit(payload)
+    return result, migrated_plaintext
+
+
 def open_local_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
@@ -1145,6 +1241,11 @@ def open_local_directory(path: Path) -> None:
 
 def build_runtime_defaults() -> Dict[str, Any]:
     file_payload = read_config_file_payload()
+    if desktop_mode_enabled() and isinstance(file_payload, dict):
+        file_payload, migrated_plaintext = transform_config_secrets(file_payload, decrypt=True)
+        if migrated_plaintext and PRIMARY_CONFIG_FILE.exists():
+            file_payload = normalize_config_payload(file_payload)
+            write_config_file_payload(file_payload)
     file_forms = file_payload.get("forms", file_payload) if isinstance(file_payload, dict) else {}
 
     defaults = {
@@ -1232,6 +1333,18 @@ def normalize_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "profiles": profiles,
         "forms": normalized_forms,
     }
+
+
+def write_config_file_payload(payload: Dict[str, Any]) -> None:
+    if not desktop_mode_enabled():
+        atomic_write_json(PRIMARY_CONFIG_FILE, payload, backup=True)
+        return
+
+    protected, _migrated_plaintext = transform_config_secrets(payload, decrypt=False)
+    atomic_write_json(PRIMARY_CONFIG_FILE, protected, backup=False)
+    backup_path = PRIMARY_CONFIG_FILE.with_name(f"{PRIMARY_CONFIG_FILE.name}.bak")
+    if backup_path.exists():
+        atomic_write_json(backup_path, protected, backup=False)
 
 
 def safe_filename_part(value: str, fallback: str = "image") -> str:
@@ -4018,7 +4131,10 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        atomic_write_json(PRIMARY_CONFIG_FILE, normalized, backup=True)
+        try:
+            write_config_file_payload(normalized)
+        except ConfigSecretError as exc:
+            raise HTTPException(status_code=500, detail="桌面配置加密失败，请检查当前 Windows 用户环境") from exc
         return {
             "ok": True,
             "path": str(PRIMARY_CONFIG_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),

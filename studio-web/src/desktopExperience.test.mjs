@@ -51,6 +51,7 @@ test("release desktop builds hide the shell console while backend diagnostics st
   assert.match(tauriLibSource, /creation_flags\(0x08000000\)/);
   assert.match(tauriLibSource, /fn desktop_open_backend_console\(state: State<'_, DesktopRuntimeState>\)/);
   assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_LOG/);
+  assert.match(tauriLibSource, /\.env\("IMAGE_TOOL_DESKTOP_MODE", "1"\)/);
   assert.match(tauriLibSource, /Get-Content -LiteralPath \$logPath -Tail 200 -Wait/);
   assert.match(tauriLibSource, /state\._backend_job\.assign\(&child\)/);
   assert.match(tauriLibSource, /\.env\("PYTHONUNBUFFERED", "1"\)/);

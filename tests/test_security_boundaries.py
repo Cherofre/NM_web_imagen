@@ -1619,5 +1619,35 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         run.assert_not_called()
 
 
+class DesktopConfigSecretTests(unittest.TestCase):
+    def test_desktop_dpapi_round_trip_and_plaintext_detection(self) -> None:
+        payload = {
+            "forms": {
+                "banana-form": {"api_key": "banana-secret", "api_base_url": "https://banana.example"},
+                "gpt-image-2-form": {"api_key": "gpt-secret", "base_url": "https://gpt.example/v1"},
+            },
+            "profiles": [
+                {"id": "gpt", "engine": "gpt-image-2", "form": {"api_key": "gpt-secret"}},
+            ],
+        }
+        with patch.dict(os.environ, {"IMAGE_TOOL_DESKTOP_MODE": "1"}):
+            protected, migrated = webapp.transform_config_secrets(payload, decrypt=False)
+            self.assertFalse(migrated)
+            self.assertTrue(
+                protected["forms"]["banana-form"]["api_key"].startswith(
+                    webapp.DESKTOP_CONFIG_SECRET_PREFIX
+                )
+            )
+            self.assertNotIn("banana-secret", json.dumps(protected))
+
+            restored, migrated = webapp.transform_config_secrets(protected, decrypt=True)
+            self.assertFalse(migrated)
+            self.assertEqual(payload, restored)
+
+            legacy, migrated = webapp.transform_config_secrets(payload, decrypt=True)
+            self.assertTrue(migrated)
+            self.assertEqual(payload, legacy)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -392,6 +392,7 @@ pub fn run() {
                 .args(["--host", "127.0.0.1", "--port", &port_text])
                 .current_dir(&data_root)
                 .env("IMAGE_TOOL_DATA_ROOT", &data_root)
+                .env("IMAGE_TOOL_DESKTOP_MODE", "1")
                 .env("IMAGE_TOOL_DESKTOP_TOKEN", &token)
                 .env("PYTHONUNBUFFERED", "1")
                 .env(

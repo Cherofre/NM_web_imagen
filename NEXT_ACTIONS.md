@@ -7,7 +7,9 @@
 - [x] Bind the FastAPI sidecar to a `KILL_ON_JOB_CLOSE` Job Object so forced shell termination cannot leave the backend running.
 - [x] Add a settings-only backend debug console that tails the fixed `desktop-backend.log`, keeps backend output unbuffered, and joins the desktop Job Object lifecycle.
 - [x] Pass Python 249/249, Node 169/169, size/compiler/release checks plus duplicate-launch, forced-kill and debug-console checks; user manually verified the final settings flow.
-- [ ] Next slice: choose DPAPI plus old-data migration, or installer/portable packaging and WebView2 prerequisite handling.
+- [x] Protect desktop `api_key` values with Windows DPAPI, migrate existing plaintext desktop config on first read, and replace plaintext `.bak` content with encrypted payloads.
+- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the DPAPI sidecar changes.
+- [ ] Next slice: implement installer/portable packaging and WebView2 prerequisite handling.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -20,9 +22,11 @@
 ## Handoff Notes
 - Start here: continue on `codex/desktop-v1.1.0` from the latest local commit and read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: preserve the single-instance/Job Object and settings-launched debug-console behavior while implementing DPAPI/migration or packaging.
+- Verify next: preserve the single-instance/Job Object, settings-launched debug-console behavior, and DPAPI config boundary while implementing packaging.
 - Do not claim: the branch is a production installer, a true single-file app, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
+- DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
+- Verification caveat: the full Python/Node/Rust/release matrix passed; a complex one-line PowerShell package smoke was rejected by local execution policy and was not claimed as passed.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this branch.
