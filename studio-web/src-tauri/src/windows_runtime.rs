@@ -2,7 +2,8 @@ use std::{
     ffi::c_void,
     mem::{size_of, zeroed},
     os::windows::io::AsRawHandle,
-    process::Child,
+    os::windows::process::CommandExt,
+    process::{Child, Command},
     ptr::{null, null_mut},
     thread,
     time::Duration,
@@ -18,13 +19,57 @@ use windows_sys::Win32::{
         Threading::CreateMutexW,
     },
     UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible, SetForegroundWindow,
-        ShowWindow, SW_RESTORE,
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible, MessageBoxW,
+        SetForegroundWindow, ShowWindow, MB_ICONERROR, MB_OK, SW_RESTORE,
     },
 };
 
 const INSTANCE_MUTEX_NAME: &str = "Local\\NMImageStudioDesktop-v1";
 const APP_WINDOW_TITLE: &str = "NM Image Studio";
+const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+pub fn ensure_webview2_runtime() -> Result<(), String> {
+    let registry_paths = [
+        format!(
+            r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        ),
+        format!(
+            r"HKLM\Software\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        ),
+        format!(
+            r"HKLM\Software\WOW6432Node\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        ),
+    ];
+
+    let found = registry_paths.iter().any(|path| {
+        Command::new("reg.exe")
+            .args(["query", path, "/v", "pv"])
+            .creation_flags(0x08000000)
+            .output()
+            .map(|output| output.status.success() && !output.stdout.is_empty())
+            .unwrap_or(false)
+    });
+    if found {
+        return Ok(());
+    }
+
+    let title = wide_null("NM Image Studio");
+    let message = wide_null(
+        "此电脑未检测到 Microsoft Edge WebView2 Runtime，桌面版无法启动。\n\n请先安装 WebView2 Evergreen Runtime，再重新打开 NM Image Studio。\n\n安装入口：\nhttps://developer.microsoft.com/microsoft-edge/webview2/",
+    );
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+    Err("Microsoft Edge WebView2 Runtime is required".to_string())
+}
 
 pub struct SingleInstanceGuard(HANDLE);
 

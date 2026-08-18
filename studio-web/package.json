@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/keep-asset-fallbacks.mjs",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build --no-bundle",
+    "desktop:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_portable.ps1",
     "desktop:prepare": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_desktop_backend.ps1",
     "test:size": "node scripts/verify-size-rules.mjs",
     "preview": "vite preview --host 127.0.0.1"

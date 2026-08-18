@@ -17,7 +17,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 mod windows_runtime;
 #[cfg(windows)]
-use windows_runtime::{BackendJob, SingleInstanceGuard};
+use windows_runtime::{ensure_webview2_runtime, BackendJob, SingleInstanceGuard};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -344,7 +344,17 @@ fn stop_backend(app: &tauri::AppHandle) {
     }
 }
 
+fn is_portable_install(executable_dir: &Path) -> bool {
+    executable_dir.join("portable.mode").is_file()
+}
+
 pub fn run() {
+    #[cfg(windows)]
+    if let Err(error) = ensure_webview2_runtime() {
+        eprintln!("{error}");
+        return;
+    }
+
     #[cfg(windows)]
     let _single_instance = match SingleInstanceGuard::acquire() {
         Ok(Some(guard)) => guard,
@@ -364,7 +374,18 @@ pub fn run() {
         .setup(|app| {
             let port = reserve_loopback_port().map_err(std::io::Error::other)?;
             let token = Uuid::new_v4().simple().to_string();
-            let data_root = app.path().app_local_data_dir()?;
+            let executable_dir = std::env::current_exe()?
+                .parent()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| {
+                    std::io::Error::other("desktop executable directory is unavailable")
+                })?;
+            let portable = is_portable_install(&executable_dir);
+            let data_root = if portable {
+                executable_dir.join("data")
+            } else {
+                app.path().app_local_data_dir()?
+            };
             std::fs::create_dir_all(&data_root)?;
             let outputs_root = data_root.join("outputs");
             std::fs::create_dir_all(&outputs_root)?;
@@ -376,6 +397,10 @@ pub fn run() {
 
             let backend_path = if cfg!(debug_assertions) {
                 std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("backend")
+                    .join("nm-image-studio-backend.exe")
+            } else if portable {
+                executable_dir
                     .join("backend")
                     .join("nm-image-studio-backend.exe")
             } else {
@@ -449,7 +474,11 @@ pub fn run() {
 
             app.manage(DesktopRuntimeState {
                 info: DesktopRuntimeInfo {
-                    mode: "desktop",
+                    mode: if portable {
+                        "desktop-portable"
+                    } else {
+                        "desktop-installed"
+                    },
                     api_base: format!("http://127.0.0.1:{port}"),
                     token,
                     data_root: data_root.to_string_lossy().into_owned(),

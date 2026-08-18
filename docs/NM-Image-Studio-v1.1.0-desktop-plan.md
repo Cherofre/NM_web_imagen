@@ -1,5 +1,5 @@
 <!--
-状态：Tauri 技术验证已完成，正式 v1.1.0 桌面 UX 第一阶段已启动
+状态：Tauri 技术验证已完成，正式 v1.1.0 桌面 UX、生命周期、DPAPI、便携包和 WebView2 启动检查已落地
 来源对话：019f49dc-772f-7a71-8f71-376ba5e14f7d
 最后更新：2026-08-18
 -->
@@ -34,7 +34,7 @@
 
 不应追求真正的“运行时单 EXE”。PyInstaller `onefile` 在本机验证中出现长时间自解压和父子进程滞留，且每次启动都要释放完整 Python 环境；`onedir` 启动更稳定，也更利于增量更新、杀毒白名单和故障诊断。单个 Setup EXE 只是安装入口，不等于安装后的应用只有一个文件。
 
-当前正式分支仍未完成或不能宣称：托盘、通知、更新器、DPAPI、旧数据迁移、原生另存为、固定 WebView2 Runtime、无 WebView2 机器、DPI 矩阵、剪贴板/拖放/遮罩全流程人工验收、安装器和便携包。已完成桌面设置、快捷键、窗口状态、常用路径操作、默认无控制台启动、可选启动时后端控制台、设置内按需打开的实时后端调试窗口、单实例和 Job Object 异常退出兜底。
+当前正式分支仍未完成或不能宣称：托盘、通知、更新器、旧数据迁移、原生另存为、固定 WebView2 Runtime、无 WebView2 机器上的实机验收、DPI 矩阵、剪贴板/拖放/遮罩全流程人工验收和安装器。已完成桌面设置、快捷键、窗口状态、常用路径操作、默认无控制台启动、可选启动时后端控制台、设置内按需打开的实时后端调试窗口、单实例、Job Object 异常退出兜底、DPAPI、便携 ZIP 生成/解压启动烟测和 WebView2 缺失启动提示代码。
 
 ## 按需后台调试窗口（2026-08-18）
 
@@ -55,6 +55,13 @@
 - 写入桌面配置不使用会复制旧明文的通用备份路径；如果存在 `.bak`，会用新的加密内容覆盖它。
 - DPAPI 无法解密时不会把密文当作 API Key 发往上游，而是返回配置加密/解密错误，要求用户在当前 Windows 用户下重新输入 Key。
 - DPAPI 绑定当前 Windows 用户。换用户或换电脑后，配置结构、模型和 URL 仍可迁移，但 API Key 需要重新输入。
+
+## 便携 ZIP 与 WebView2 启动检查（2026-08-18）
+
+- `scripts/package_desktop_portable.ps1` 从 release 目录收集壳 EXE 和完整 `backend\`，加入 `portable.mode`，生成 `NM-Image-Studio-v<版本>-Portable-x64.zip`，并在 ZIP 旁输出 manifest 与 SHA256 文件。
+- 便携标记存在时，桌面配置、会话、历史、日志、引用和成图全部写入 EXE 同级 `data\`；没有标记的安装版继续写入 Tauri per-user app-local data 目录。
+- `scripts/smoke_desktop_portable.ps1` 会解压 ZIP、检查壳/sidecar/标记并启动 EXE，确认便携 `data\` 在启动时创建。
+- Windows 启动 Tauri 前查询 WebView2 Evergreen Runtime 的 EdgeUpdate 注册表客户端键。缺失时显示中文错误窗口和官方安装入口后退出；当前默认包不携带固定 WebView2 Runtime。
 
 前端构建链当前还有 5 个 `npm audit` 报告（2 low、3 high），集中在 Vite/PostCSS/esbuild/Babel/nanoid 的开发构建或开发服务器路径。当前兼容范围内 `npm audit fix` 无可应用变更，且这些 Node 依赖不会进入约 66 MiB 的桌面运行目录；正式 v1.1.0 发布前仍应单独升级到已修复的 Vite 主版本并重跑完整矩阵。
 

@@ -1,11 +1,13 @@
 # Next Actions
 
 ## Now
-- [x] Build the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, and Job Object cleanup.
-- [x] Add the settings-only backend debug console, unbuffered backend output, and Job Object lifecycle cleanup; user manually verified the final settings flow.
+- [x] Build and verify the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, and the settings-only backend debug console; user manually verified the final settings flow.
 - [x] Protect desktop `api_key` values with Windows DPAPI, migrate existing plaintext desktop config on first read, and replace plaintext `.bak` content with encrypted payloads.
-- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the debug-console and DPAPI changes.
-- [ ] Next slice: implement installer/portable packaging and WebView2 prerequisite handling.
+- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the debug-console, DPAPI, portable routing and WebView2 changes.
+- [x] Add a release portable ZIP script with the complete EXE + `backend\` onedir runtime, `portable.mode`, README, manifest and SHA256 sidecars; portable data stays under package-local `data\` while installed mode keeps `%LOCALAPPDATA%`.
+- [x] Add a pre-window WebView2 Evergreen registry check with a clear Chinese startup error and official offline install URL.
+- [x] Rebuild the release EXE, generate `NM-Image-Studio-v1.1.0-alpha.1-Portable-x64.zip`, and pass extracted-package startup smoke.
+- [ ] Next slice: pre-research the installer configuration and decide whether to add a signed/offline WebView2 bootstrap package.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -18,11 +20,11 @@
 ## Handoff Notes
 - Start here: continue on `codex/desktop-v1.1.0` from the latest local commit and read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: preserve the single-instance/Job Object, settings-launched debug-console behavior, and DPAPI config boundary while implementing packaging.
+- Verify next: preserve the single-instance/Job Object, settings-launched debug-console behavior, and DPAPI config boundary while implementing installer configuration.
 - Do not claim: the branch is a production installer, a true single-file app, offline without WebView2, or fully accepted for drag/drop/clipboard/mask/DPI behavior.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
-- Verification caveat: the full Python/Node/Rust/release matrix passed; a complex one-line PowerShell package smoke was rejected by local execution policy and was not claimed as passed.
+- Verification caveat: portable ZIP creation and extracted-package startup smoke passed with the dedicated scripts; a missing-WebView2 machine has not been simulated, so only the registry-check code path is compiled and reviewed.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this branch.

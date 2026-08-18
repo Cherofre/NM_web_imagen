@@ -1,16 +1,16 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-08-18 00:30 +08:00
-- Phase: desktop UX, lifecycle hardening, opt-in backend debug console, and desktop DPAPI config protection implemented
+- Last Updated: 2026-08-18 01:20 +08:00
+- Phase: desktop UX, lifecycle hardening, debug console, DPAPI protection, portable packaging, and WebView2 prerequisite handling implemented
 - Branch: `codex/desktop-v1.1.0`, based on the verified Tauri spike commit `05d2c2b`
 - Goal: make the Windows desktop shell feel native and practical while preserving web-mode compatibility and the existing Studio workflow
-- Current Focus: preserve the verified desktop security/lifecycle slices and move to installer/portable packaging plus WebView2 prerequisite handling
-- Implemented: desktop settings/shortcuts/path actions/window state, default no-console launch, opt-in startup backend console, settings-launched live backend debug console, Windows DPAPI protection with plaintext-config migration, `gpt-5.6` migration, Windows named-mutex single instance with existing-window activation, and a `KILL_ON_JOB_CLOSE` Job Object around the FastAPI sidecar plus debug console
+- Current Focus: preserve the verified desktop security/lifecycle slices and pre-research installer configuration; normal distribution now has a validated portable ZIP path
+- Implemented: desktop settings/shortcuts/path actions/window state, default no-console launch, opt-in startup backend console, settings-launched live backend debug console, Windows DPAPI protection with plaintext-config migration, `gpt-5.6` migration, Windows named-mutex single instance with existing-window activation, a `KILL_ON_JOB_CLOSE` Job Object around the FastAPI sidecar plus debug console, portable-mode data routing, portable ZIP/manifest/SHA256 packaging, and a pre-window WebView2 Evergreen registry check with a clear Chinese error dialog
 - Runtime Evidence: a second EXE launch exited while the original window remained, with exactly one shell and one backend; forcibly terminating the shell also terminated the backend; the user manually verified the settings path `桌面设置 → 存储与日志 → 打开调试窗口`; the debug console follows `desktop-backend.log` without restarting the backend, and its sidecar uses unbuffered output. Earlier tokenized API and unauthorized-401 checks remain valid
-- Build Evidence: Tauri shell 8.14 MiB; backend directory 58 MiB / 708 files; combined runtime payload 66.14 MiB before WebView2
-- Latest Verification: Python 251/251, Node 169/169, Studio size rules, Python compilation, `cargo fmt --check`, `cargo check --offline`, Tauri release build with the DPAPI sidecar, DPAPI round-trip/migration integration tests, duplicate-launch smoke, forced-shell-termination smoke and prior debug-console smoke passed; user manual debug-console verification completed on 2026-08-18
-- Residual Risks: package-level automated sidecar write/read smoke was blocked by the local PowerShell policy for a complex one-line launcher; no tray, updater, installer/portable package, fixed/offline WebView2 or full DPI/drag/clipboard/mask manual matrix yet; single-instance window lookup currently relies on the unique `NM Image Studio` title; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
+- Build Evidence: Tauri shell 8.14 MiB; backend directory 58 MiB / 708 files; combined runtime payload 66.14 MiB before WebView2; portable ZIP `NM-Image-Studio-v1.1.0-alpha.1-Portable-x64.zip` generated under `_release\desktop\`
+- Latest Verification: Python 251/251, Node 169/169, Studio size rules, Python compilation, `cargo fmt --check`, `cargo check --offline`, Tauri release build with portable routing and WebView2 check, DPAPI round-trip/migration integration tests, duplicate-launch smoke, forced-shell-termination smoke, prior debug-console smoke, portable ZIP manifest generation, and extracted-package startup smoke passed; user manual debug-console verification completed on 2026-08-18
+- Residual Risks: missing-WebView2 behavior has not been tested on a machine without the runtime; no tray, updater, installer, fixed/offline WebView2 package or full DPI/drag/clipboard/mask manual matrix yet; single-instance window lookup currently relies on the unique `NM Image Studio` title; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
 - Boundary: local commit only; no push, merge, tag, GitHub Release or G: synchronization is authorized; pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched
 
 ## Previous Published Snapshot
