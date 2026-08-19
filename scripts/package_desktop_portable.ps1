@@ -157,6 +157,8 @@ try {
 
   Compress-Archive -Path $StageApp -DestinationPath $OutputPath -Force
   $ZipHash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $Manifest["size"] = (Get-Item -LiteralPath $OutputPath).Length
+  $Manifest["sha256"] = $ZipHash
   $Manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
   Set-Content -LiteralPath $ShaPath -Value "$ZipHash  $([System.IO.Path]::GetFileName($OutputPath))" -Encoding ASCII
 

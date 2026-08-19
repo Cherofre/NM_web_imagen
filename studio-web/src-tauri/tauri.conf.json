@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "NM Image Studio",
-  "version": "1.1.0-alpha.1",
+  "version": "1.1.0",
   "identifier": "com.nmimagestudio.desktop",
   "build": {
     "beforeDevCommand": "npm run desktop:prepare && npm run dev",

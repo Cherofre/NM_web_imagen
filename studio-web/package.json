@@ -9,7 +9,11 @@
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build --no-bundle",
     "desktop:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_portable.ps1",
+    "desktop:installer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_installer.ps1",
+    "desktop:installer:offline": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_installer.ps1 -OfflineWebView2",
+    "desktop:verify-packages": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/verify_v1_1_0_packages.ps1",
     "desktop:prepare": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_desktop_backend.ps1",
+    "web:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_web_release.ps1",
     "test:size": "node scripts/verify-size-rules.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },

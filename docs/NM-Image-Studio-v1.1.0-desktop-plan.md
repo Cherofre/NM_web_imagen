@@ -1,5 +1,5 @@
 <!--
-状态：Tauri 技术验证已完成，正式 v1.1.0 桌面 UX、生命周期、DPAPI、便携包和 WebView2 启动检查已落地
+状态：Tauri 技术验证已完成，正式 v1.1.0 桌面 UX、生命周期、DPAPI、便携包、NSIS 安装器和 WebView2 方案已落地
 来源对话：019f49dc-772f-7a71-8f71-376ba5e14f7d
 最后更新：2026-08-18
 -->
@@ -291,10 +291,13 @@ FastAPI 新增桌面专用接口：
 
 发布产物统一使用根目录 `VERSION` 作为版本源：
 
-- `NM-Image-Studio-v1.1.0-Setup-x64.exe`
+- `NM-Image-Studio-v1.1.0-Setup-x64.exe`（普通联网安装器）
+- `NM-Image-Studio-v1.1.0-Offline-WebView2-Setup-x64.exe`（内嵌 WebView2 安装器）
 - `NM-Image-Studio-v1.1.0-Portable-x64.zip`
 - `NM_web_imagen-v1.1.0-Web-x64.zip`
 - 更新清单、签名文件和 SHA256 清单
+
+四种产物已通过版本/哈希/内容隔离验证。网页包继续使用现有 `start_web.ps1` 和默认 `127.0.0.1:7861`；桌面安装版使用 Tauri 随机 loopback sidecar 端口和 `%LOCALAPPDATA%`，桌面便携版使用 EXE 同级 `data\\`。两端不共享运行目录、配置、日志或端口。
 
 当前没有 Authenticode 证书：
 
