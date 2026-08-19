@@ -1,8 +1,7 @@
 # Next Actions
 
 ## Now
-- [x] Build and verify the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, and the settings-only backend debug console; user manually verified the final settings flow.
-- [x] Protect desktop `api_key` values with Windows DPAPI, migrate existing plaintext desktop config on first read, and replace plaintext `.bak` content with encrypted payloads.
+- [x] Build and verify the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, settings-only backend debug console, and Windows DPAPI config protection/migration; user manually verified the final settings flow.
 - [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the debug-console, DPAPI, portable routing and WebView2 changes.
 - [x] Add a release portable ZIP script with the complete EXE + `backend\` onedir runtime, `portable.mode`, README, manifest and SHA256 sidecars; portable data stays under package-local `data\` while installed mode keeps `%LOCALAPPDATA%`.
 - [x] Add a pre-window WebView2 Evergreen registry check with a clear Chinese startup error and official offline install URL; configure ordinary and offline NSIS WebView2 modes.
