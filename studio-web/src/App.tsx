@@ -80,10 +80,28 @@ import {
   isDesktopRuntime,
   isRuntimeOutputUrl,
   openBackendDebugConsole,
+  openDesktopDownloadsDirectory,
   openDesktopPath,
   resetDesktopWindow,
   resolveRuntimeUrl,
 } from "./desktopRuntime";
+import {
+  checkDesktopUpdate,
+  downloadDesktopUpdate,
+  formatDesktopDownloadSize,
+  isDesktopUpdateSnoozed,
+  openDesktopReleasePage,
+  readDesktopUpdateAutoCheck,
+  readDesktopUpdateLastCheck,
+  saveDesktopUpdateAutoCheck,
+  saveDesktopUpdateLastCheck,
+  saveDesktopUpdateSnooze,
+  shouldAutoCheckDesktopUpdate,
+  type DesktopDownloadEvent,
+  type DesktopUpdateInfo,
+  type DesktopUpdateStatus,
+  installDesktopUpdate,
+} from "./desktopUpdater";
 import {
   activeProfileForEngine,
   buildConfigPayload,
@@ -1310,6 +1328,14 @@ function App() {
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
   const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcutBindings>(() => loadDesktopShortcutBindings());
   const [capturingShortcut, setCapturingShortcut] = useState<DesktopShortcutAction | null>(null);
+  const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>("idle");
+  const [desktopUpdateInfo, setDesktopUpdateInfo] = useState<DesktopUpdateInfo | null>(null);
+  const [desktopUpdateProgress, setDesktopUpdateProgress] = useState({ downloaded: 0, contentLength: null as number | null });
+  const [desktopUpdateDownloadedPath, setDesktopUpdateDownloadedPath] = useState("");
+  const [desktopUpdateError, setDesktopUpdateError] = useState("");
+  const [desktopUpdateSnoozedVersion, setDesktopUpdateSnoozedVersion] = useState("");
+  const [desktopAutoCheck, setDesktopAutoCheck] = useState(() => readDesktopUpdateAutoCheck(typeof localStorage === "undefined" ? null : localStorage));
+  const [desktopLastCheckedAt, setDesktopLastCheckedAt] = useState(() => readDesktopUpdateLastCheck(typeof localStorage === "undefined" ? null : localStorage));
   const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
   const [activeProfileIds, setActiveProfileIds] = useState<ActiveProfileIds>({
     "gpt-image-2": "gpt-image-2-default",
@@ -1734,6 +1760,92 @@ function App() {
   useEffect(() => {
     if (desktopSettingsSection !== "shortcuts") setCapturingShortcut(null);
   }, [desktopSettingsSection]);
+
+  useEffect(() => {
+    if (!desktopMode || !desktopAutoCheck || typeof window === "undefined") return undefined;
+    if (!shouldAutoCheckDesktopUpdate(window.localStorage)) return undefined;
+    const timer = window.setTimeout(() => {
+      void handleDesktopCheckUpdate(true);
+    }, 7000);
+    return () => window.clearTimeout(timer);
+  }, [desktopMode, desktopAutoCheck]);
+
+  function updateErrorText(error: unknown) {
+    const value = error instanceof Error ? error.message : String(error || "Unknown update error");
+    return value.replace(/^Error:\s*/i, "").slice(0, 260);
+  }
+
+  async function handleDesktopCheckUpdate(silent = false) {
+    if (!desktopMode) return;
+    setDesktopUpdateStatus("checking");
+    setDesktopUpdateError("");
+    try {
+      const info = await checkDesktopUpdate();
+      const now = Date.now();
+      setDesktopUpdateInfo(info);
+      setDesktopLastCheckedAt(now);
+      saveDesktopUpdateLastCheck(typeof localStorage === "undefined" ? null : localStorage, now);
+      setDesktopUpdateProgress({ downloaded: 0, contentLength: null });
+      setDesktopUpdateDownloadedPath("");
+      setDesktopUpdateSnoozedVersion(isDesktopUpdateSnoozed(typeof localStorage === "undefined" ? null : localStorage, info.version) ? info.version || "" : "");
+      setDesktopUpdateStatus(info.available ? "available" : "upToDate");
+    } catch (error) {
+      setDesktopUpdateStatus("failed");
+      setDesktopUpdateError(updateErrorText(error));
+      if (!silent) setNotice(t("desktop.updateCheckFailed"));
+    }
+  }
+
+  async function handleDesktopDownloadUpdate() {
+    if (!desktopUpdateInfo?.available) return;
+    setDesktopUpdateStatus("downloading");
+    setDesktopUpdateError("");
+    setDesktopUpdateProgress({ downloaded: 0, contentLength: null });
+    try {
+      const result = await downloadDesktopUpdate((event: DesktopDownloadEvent) => {
+        if (event.event === "Started") {
+          setDesktopUpdateProgress((current) => ({ ...current, contentLength: event.data.contentLength }));
+        } else if (event.event === "Progress") {
+          setDesktopUpdateProgress({ downloaded: event.data.downloaded, contentLength: event.data.contentLength });
+        }
+      });
+      if (result.mode === "desktop-portable") {
+        setDesktopUpdateDownloadedPath(result.downloadedPath || "");
+        setDesktopUpdateStatus("portableDownloaded");
+      } else {
+        setDesktopUpdateStatus("readyToInstall");
+      }
+    } catch (error) {
+      setDesktopUpdateStatus("failed");
+      setDesktopUpdateError(updateErrorText(error));
+    }
+  }
+
+  async function handleDesktopInstallUpdate() {
+    if (activeQueueCount > 0) {
+      setDesktopUpdateStatus("readyToInstall");
+      setDesktopUpdateError(t("desktop.updateInstallBlocked", { count: activeQueueCount }));
+      return;
+    }
+    setDesktopUpdateStatus("installing");
+    setDesktopUpdateError("");
+    try {
+      await installDesktopUpdate(activeQueueCount);
+    } catch (error) {
+      setDesktopUpdateStatus("failed");
+      setDesktopUpdateError(updateErrorText(error));
+    }
+  }
+
+  function handleDesktopAutoCheckChange(value: boolean) {
+    setDesktopAutoCheck(value);
+    saveDesktopUpdateAutoCheck(typeof localStorage === "undefined" ? null : localStorage, value);
+  }
+
+  function snoozeDesktopUpdate() {
+    saveDesktopUpdateSnooze(typeof localStorage === "undefined" ? null : localStorage, desktopUpdateInfo?.version || null);
+    setDesktopUpdateSnoozedVersion(desktopUpdateInfo?.version || "");
+  }
 
   useEffect(() => {
     if (composerPopover === "size") return;
@@ -4464,6 +4576,18 @@ function App() {
     });
   }
 
+  const desktopDownloadPercent = desktopUpdateProgress.contentLength && desktopUpdateProgress.contentLength > 0
+    ? Math.min(100, Math.round((desktopUpdateProgress.downloaded / desktopUpdateProgress.contentLength) * 100))
+    : null;
+  const desktopUpdatePublishedAt = desktopUpdateInfo?.publishedAt
+    ? formatTime(desktopUpdateInfo.publishedAt, language)
+    : "";
+  const desktopLastCheckedLabel = desktopLastCheckedAt
+    ? formatTime(new Date(desktopLastCheckedAt).toISOString(), language)
+    : "";
+  const desktopUpdateSnoozed = Boolean(desktopUpdateInfo?.version && desktopUpdateSnoozedVersion === desktopUpdateInfo.version);
+  const showDesktopUpdateNotice = desktopMode && desktopUpdateStatus === "available" && Boolean(desktopUpdateInfo?.version) && !desktopUpdateSnoozed;
+
   return (
     <main
       className={`studio-shell ${historyCollapsed ? "history-is-collapsed" : ""} ${dragActive ? "is-dragging" : ""}`}
@@ -4646,7 +4770,7 @@ function App() {
         )}
       </aside>
 
-      <section className="workspace" aria-hidden={desktopSettingsOpen || undefined}>
+      <section className={`workspace ${showDesktopUpdateNotice ? "has-update-notice" : ""}`.trim()} aria-hidden={desktopSettingsOpen || undefined}>
         <header className="workspace-header">
           <div className="workspace-title">
             <div className="workspace-kicker">
@@ -4752,6 +4876,16 @@ function App() {
             </div>
           </div>
         </header>
+
+        {showDesktopUpdateNotice && desktopUpdateInfo?.version && (
+          <div className="desktop-update-notice" role="status">
+            <span>{t("desktop.updateNotice", { version: desktopUpdateInfo.version })}</span>
+            <div>
+              <button type="button" onClick={() => openDesktopSettings("about")}>{t("desktop.updateView")}</button>
+              <button type="button" onClick={snoozeDesktopUpdate}>{t("desktop.updateLater")}</button>
+            </div>
+          </div>
+        )}
 
         <section className="conversation-canvas" ref={conversationCanvasRef}>
           {queueJobs.length > 0 && (
@@ -5608,13 +5742,75 @@ function App() {
                     <Info size={17} />
                     <span>{t("desktop.aboutPrivacy")}</span>
                   </div>
-                  <div className="desktop-about-update">
-                    <div>
-                      <strong>{t("desktop.updatePlanTitle")}</strong>
-                      <span>{t("desktop.updatePlanHint")}</span>
+                  <section className={`desktop-about-update ${desktopUpdateStatus}`}>
+                    <div className="desktop-update-heading">
+                      <div>
+                        <strong>{t("desktop.updateTitle")}</strong>
+                        <span>{t("desktop.updateHint")}</span>
+                      </div>
+                      <label className="desktop-update-toggle">
+                        <input type="checkbox" checked={desktopAutoCheck} onChange={(event) => handleDesktopAutoCheckChange(event.target.checked)} />
+                        <span>{t("desktop.updateAutoCheck")}</span>
+                      </label>
                     </div>
-                    <span className="desktop-planned-badge">{t("desktop.updatePlanned")}</span>
-                  </div>
+                    <div className="desktop-update-status" role="status" aria-live="polite">
+                      {desktopUpdateStatus === "idle" && <span>{t("desktop.updateNotChecked")}</span>}
+                      {desktopUpdateStatus === "checking" && <span>{t("desktop.updateChecking")}</span>}
+                      {desktopUpdateStatus === "upToDate" && <span>{t("desktop.updateUpToDate", { time: desktopLastCheckedLabel || t("desktop.updateJustNow") })}</span>}
+                      {desktopUpdateStatus === "available" && desktopUpdateInfo?.version && (
+                        <div className="desktop-update-message">
+                          <strong>{t("desktop.updateAvailable", { version: desktopUpdateInfo.version })}</strong>
+                          {desktopUpdatePublishedAt && <span>{t("desktop.updatePublished", { date: desktopUpdatePublishedAt })}</span>}
+                          {desktopUpdateInfo.notes && <p>{desktopUpdateInfo.notes}</p>}
+                        </div>
+                      )}
+                      {desktopUpdateStatus === "downloading" && (
+                        <div className="desktop-update-message">
+                          <strong>{t("desktop.updateDownloading")}</strong>
+                          <span>{desktopDownloadPercent === null ? formatDesktopDownloadSize(desktopUpdateProgress.downloaded) : `${desktopDownloadPercent}%`} {desktopUpdateProgress.contentLength ? `· ${formatDesktopDownloadSize(desktopUpdateProgress.contentLength)}` : ""}</span>
+                        </div>
+                      )}
+                      {desktopUpdateStatus === "readyToInstall" && (
+                        <div className="desktop-update-message">
+                          <strong>{t("desktop.updateReady")}</strong>
+                          <span>{activeQueueCount > 0 ? t("desktop.updateInstallBlocked", { count: activeQueueCount }) : t("desktop.updateReadyHint")}</span>
+                        </div>
+                      )}
+                      {desktopUpdateStatus === "portableDownloaded" && (
+                        <div className="desktop-update-message">
+                          <strong>{t("desktop.updatePortableDownloaded")}</strong>
+                          <span>{desktopUpdateDownloadedPath || t("desktop.updatePortableHint")}</span>
+                        </div>
+                      )}
+                      {desktopUpdateStatus === "installing" && <span>{t("desktop.updateInstalling")}</span>}
+                      {desktopUpdateStatus === "failed" && (
+                        <div className="desktop-update-message is-error">
+                          <strong>{t("desktop.updateFailed")}</strong>
+                          <span>{desktopUpdateError || t("desktop.updateRetryHint")}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="desktop-update-actions">
+                      {(desktopUpdateStatus === "idle" || desktopUpdateStatus === "upToDate" || desktopUpdateStatus === "failed") && (
+                        <button type="button" onClick={() => void handleDesktopCheckUpdate()}>{t("desktop.updateCheck")}</button>
+                      )}
+                      {desktopUpdateStatus === "available" && (
+                        <>
+                          <button type="button" onClick={() => void handleDesktopDownloadUpdate()}>{t("desktop.updateDownload")}</button>
+                          <button type="button" onClick={snoozeDesktopUpdate}>{t("desktop.updateLater")}</button>
+                        </>
+                      )}
+                      {desktopUpdateStatus === "readyToInstall" && (
+                        <button type="button" onClick={() => void handleDesktopInstallUpdate()} disabled={activeQueueCount > 0}>{t("desktop.updateInstall")}</button>
+                      )}
+                      {desktopUpdateStatus === "portableDownloaded" && (
+                        <button type="button" onClick={() => void openDesktopDownloadsDirectory()}>{t("desktop.updateOpenDownloads")}</button>
+                      )}
+                      {desktopUpdateStatus !== "checking" && desktopUpdateStatus !== "downloading" && desktopUpdateStatus !== "installing" && (
+                        <button type="button" onClick={() => void openDesktopReleasePage()}>{t("desktop.updateReleasePage")}</button>
+                      )}
+                    </div>
+                  </section>
                 </div>
               )}
             </div>

@@ -11,6 +11,8 @@
     "desktop:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_portable.ps1",
     "desktop:installer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_installer.ps1",
     "desktop:installer:offline": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_installer.ps1 -OfflineWebView2",
+    "desktop:updater": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_desktop_updater.ps1",
+    "desktop:updater:test": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/test_desktop_update_feed.ps1",
     "desktop:verify-packages": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/verify_v1_1_0_packages.ps1",
     "desktop:prepare": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_desktop_backend.ps1",
     "web:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/package_web_release.ps1",

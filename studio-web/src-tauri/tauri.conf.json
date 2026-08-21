@@ -39,5 +39,16 @@
     "resources": [
       "backend"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4OTZDNTJDMEYwRTkyQzIKUldUQ2tnNFBMTVdXcUZiTlpCemJKVkFOa1NQSzZIZC9IazRUZTBFVUlTdm1ZR09Nb3lFd0d4elgK",
+      "endpoints": [
+        "https://github.com/Cherofre/NM_web_imagen/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

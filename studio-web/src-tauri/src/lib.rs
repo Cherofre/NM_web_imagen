@@ -18,6 +18,7 @@ use std::os::windows::process::CommandExt;
 mod windows_runtime;
 #[cfg(windows)]
 use windows_runtime::{ensure_webview2_runtime, BackendJob, SingleInstanceGuard};
+mod updater;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -209,6 +210,24 @@ fn desktop_open_backend_log(state: State<'_, DesktopRuntimeState>) -> Result<(),
     open_in_explorer(Path::new(&state.info.log_path), true)
 }
 
+#[tauri::command]
+fn desktop_open_downloads_directory(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let path = app
+            .path()
+            .download_dir()
+            .map_err(|error| format!("downloads directory is unavailable: {error}"))?;
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("failed to create downloads directory: {error}"))?;
+        open_in_explorer(&path, false)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("opening the downloads directory is only supported on Windows".to_string())
+    }
+}
+
 #[cfg(windows)]
 fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
     const SCRIPT: &str = r#"
@@ -363,13 +382,20 @@ pub fn run() {
     };
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::DesktopUpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
             desktop_open_outputs_directory,
             desktop_open_data_directory,
             desktop_open_backend_log,
+            desktop_open_downloads_directory,
             desktop_open_backend_console,
-            desktop_reset_window_state
+            desktop_reset_window_state,
+            updater::desktop_check_update,
+            updater::desktop_download_update,
+            updater::desktop_install_update,
+            updater::desktop_open_release_page
         ])
         .setup(|app| {
             let port = reserve_loopback_port().map_err(std::io::Error::other)?;

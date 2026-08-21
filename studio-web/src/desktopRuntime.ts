@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type RuntimeMode = "web" | "desktop";
+export type RuntimeMode = "web" | "desktop-installed" | "desktop-portable";
 
 export type DesktopRuntimeInfo = {
   mode: RuntimeMode;
@@ -57,6 +57,12 @@ export async function openDesktopPath(kind: DesktopPathKind) {
     log: "desktop_open_backend_log",
   }[kind];
   await invoke(command);
+  return true;
+}
+
+export async function openDesktopDownloadsDirectory() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_open_downloads_directory");
   return true;
 }
 

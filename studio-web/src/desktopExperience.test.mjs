@@ -6,6 +6,8 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const runtimeSource = readFileSync(new URL("./desktopRuntime.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const i18nSource = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
+const updaterSource = readFileSync(new URL("./desktopUpdater.ts", import.meta.url), "utf8");
+const tauriUpdaterSource = readFileSync(new URL("../src-tauri/src/updater.rs", import.meta.url), "utf8");
 const tauriMainSource = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
 const tauriLibSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const windowsRuntimeSource = readFileSync(new URL("../src-tauri/src/windows_runtime.rs", import.meta.url), "utf8");
@@ -59,7 +61,21 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(i18nSource, /"desktop\.openDebugConsole": "Open debug console"/);
   assert.match(i18nSource, /"desktop\.shortcutsCustomHint":/);
   assert.match(i18nSource, /"desktop\.shortcutsReset":/);
-  assert.match(i18nSource, /"desktop\.updatePlanTitle":/);
+  assert.match(i18nSource, /"desktop\.updateTitle":/);
+  assert.match(appSource, /desktop\.updateInstallBlocked/);
+});
+
+test("desktop updater keeps the installed, portable and web boundaries explicit", () => {
+  assert.match(runtimeSource, /RuntimeMode = "web" \| "desktop-installed" \| "desktop-portable"/);
+  assert.match(updaterSource, /desktop_check_update/);
+  assert.match(updaterSource, /desktop_download_update/);
+  assert.match(updaterSource, /desktop_install_update/);
+  assert.match(updaterSource, /DESKTOP_UPDATE_CHECK_INTERVAL_MS/);
+  assert.match(tauriUpdaterSource, /PORTABLE_ENDPOINT/);
+  assert.match(tauriUpdaterSource, /pending: Mutex<Option<PendingDesktopUpdate>>/);
+  assert.match(tauriUpdaterSource, /portable builds must replace the application folder/);
+  assert.match(tauriLibSource, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
+  assert.match(tauriConfigSource, /"plugins":\s*\{[\s\S]*"updater":/);
 });
 
 test("release desktop builds hide the shell console while backend diagnostics stay opt-in", () => {

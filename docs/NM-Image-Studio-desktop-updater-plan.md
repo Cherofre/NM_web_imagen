@@ -1,6 +1,6 @@
 # NM Image Studio 桌面端检查更新实施方案
 
-> 状态：方案已收敛，尚未实现  
+> 状态：第一版本地实现已完成，尚未发布 Release
 > 适用范围：Windows x64 桌面安装版与桌面便携版  
 > 不影响：现有网页端、网页 ZIP、`127.0.0.1:7861` 启动方式和网页端数据目录
 
@@ -11,6 +11,8 @@
 - **桌面安装版**使用 Tauri 2 官方 updater 插件，下载 Tauri 生成的 NSIS 更新包，强制校验 Tauri 签名，用户确认后安装并重启。
 - **桌面便携版**检查同一版本，但下载完整便携 ZIP。第一阶段不在程序运行时覆盖自身，只打开下载位置并指导用户保留 `data\` 后替换程序文件。
 - **网页端**不接入桌面更新器。网页 ZIP 继续独立发布，桌面更新不会扫描、停止、覆盖或迁移网页端目录。
+
+当前实现已落在 `studio-web/src-tauri/src/updater.rs`、`studio-web/src/desktopUpdater.ts` 及发布脚本中。安装版在当前 Tauri 2.9 NSIS 配置下实际产物为带 `.sig` 的 `*-setup.exe`；不要按旧预期寻找 `*.nsis.zip`。
 
 这比给安装版和便携版强行共用一套自替换逻辑更适合当前项目。安装版可以复用 Tauri 已有的签名、下载和 NSIS 安装流程；便携版则避免 Windows 文件占用、sidecar 进程和 `data\` 误覆盖风险。
 
@@ -142,10 +144,10 @@ https://github.com/Cherofre/NM_web_imagen/releases/latest/download/latest.json
 
 不要在第一版同时实现 GitHub、UNC、G 盘和自定义 URL 的自动回退。Tauri 正式环境会强制 HTTPS，而 UNC 还需要自行完成读取、签名校验、超时、凭据和错误回退，测试成本远高于收益。内部源可在稳定渠道跑通后作为第二阶段，以相同清单格式增加，不改变界面状态机。
 
-每次桌面 Release 建议包含：
+每次桌面 Release 应包含：
 
 - 普通 NSIS Setup。
-- NSIS updater 签名文件。
+- 与 Setup 对应的 updater 签名文件（当前 Tauri 2.9 产物为 `*-setup.exe.sig`）。
 - `latest.json`，供安装版 Tauri updater 使用。
 - 便携 ZIP。
 - 便携 ZIP 签名和 SHA256。
@@ -153,7 +155,7 @@ https://github.com/Cherofre/NM_web_imagen/releases/latest/download/latest.json
 - 离线 WebView2 Setup，供手动下载。
 - 网页 ZIP，继续独立使用，不进入桌面更新动作。
 
-`latest.json` 使用 Tauri 官方静态清单结构。`portable-latest.json` 建议包含：
+`latest.json` 使用 Tauri 官方静态清单结构。当前生成器同时写入 `releasePage`、`package`、`sha256` 和 `size` 扩展字段；`portable-latest.json` 使用相同的平台签名结构，供便携版复用 Tauri 的签名下载校验。
 
 ```json
 {
@@ -169,7 +171,7 @@ https://github.com/Cherofre/NM_web_imagen/releases/latest/download/latest.json
 }
 ```
 
-增加 `scripts/generate_desktop_update_feed.ps1`，从根目录 `VERSION`、已生成包、签名和一份发布说明源生成两个 JSON。禁止手工分别维护两个版本号。`scripts/verify_v1_1_0_packages.ps1` 或后续版本化验证脚本应检查：
+`scripts/generate_desktop_update_feed.ps1` 已从已生成包、签名和发布说明生成两个 JSON，禁止手工分别维护两个版本号。脚本使用无 BOM UTF-8 写入；`scripts/test_desktop_update_feed.ps1` 会用真实 Tauri 私钥签名临时包并检查版本、URL、签名、SHA256 和无 BOM。`scripts/verify_v1_1_0_packages.ps1` 或后续版本化验证脚本应继续检查：
 
 - 两个清单版本一致。
 - URL 文件名与实际资产一致。
@@ -207,7 +209,7 @@ Tauri updater 本身不等于完整自动回滚系统。第一版采用“安装
 
 ## 实施顺序
 
-### 阶段 A：发布基础
+### 阶段 A：发布基础（已完成）
 
 1. 生成 updater 密钥并安全备份。
 2. 加入 Tauri updater 插件和签名配置。
@@ -215,21 +217,21 @@ Tauri updater 本身不等于完整自动回滚系统。第一版采用“安装
 4. 让便携脚本产出签名和 `portable-latest.json`。
 5. 添加清单、版本、签名和包内容验证。
 
-### 阶段 B：检查与界面
+### 阶段 B：检查与界面（已完成）
 
 1. 实现 Rust 检查命令和运行模式分流。
 2. 实现关于页状态机、手动检查、自动检查开关和 24 小时节流。
 3. 实现顶部轻提示、稍后提醒和中英文文案。
-4. 使用本地假清单完成无更新、有更新、超时、无效清单和签名失败测试。
+4. 使用真实签名临时包完成 feed 生成烟测；真实 GitHub 有更新、无效签名和旧版升级仍需在未发布的测试 Release 或本地 HTTPS feed 上做手动验收。
 
-### 阶段 C：安装版更新
+### 阶段 C：安装版更新（代码已完成，真实升级待验收）
 
 1. 实现下载进度和待安装状态。
 2. 加入活跃任务阻止安装。
 3. 安装前刷新会话、配置和窗口状态。
 4. 从旧版安装包实测更新到新版，并检查 sidecar、数据目录和单实例行为。
 
-### 阶段 D：便携版更新
+### 阶段 D：便携版更新（代码已完成，真实升级待验收）
 
 1. 实现便携清单检查和 ZIP 下载。
 2. 校验签名和 SHA256。

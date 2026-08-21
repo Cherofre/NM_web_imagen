@@ -1,13 +1,11 @@
 # Next Actions
 
 ## Now
-- [x] Surface a compact gear-only desktop settings action beside the language switcher, keep the three-dot menu as a compatibility path, and retain the `Ctrl+,` shortcut.
-- [x] Present desktop settings as a centered modal dialog with a backdrop, outside-click dismissal, `Esc` dismissal, close button, and focus restoration; use a near-full-screen layout on narrow windows.
-- [x] Make desktop shortcuts editable, clearable, persisted locally, conflict-checked, and resettable without changing web-mode keyboard behavior.
-- [x] Reuse the existing web black-and-white triangle mark for the Tauri SVG/PNG/ICO/ICNS icon set.
-- [x] Pass Node 170/170, Studio size rules, TypeScript/Vite build, Rust checks, and a fresh `npm run desktop:build` after replacing the icon and settings treatment.
-- [x] Design the signed desktop updater flow in `docs/NM-Image-Studio-desktop-updater-plan.md`, separating installed NSIS updates, portable ZIP upgrades, and the unaffected web package.
-- [ ] Next slice, after user approval: implement Stage A release/signing infrastructure, then Stage B check-only UI before enabling installation; no publish, merge, tag, or G: synchronization yet.
+- [x] Complete the signed updater implementation for installed and portable desktop modes, including the About-page state machine, task blocking, download progress, and web/desktop boundary.
+- [x] Generate and locally verify v1.1.0 Setup, signed updater EXE, portable ZIP, signatures, no-BOM feeds, manifest and SHA256 sidecars.
+- [x] Pass the local code/build/runtime matrix: 171 Node tests, size rules, Python compile, Vite build, Rust check, release EXE build, startup health evidence and single-instance smoke.
+- [ ] Manually test the running release EXE at `桌面设置 → 关于 → 检查更新`; until a Release feed exists, confirm the failure state is clear and the workbench remains usable.
+- [ ] Before any publication, use a real signed test Release or local HTTPS feed for update-available, invalid-signature, install-from-old-version and portable download/replacement checks; publication, merge, tag and G: synchronization still require explicit authorization.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -18,13 +16,13 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `codex/desktop-v1.1.0`; review `docs/NM-Image-Studio-desktop-updater-plan.md`. If implementation is approved, begin with updater keys, `createUpdaterArtifacts`, signed feed generation, and package verification before adding the About-page check button.
+- Start here: continue on `codex/desktop-v1.1.0`; the updater implementation is in `studio-web/src-tauri/src/updater.rs`, `studio-web/src/desktopUpdater.ts`, `scripts/package_desktop_updater.ps1`, and `scripts/generate_desktop_update_feed.ps1`.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: obtain user acceptance of the updater scope; then use a local signed test feed to prove no-update, update-available, invalid-signature and task-blocked states before any real GitHub Release.
-- Do not claim: Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
+- Verify next: manually open the running release EXE's About page and observe the expected no-feed failure state; then use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states before any real GitHub Release.
+- Do not claim: a published updater feed, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
-- Updater boundary: About now records the planned surface and the full implementation design lives in `docs/NM-Image-Studio-desktop-updater-plan.md`, but no update network call, signing key, signed package, package replacement, rollback helper or silent updater is implemented yet.
+- Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
 - Verification caveat: portable ZIP creation and extracted-package startup smoke passed with the dedicated scripts; a missing-WebView2 machine has not been simulated, so only the registry-check code path is compiled and reviewed.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
