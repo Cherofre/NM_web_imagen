@@ -1,6 +1,12 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-21 — Status: active: Desktop-global shortcuts are user-configurable and persisted in browser storage scoped to the Studio frontend. The six actions are new session, add reference, open outputs, toggle sidebar, open settings, and open shortcut help. Each binding requires Ctrl, Alt, or Meta, duplicate bindings are rejected, individual bindings can be cleared, and all bindings can be restored to defaults. Enter and Shift+Enter remain fixed composer semantics.
+- Reason: Different users have different keyboard habits, and some users want global shortcuts disabled entirely. Requiring a modifier avoids hijacking ordinary prompt typing while keeping capture predictable.
+- Consequences / follow-up: The web runtime keeps its existing keyboard behavior. A future settings migration can version the local shortcut map through `desktop-shortcuts-v1`.
+- 2026-08-21 — Status: active: Add update checking to the desktop roadmap as a signed, user-visible flow: manual check, release notes, download progress, signature verification, install/restart, failure rollback, and a portable-package policy. The current About page labels this capability `规划中` and does not expose a fake check button.
+- Reason: An updater must be trustworthy for both installed and portable desktop variants. A superficial version label or unsigned replacement would create more risk than value.
+- Consequences / follow-up: Before implementation, choose the release manifest/source, signing key handling, package channel policy, in-use/queued-job behavior, and rollback strategy. Web mode remains outside the updater boundary.
 - 2026-08-21 — Status: active: Desktop settings are an in-app modal dialog rather than a full-window route or separate native OS window. The dialog keeps the existing four-section layout, uses a backdrop, closes on backdrop click or `Esc`, and restores focus to the gear trigger. On narrow windows it expands to nearly the full viewport.
 - Reason: Settings are temporary maintenance work, and returning to the workbench should be one click or one key away. A modal preserves the complete storage/debug/shortcut content without adding another taskbar window or lifecycle boundary.
 - Consequences / follow-up: Do not add unsaved-change dismissal yet because current settings actions are immediate and there is no draft form state in this surface. If future settings become editable drafts, add a dirty-state confirmation before allowing backdrop dismissal.

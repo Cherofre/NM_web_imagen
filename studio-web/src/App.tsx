@@ -393,6 +393,8 @@ type HistoryFavoriteFilter = "all" | "favorite";
 type HistoryDateFilter = "all" | "today" | "7d" | "30d";
 type HistoryEngineFilter = "all" | Engine;
 type DesktopSettingsSection = "general" | "storage" | "shortcuts" | "about";
+type DesktopShortcutAction = "newSession" | "addReference" | "openOutputs" | "toggleSidebar" | "settings" | "help";
+type DesktopShortcutBindings = Record<DesktopShortcutAction, string>;
 type HistoryActionMenuSource = "sidebar" | "browser";
 type HistoryActionMenuState = {
   entryId: string;
@@ -428,6 +430,69 @@ const HISTORY_QUICK_ENTRY_LIMIT = 12;
 const HISTORY_QUICK_POPOVER_SIZE = { width: 340, height: 340 };
 const ACTION_MENU_SELECTOR = "details.header-more-menu, details.image-more-actions";
 const OPEN_ACTION_MENU_SELECTOR = "details.header-more-menu[open], details.image-more-actions[open]";
+const DESKTOP_SHORTCUT_STORAGE_KEY = "image-generate-web-tool:desktop-shortcuts-v1";
+const DEFAULT_DESKTOP_SHORTCUTS: DesktopShortcutBindings = {
+  newSession: "Ctrl+N",
+  addReference: "Ctrl+O",
+  openOutputs: "Ctrl+Shift+O",
+  toggleSidebar: "Ctrl+B",
+  settings: "Ctrl+,",
+  help: "Ctrl+/",
+};
+
+const DESKTOP_SHORTCUT_ACTIONS: DesktopShortcutAction[] = [
+  "newSession",
+  "addReference",
+  "openOutputs",
+  "toggleSidebar",
+  "settings",
+  "help",
+];
+
+function normalizeDesktopShortcutBindings(value: unknown): DesktopShortcutBindings {
+  const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return DESKTOP_SHORTCUT_ACTIONS.reduce((next, action) => {
+    const stored = source[action];
+    next[action] = typeof stored === "string" ? stored.trim().slice(0, 40) : DEFAULT_DESKTOP_SHORTCUTS[action];
+    return next;
+  }, { ...DEFAULT_DESKTOP_SHORTCUTS });
+}
+
+function loadDesktopShortcutBindings(): DesktopShortcutBindings {
+  try {
+    const raw = localStorage.getItem(DESKTOP_SHORTCUT_STORAGE_KEY);
+    return raw ? normalizeDesktopShortcutBindings(JSON.parse(raw)) : { ...DEFAULT_DESKTOP_SHORTCUTS };
+  } catch {
+    return { ...DEFAULT_DESKTOP_SHORTCUTS };
+  }
+}
+
+function desktopShortcutKeyToken(event: globalThis.KeyboardEvent) {
+  if (event.code === "Comma") return ",";
+  if (event.code === "Slash") return "/";
+  if (event.code === "Space") return "Space";
+  if (event.code.startsWith("Key")) return event.code.slice(3).toUpperCase();
+  if (event.code.startsWith("Digit")) return event.code.slice(5);
+  if (event.key.length === 1) return event.key.toUpperCase();
+  return event.key;
+}
+
+function desktopShortcutFromEvent(event: globalThis.KeyboardEvent): string | null {
+  if (event.ctrlKey === false && event.altKey === false && event.metaKey === false) return null;
+  const key = desktopShortcutKeyToken(event);
+  if (!key || ["Control", "Alt", "Shift", "Meta"].includes(key)) return null;
+  const modifiers = [
+    event.ctrlKey ? "Ctrl" : "",
+    event.altKey ? "Alt" : "",
+    event.shiftKey ? "Shift" : "",
+    event.metaKey ? "Meta" : "",
+  ].filter(Boolean);
+  return [...modifiers, key].join("+");
+}
+
+function matchesDesktopShortcut(event: globalThis.KeyboardEvent, binding: string) {
+  return Boolean(binding) && desktopShortcutFromEvent(event) === binding;
+}
 
 function closeOpenActionMenus(except?: Node | null) {
   let closed = false;
@@ -1243,6 +1308,8 @@ function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(false);
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
+  const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcutBindings>(() => loadDesktopShortcutBindings());
+  const [capturingShortcut, setCapturingShortcut] = useState<DesktopShortcutAction | null>(null);
   const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
   const [activeProfileIds, setActiveProfileIds] = useState<ActiveProfileIds>({
     "gpt-image-2": "gpt-image-2-default",
@@ -1639,6 +1706,10 @@ function App() {
   }, [queueJobs]);
 
   useEffect(() => {
+    localStorage.setItem(DESKTOP_SHORTCUT_STORAGE_KEY, JSON.stringify(desktopShortcuts));
+  }, [desktopShortcuts]);
+
+  useEffect(() => {
     const nextJob = nextQueuedGenerationJob(queueJobs);
     if (!nextJob || queueProcessingRef.current) return;
     queueProcessingRef.current = nextJob.id;
@@ -1659,6 +1730,10 @@ function App() {
     const frame = window.requestAnimationFrame(() => desktopSettingsRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [desktopSettingsOpen]);
+
+  useEffect(() => {
+    if (desktopSettingsSection !== "shortcuts") setCapturingShortcut(null);
+  }, [desktopSettingsSection]);
 
   useEffect(() => {
     if (composerPopover === "size") return;
@@ -1977,8 +2052,7 @@ function App() {
   useEffect(() => {
     if (!desktopMode) return undefined;
     function onDesktopShortcut(event: globalThis.KeyboardEvent) {
-      if (event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
-      const key = event.key.toLowerCase();
+      if (event.defaultPrevented || capturingShortcut) return;
       const hasBlockingSurface = advancedOpen
         || connectionOpen
         || renameOpen
@@ -1988,29 +2062,29 @@ function App() {
         || Boolean(pendingMultiImageConfirm)
         || Boolean(previewImage);
 
-      if (event.code === "Comma" || key === ",") {
+      if (matchesDesktopShortcut(event, desktopShortcuts.settings)) {
         event.preventDefault();
         setDesktopSettingsSection("general");
         setDesktopSettingsOpen(true);
         return;
       }
-      if (event.code === "Slash" || key === "/") {
+      if (matchesDesktopShortcut(event, desktopShortcuts.help)) {
         event.preventDefault();
         setDesktopSettingsSection("shortcuts");
         setDesktopSettingsOpen(true);
         return;
       }
       if (hasBlockingSurface || desktopSettingsOpen) return;
-      if (event.code === "KeyN" || key === "n") {
+      if (matchesDesktopShortcut(event, desktopShortcuts.newSession)) {
         event.preventDefault();
         startFreshSession();
-      } else if (event.code === "KeyB" || key === "b") {
+      } else if (matchesDesktopShortcut(event, desktopShortcuts.toggleSidebar)) {
         event.preventDefault();
         setHistoryCollapsed((value) => !value);
-      } else if ((event.code === "KeyO" || key === "o") && event.shiftKey) {
+      } else if (matchesDesktopShortcut(event, desktopShortcuts.openOutputs)) {
         event.preventDefault();
         void openOutputs();
-      } else if (event.code === "KeyO" || key === "o") {
+      } else if (matchesDesktopShortcut(event, desktopShortcuts.addReference)) {
         event.preventDefault();
         if (referenceState.canAdd) {
           fileInputRef.current?.click();
@@ -2033,6 +2107,8 @@ function App() {
     referenceState.canAdd,
     renameOpen,
     sessionPromptOpen,
+    capturingShortcut,
+    desktopShortcuts,
     t,
   ]);
 
@@ -3945,6 +4021,40 @@ function App() {
     window.requestAnimationFrame(() => desktopSettingsTriggerRef.current?.focus());
   }
 
+  function setDesktopShortcutBinding(action: DesktopShortcutAction, binding: string) {
+    if (binding && Object.entries(desktopShortcuts).some(([otherAction, otherBinding]) => otherAction !== action && otherBinding === binding)) {
+      setNotice(t("desktop.shortcutConflict"));
+      return;
+    }
+    setDesktopShortcuts((current) => ({ ...current, [action]: binding }));
+    setCapturingShortcut(null);
+  }
+
+  function captureDesktopShortcut(action: DesktopShortcutAction, event: KeyboardEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      setCapturingShortcut(null);
+      return;
+    }
+    const binding = desktopShortcutFromEvent(event.nativeEvent);
+    if (!binding) {
+      setNotice(t("desktop.shortcutRequiresModifier"));
+      return;
+    }
+    setDesktopShortcutBinding(action, binding);
+  }
+
+  function clearDesktopShortcut(action: DesktopShortcutAction) {
+    setDesktopShortcutBinding(action, "");
+  }
+
+  function resetDesktopShortcuts() {
+    setDesktopShortcuts({ ...DEFAULT_DESKTOP_SHORTCUTS });
+    setCapturingShortcut(null);
+    setNotice(t("desktop.shortcutsReset"));
+  }
+
   async function openDesktopUtility(kind: "data" | "log") {
     try {
       await openDesktopPath(kind);
@@ -5449,23 +5559,37 @@ function App() {
                     <h2>{t("desktop.shortcuts")}</h2>
                     <p>{t("desktop.shortcutsHint")}</p>
                   </div>
+                  <div className="desktop-shortcut-toolbar">
+                    <span>{t("desktop.shortcutsCustomHint")}</span>
+                    <button type="button" onClick={resetDesktopShortcuts}>{t("desktop.shortcutsReset")}</button>
+                  </div>
                   <div className="desktop-shortcut-list">
                     {([
-                      [t("desktop.shortcutNewSession"), "Ctrl+N"],
-                      [t("desktop.shortcutAddReference"), "Ctrl+O"],
-                      [t("desktop.shortcutOpenOutputs"), "Ctrl+Shift+O"],
-                      [t("desktop.shortcutToggleSidebar"), "Ctrl+B"],
-                      [t("desktop.shortcutSettings"), "Ctrl+,"],
-                      [t("desktop.shortcutHelp"), "Ctrl+/"],
-                      [t("desktop.shortcutSubmit"), "Enter"],
-                      [t("desktop.shortcutNewline"), "Shift+Enter"],
-                    ] as const).map(([label, keys]) => (
-                      <div className="desktop-shortcut-row" key={keys}>
+                      ["newSession", t("desktop.shortcutNewSession")],
+                      ["addReference", t("desktop.shortcutAddReference")],
+                      ["openOutputs", t("desktop.shortcutOpenOutputs")],
+                      ["toggleSidebar", t("desktop.shortcutToggleSidebar")],
+                      ["settings", t("desktop.shortcutSettings")],
+                      ["help", t("desktop.shortcutHelp")],
+                    ] as const).map(([action, label]) => (
+                      <div className="desktop-shortcut-row" key={action}>
                         <span>{label}</span>
-                        <kbd>{keys}</kbd>
+                        <div className="desktop-shortcut-actions">
+                          <button
+                            type="button"
+                            className={`desktop-shortcut-bind ${capturingShortcut === action ? "is-capturing" : ""}`}
+                            aria-label={capturingShortcut === action ? t("desktop.shortcutPressKey") : t("desktop.shortcutSet")}
+                            onClick={() => setCapturingShortcut(action)}
+                            onKeyDown={(event) => captureDesktopShortcut(action, event)}
+                          >
+                            <kbd>{capturingShortcut === action ? t("desktop.shortcutPressKey") : desktopShortcuts[action] || t("desktop.shortcutDisabled")}</kbd>
+                          </button>
+                          <button type="button" className="desktop-shortcut-clear" onClick={() => clearDesktopShortcut(action)} disabled={!desktopShortcuts[action]}>{t("desktop.shortcutClear")}</button>
+                        </div>
                       </div>
                     ))}
                   </div>
+                  <p className="desktop-shortcut-note">{t("desktop.shortcutsInputHint")}</p>
                 </div>
               )}
 
@@ -5483,6 +5607,13 @@ function App() {
                   <div className="desktop-settings-note">
                     <Info size={17} />
                     <span>{t("desktop.aboutPrivacy")}</span>
+                  </div>
+                  <div className="desktop-about-update">
+                    <div>
+                      <strong>{t("desktop.updatePlanTitle")}</strong>
+                      <span>{t("desktop.updatePlanHint")}</span>
+                    </div>
+                    <span className="desktop-planned-badge">{t("desktop.updatePlanned")}</span>
                   </div>
                 </div>
               )}

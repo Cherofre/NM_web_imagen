@@ -33,11 +33,18 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(appSource, /className="desktop-settings-surface"[\s\S]*role="dialog"[\s\S]*aria-modal="true"/);
   assert.match(appSource, /className="desktop-settings-close"/);
   assert.match(appSource, /type DesktopSettingsSection = "general" \| "storage" \| "shortcuts" \| "about";/);
-  assert.match(appSource, /event\.code === "Comma"/);
-  assert.match(appSource, /event\.code === "Slash"/);
-  assert.match(appSource, /event\.code === "KeyN"/);
-  assert.match(appSource, /event\.code === "KeyB"/);
-  assert.match(appSource, /\(event\.code === "KeyO" \|\| key === "o"\) && event\.shiftKey/);
+  assert.match(appSource, /type DesktopShortcutAction = "newSession" \| "addReference" \| "openOutputs" \| "toggleSidebar" \| "settings" \| "help";/);
+  assert.match(appSource, /DESKTOP_SHORTCUT_STORAGE_KEY/);
+  assert.match(appSource, /captureDesktopShortcut\(/);
+  assert.match(appSource, /resetDesktopShortcuts\(/);
+  assert.match(appSource, /desktop\.shortcutConflict/);
+  assert.match(appSource, /desktop\.shortcutRequiresModifier/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.settings\)/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.help\)/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.newSession\)/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.toggleSidebar\)/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.openOutputs\)/);
+  assert.match(appSource, /matchesDesktopShortcut\(event, desktopShortcuts\.addReference\)/);
   assert.match(appSource, /desktopRuntime\.outputsRoot/);
   assert.match(appSource, /desktopRuntime\.dataRoot/);
   assert.match(appSource, /desktopRuntime\.logPath/);
@@ -50,6 +57,9 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(i18nSource, /"desktop\.settings": "Desktop settings"/);
   assert.match(i18nSource, /"desktop\.openDebugConsole": "打开调试窗口"/);
   assert.match(i18nSource, /"desktop\.openDebugConsole": "Open debug console"/);
+  assert.match(i18nSource, /"desktop\.shortcutsCustomHint":/);
+  assert.match(i18nSource, /"desktop\.shortcutsReset":/);
+  assert.match(i18nSource, /"desktop\.updatePlanTitle":/);
 });
 
 test("release desktop builds hide the shell console while backend diagnostics stay opt-in", () => {
