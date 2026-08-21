@@ -6,8 +6,8 @@
 - [x] Make desktop shortcuts editable, clearable, persisted locally, conflict-checked, and resettable without changing web-mode keyboard behavior.
 - [x] Reuse the existing web black-and-white triangle mark for the Tauri SVG/PNG/ICO/ICNS icon set.
 - [x] Pass Node 170/170, Studio size rules, TypeScript/Vite build, Rust checks, and a fresh `npm run desktop:build` after replacing the icon and settings treatment.
-- [x] Preserve the already verified v1.1.0 shell lifecycle, settings/debug-console, DPAPI, WebView2, portable ZIP, installer, web package, and web/desktop coexistence slices.
-- [ ] Next slice: user acceptance of custom shortcuts and the About-page updater plan, then design the signed update-check/download flow; no publish, merge, tag, or G: synchronization yet.
+- [x] Design the signed desktop updater flow in `docs/NM-Image-Studio-desktop-updater-plan.md`, separating installed NSIS updates, portable ZIP upgrades, and the unaffected web package.
+- [ ] Next slice, after user approval: implement Stage A release/signing infrastructure, then Stage B check-only UI before enabling installation; no publish, merge, tag, or G: synchronization yet.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -18,13 +18,13 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `codex/desktop-v1.1.0`; inspect the direct header settings action in `studio-web/src/App.tsx` and the icon list in `studio-web/src-tauri/tauri.conf.json`.
+- Start here: continue on `codex/desktop-v1.1.0`; review `docs/NM-Image-Studio-desktop-updater-plan.md`. If implementation is approved, begin with updater keys, `createUpdaterArtifacts`, signed feed generation, and package verification before adding the About-page check button.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: user-run the rebuilt desktop EXE, customize one shortcut, clear it, restore defaults, confirm duplicate bindings are rejected, and review the About-page updater plan; preserve the single-instance/Job Object, debug-console, DPAPI, and web/desktop isolation boundaries.
+- Verify next: obtain user acceptance of the updater scope; then use a local signed test feed to prove no-update, update-available, invalid-signature and task-blocked states before any real GitHub Release.
 - Do not claim: Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
-- Updater boundary: About now records the planned update-check/download surface, but no update network call, signature verification, package replacement, rollback or silent updater is implemented yet.
+- Updater boundary: About now records the planned surface and the full implementation design lives in `docs/NM-Image-Studio-desktop-updater-plan.md`, but no update network call, signing key, signed package, package replacement, rollback helper or silent updater is implemented yet.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
 - Verification caveat: portable ZIP creation and extracted-package startup smoke passed with the dedicated scripts; a missing-WebView2 machine has not been simulated, so only the registry-check code path is compiled and reviewed.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.

@@ -1,16 +1,16 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-08-21 16:00 +08:00
-- Phase: v1.1.0 desktop UX follow-up, customizable shortcuts, triangle icon, and updater planning
+- Last Updated: 2026-08-21
+- Phase: v1.1.0 desktop UX follow-up and updater architecture planning
 - Branch: `codex/desktop-v1.1.0`, based on the verified Tauri spike commit `05d2c2b`
 - Goal: make the Windows desktop shell feel native and practical while preserving web-mode compatibility and the existing Studio workflow
-- Current Focus: make desktop settings discoverable without changing web mode, and ship the refreshed icon through the Tauri bundle configuration
+- Current Focus: review the signed desktop updater plan, then decide whether to implement it before the first v1.1.0 desktop release
 - Implemented: desktop settings/shortcuts/path actions/window state, a compact gear-only settings action beside the language switcher with `Ctrl+,`, a centered modal settings dialog with backdrop-click and `Esc` dismissal plus focus restoration, persistent customizable desktop shortcuts with conflict detection, per-shortcut clear and restore-all controls, an About-page updater-planning note, default no-console launch, opt-in startup backend console, settings-launched live backend debug console, Windows DPAPI protection with plaintext-config migration, `gpt-5.6` migration, Windows named-mutex single instance with existing-window activation, a `KILL_ON_JOB_CLOSE` Job Object around the FastAPI sidecar plus debug console, portable-mode data routing, portable ZIP/manifest/SHA256 packaging, a pre-window WebView2 Evergreen registry check with a clear Chinese error dialog, and the existing web black-and-white triangle mark reused for Tauri icons
 - Runtime Evidence: a second EXE launch exited while the original window remained, with exactly one shell and one backend; forcibly terminating the shell also terminated the backend; the user manually verified the settings path `桌面设置 → 存储与日志 → 打开调试窗口`; the debug console follows `desktop-backend.log` without restarting the backend, and its sidecar uses unbuffered output. Earlier tokenized API and unauthorized-401 checks remain valid
 - Build Evidence: Tauri shell 8.14 MiB; backend directory 58 MiB / 708 files; normal Setup 25.16 MB; offline-WebView2 Setup 240.89 MB; portable desktop ZIP 34.16 MB; web ZIP generated with the same 1.1.0 version source
-- Latest Verification: Node 170/170, Studio size rules, TypeScript/Vite production build, `cargo fmt --check`, `cargo check --offline`, and a fresh `npm run desktop:build` with customizable shortcuts and the updater planning note passed. Prior installer/package/coexistence and debug-console evidence remains valid; installer/portable artifacts have not been rebuilt for this UI-only follow-up
-- Residual Risks: missing-WebView2 behavior has not been tested on a machine without the runtime; no tray, updater, fixed-runtime package or full DPI/drag/clipboard/mask manual matrix yet; single-instance window lookup currently relies on the unique `NM Image Studio` title; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
+- Latest Verification: the dedicated updater plan was checked against the current Tauri 2.9 configuration, official Tauri updater requirements, existing NSIS/portable packaging scripts, runtime-mode isolation, queue behavior, and the Project Ledger Loop health check. No updater code or network call was added; prior Node/Rust/build/package evidence remains unchanged
+- Residual Risks: the updater remains unimplemented; updater signing keys, real signed artifacts, GitHub update feeds, install-from-old-version smoke, portable download verification, and automatic rollback helper do not exist yet. Missing-WebView2 behavior also remains untested on a machine without the runtime; single-instance window lookup still relies on the unique `NM Image Studio` title; `npm audit` still reports five build-chain findings that require a later Vite major upgrade
 - Boundary: local commit only; no push, merge, tag, GitHub Release or G: synchronization is authorized; pre-existing untracked `PRODUCT.md` and `.impeccable/` remain untouched
 
 ## Previous Published Snapshot
