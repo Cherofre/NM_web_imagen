@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-21 — Status: active: Treat the v1.1.0 desktop candidate as internally verified but not publicly releasable until clean-staging metadata, a real 1.1.0 → 1.1.1 upgrade, and (for ordinary Windows distribution) Authenticode signing are closed. The complete evidence lives in `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
+- Reason: Local smoke proves the application and package contents work on this Windows 11 x64 machine, but it cannot prove SmartScreen trust, no-WebView2 behavior, another-machine permissions, or a real Release upgrade. Separating “internal candidate” from “public release” prevents overstating those guarantees.
+- Consequences / follow-up: Keep all artifacts local, do not push/tag/release/sync G:, and require a fresh clean staging rebuild after the updater metadata-order fix. Legacy web preflight path differences and old alpha files must be resolved or explicitly excluded before upload.
 - 2026-08-21 — Status: active: The first updater implementation is locally complete but remains unpublished. Tauri 2.9's actual signed NSIS updater artifact is `*-setup.exe` plus `*.sig`, so the packaging script copies that signed executable to the updater feed rather than assuming a `*.nsis.zip` file.
 - Reason: The build output is the authoritative contract for this pinned Tauri version; rejecting the actual artifact shape would block valid signed updates. The feed still keeps separate Setup and Updater filenames for release clarity, while both are byte-identical copies of the signed Setup artifact.
 - Consequences / follow-up: Feed smoke has verified no-BOM JSON, signature presence, URL/version alignment and SHA256. A real GitHub/test Release is still required to exercise client-side update discovery and installation from an older build. No publication, merge, tag or G: sync is authorized.
