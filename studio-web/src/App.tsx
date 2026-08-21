@@ -1299,6 +1299,7 @@ function App() {
   const queuePopoverResizeRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number; pointerId: number } | null>(null);
   const previewDialogRef = useRef<HTMLDivElement | null>(null);
   const desktopSettingsRef = useRef<HTMLElement | null>(null);
+  const desktopSettingsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const previewDragRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number } | null>(null);
   const previewMaskRequestRef = useRef(0);
   const queueAbortControllersRef = useRef<Record<string, AbortController>>({});
@@ -1943,7 +1944,7 @@ function App() {
         event.preventDefault();
         setAdvancedOpen(false);
         closeConnectionDrawer();
-        setDesktopSettingsOpen(false);
+        closeDesktopSettings();
         setRenameOpen(false);
         setPromptEditorOpen(false);
         setSessionPromptOpen(false);
@@ -3120,6 +3121,7 @@ function App() {
     event.stopPropagation();
     setAdvancedOpen(false);
     closeConnectionDrawer();
+    closeDesktopSettings();
     setRenameOpen(false);
     setPromptEditorOpen(false);
     setSessionPromptOpen(false);
@@ -3938,6 +3940,11 @@ function App() {
     setDesktopSettingsOpen(true);
   }
 
+  function closeDesktopSettings() {
+    setDesktopSettingsOpen(false);
+    window.requestAnimationFrame(() => desktopSettingsTriggerRef.current?.focus());
+  }
+
   async function openDesktopUtility(kind: "data" | "log") {
     try {
       await openDesktopPath(kind);
@@ -4574,6 +4581,7 @@ function App() {
                 <button
                   type="button"
                   className="desktop-settings-trigger"
+                  ref={desktopSettingsTriggerRef}
                   onClick={() => openDesktopSettings("general")}
                   title={`${t("desktop.settings")} · Ctrl+,`}
                   aria-label={`${t("desktop.settings")} · Ctrl+,`}
@@ -5332,20 +5340,30 @@ function App() {
       </section>
 
       {desktopMode && desktopSettingsOpen && (
-        <section
-          className="desktop-settings-surface"
-          ref={desktopSettingsRef}
-          tabIndex={-1}
-          aria-label={t("desktop.settings")}
-        >
+        <div className="desktop-settings-shell">
+          <button
+            type="button"
+            className="desktop-settings-backdrop"
+            aria-label={t("common.close")}
+            onClick={closeDesktopSettings}
+          />
+          <section
+            className="desktop-settings-surface"
+            ref={desktopSettingsRef}
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
+            aria-label={t("desktop.settings")}
+            onKeyDown={closeOnEscape}
+          >
           <header className="desktop-settings-header">
-            <button type="button" className="desktop-settings-back" onClick={() => setDesktopSettingsOpen(false)}>
-              <ArrowLeft size={17} /> {t("desktop.backToStudio")}
-            </button>
             <div>
               <h1>{t("desktop.settings")}</h1>
               <p>{t("desktop.settingsHint")}</p>
             </div>
+            <button type="button" className="desktop-settings-close" onClick={closeDesktopSettings} aria-label={t("common.close")} title={t("common.close")}>
+              <X size={18} />
+            </button>
           </header>
           <div className="desktop-settings-layout">
             <nav className="desktop-settings-nav" aria-label={t("desktop.settingsSections")}>
@@ -5470,7 +5488,8 @@ function App() {
               )}
             </div>
           </div>
-        </section>
+          </section>
+        </div>
       )}
 
       {pendingSessionSwitch && (

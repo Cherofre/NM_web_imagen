@@ -27,8 +27,11 @@ test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /document\.documentElement\.dataset\.runtime = "desktop"/);
 });
 
-test("desktop app provides a full-window settings surface and standard shortcuts", () => {
-  assert.match(appSource, /className="desktop-settings-surface"/);
+test("desktop app provides a modal settings surface and standard shortcuts", () => {
+  assert.match(appSource, /className="desktop-settings-shell"/);
+  assert.match(appSource, /className="desktop-settings-backdrop"/);
+  assert.match(appSource, /className="desktop-settings-surface"[\s\S]*role="dialog"[\s\S]*aria-modal="true"/);
+  assert.match(appSource, /className="desktop-settings-close"/);
   assert.match(appSource, /type DesktopSettingsSection = "general" \| "storage" \| "shortcuts" \| "about";/);
   assert.match(appSource, /event\.code === "Comma"/);
   assert.match(appSource, /event\.code === "Slash"/);
@@ -78,6 +81,8 @@ test("desktop styling removes the outer web cards without changing web mode", ()
   assert.match(styles, /html\[data-runtime="desktop"\] \.studio-shell[\s\S]*gap:\s*0;[\s\S]*padding:\s*0;/);
   assert.match(styles, /html\[data-runtime="desktop"\] \.history-sidebar[\s\S]*border-radius:\s*0;[\s\S]*box-shadow:\s*none;/);
   assert.match(styles, /html\[data-runtime="desktop"\] \.workspace[\s\S]*border-radius:\s*0;[\s\S]*box-shadow:\s*none;/);
+  assert.match(styles, /\.desktop-settings-shell[\s\S]*place-items:\s*center;/);
+  assert.match(styles, /\.desktop-settings-backdrop[\s\S]*position:\s*absolute;/);
   assert.match(styles, /\.desktop-settings-layout[\s\S]*grid-template-columns:\s*220px minmax\(0, 1fr\);/);
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*\.desktop-settings-layout[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/);
 });

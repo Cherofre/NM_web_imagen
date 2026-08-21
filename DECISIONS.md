@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-21 — Status: active: Desktop settings are an in-app modal dialog rather than a full-window route or separate native OS window. The dialog keeps the existing four-section layout, uses a backdrop, closes on backdrop click or `Esc`, and restores focus to the gear trigger. On narrow windows it expands to nearly the full viewport.
+- Reason: Settings are temporary maintenance work, and returning to the workbench should be one click or one key away. A modal preserves the complete storage/debug/shortcut content without adding another taskbar window or lifecycle boundary.
+- Consequences / follow-up: Do not add unsaved-change dismissal yet because current settings actions are immediate and there is no draft form state in this surface. If future settings become editable drafts, add a dirty-state confirmation before allowing backdrop dismissal.
 - 2026-08-21 — Status: active: Desktop settings use one compact gear-only action placed immediately after the 中/EN language switcher. It keeps the `Ctrl+,` shortcut and the original overflow entry as fallback.
 - Reason: The previous labeled button consumed too much header attention for a utility action. The icon is discoverable through its tooltip and keyboard shortcut while preserving a clean control cluster.
 - Consequences / follow-up: The action opens the same full-window settings surface at the `general` section. Backend debug-console access remains inside `存储与日志`.

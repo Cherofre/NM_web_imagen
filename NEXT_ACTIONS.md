@@ -2,6 +2,7 @@
 
 ## Now
 - [x] Surface a compact gear-only desktop settings action beside the language switcher, keep the three-dot menu as a compatibility path, and retain the `Ctrl+,` shortcut.
+- [x] Present desktop settings as a centered modal dialog with a backdrop, outside-click dismissal, `Esc` dismissal, close button, and focus restoration; use a near-full-screen layout on narrow windows.
 - [x] Reuse the existing web black-and-white triangle mark for the Tauri SVG/PNG/ICO/ICNS icon set.
 - [x] Pass Node 170/170, Studio size rules, TypeScript/Vite build, Rust checks, and a fresh `npm run desktop:build` after replacing the icon and settings treatment.
 - [x] Preserve the already verified v1.1.0 shell lifecycle, settings/debug-console, DPAPI, WebView2, portable ZIP, installer, web package, and web/desktop coexistence slices.
@@ -18,7 +19,7 @@
 ## Handoff Notes
 - Start here: continue on `codex/desktop-v1.1.0`; inspect the direct header settings action in `studio-web/src/App.tsx` and the icon list in `studio-web/src-tauri/tauri.conf.json`.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: user-run the rebuilt desktop EXE and confirm the taskbar/window icon is the black-and-white triangle, the gear beside 中/EN opens the full-window settings surface, and `Ctrl+,` still works; preserve the single-instance/Job Object, debug-console, DPAPI, and web/desktop isolation boundaries.
+- Verify next: user-run the rebuilt desktop EXE and confirm the taskbar/window icon is the black-and-white triangle, the gear beside 中/EN opens the modal settings dialog, blank-space click and `Esc` close it, and `Ctrl+,` still works; preserve the single-instance/Job Object, debug-console, DPAPI, and web/desktop isolation boundaries.
 - Do not claim: Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.

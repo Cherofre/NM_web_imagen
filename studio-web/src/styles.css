@@ -4495,22 +4495,47 @@ button.primary-action:focus-visible,
   background: var(--line);
 }
 
-.desktop-settings-surface {
+.desktop-settings-shell {
   position: fixed;
   inset: 0;
   z-index: 48;
   display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(28, 25, 23, .26);
+}
+
+.desktop-settings-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.desktop-settings-surface {
+  position: relative;
+  z-index: 1;
+  display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  width: min(940px, 100%);
+  height: min(760px, 100%);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 8px rgba(15, 23, 42, .18);
   outline: none;
 }
 
 .desktop-settings-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
   min-height: 76px;
@@ -4538,7 +4563,7 @@ button.primary-action:focus-visible,
   line-height: 1.45;
 }
 
-.desktop-settings-back,
+.desktop-settings-close,
 .desktop-settings-nav button,
 .desktop-setting-row button,
 .desktop-path-actions button,
@@ -4557,7 +4582,8 @@ button.primary-action:focus-visible,
   font-weight: 650;
 }
 
-.desktop-settings-back:hover,
+.desktop-settings-close:hover,
+.desktop-settings-close:focus-visible,
 .desktop-settings-nav button:hover,
 .desktop-setting-row button:hover,
 .desktop-path-actions button:hover,
@@ -4566,6 +4592,12 @@ button.primary-action:focus-visible,
   border-color: var(--line-strong);
   background: var(--panel-soft);
   color: var(--ink);
+}
+
+.desktop-settings-close {
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
 }
 
 .desktop-settings-layout {
@@ -4751,6 +4783,16 @@ button.primary-action:focus-visible,
 }
 
 @media (max-width: 760px) {
+  .desktop-settings-shell {
+    padding: 10px;
+  }
+
+  .desktop-settings-surface {
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-md);
+  }
+
   .desktop-settings-header {
     gap: 12px;
     padding-inline: 14px;
