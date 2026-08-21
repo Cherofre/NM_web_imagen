@@ -9,6 +9,7 @@ const i18nSource = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
 const tauriMainSource = readFileSync(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
 const tauriLibSource = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const windowsRuntimeSource = readFileSync(new URL("../src-tauri/src/windows_runtime.rs", import.meta.url), "utf8");
+const tauriConfigSource = readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
 
 test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /outputsRoot: string;/);
@@ -38,6 +39,8 @@ test("desktop app provides a full-window settings surface and standard shortcuts
   assert.match(appSource, /desktopRuntime\.logPath/);
   assert.match(appSource, /desktop\.openDebugConsole/);
   assert.match(appSource, /desktop\.debugConsoleHint/);
+  assert.match(appSource, /className="desktop-settings-trigger"/);
+  assert.match(appSource, /title=\{`\$\{t\("desktop\.settings"\)\} · Ctrl\+,`\}/);
   assert.match(i18nSource, /"desktop\.settings": "桌面设置"/);
   assert.match(i18nSource, /"desktop\.settings": "Desktop settings"/);
   assert.match(i18nSource, /"desktop\.openDebugConsole": "打开调试窗口"/);
@@ -75,4 +78,8 @@ test("desktop styling removes the outer web cards without changing web mode", ()
   assert.match(styles, /html\[data-runtime="desktop"\] \.workspace[\s\S]*border-radius:\s*0;[\s\S]*box-shadow:\s*none;/);
   assert.match(styles, /\.desktop-settings-layout[\s\S]*grid-template-columns:\s*220px minmax\(0, 1fr\);/);
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*\.desktop-settings-layout[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/);
+});
+
+test("desktop branding ships the generated application icon set", () => {
+  assert.match(tauriConfigSource, /"icon":\s*\[[\s\S]*icons\/32x32\.png[\s\S]*icons\/128x128@2x\.png[\s\S]*icons\/icon\.ico/);
 });

@@ -1,13 +1,11 @@
 # Next Actions
 
 ## Now
-- [x] Build and verify the Tauri + PyInstaller `onedir` desktop shell with settings, shortcuts, path actions, window state, no-console launch, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, settings-only backend debug console, and Windows DPAPI config protection/migration; user manually verified the final settings flow.
-- [x] Pass Python 251/251, Node 169/169, compiler checks and a fresh release build containing the debug-console, DPAPI, portable routing and WebView2 changes.
-- [x] Add a release portable ZIP script with the complete EXE + `backend\` onedir runtime, `portable.mode`, README, manifest and SHA256 sidecars; portable data stays under package-local `data\` while installed mode keeps `%LOCALAPPDATA%`.
-- [x] Add a pre-window WebView2 Evergreen registry check with a clear Chinese startup error and official offline install URL; configure ordinary and offline NSIS WebView2 modes.
-- [x] Rebuild the release EXE and generate the 1.1.0 portable desktop ZIP, ordinary NSIS Setup, offline-WebView2 NSIS Setup, and versioned web ZIP.
-- [x] Verify installer extraction/uninstall, package hashes/manifests, web package smoke, and simultaneous web+desktop operation with isolated ports and data roots.
-- [ ] Next slice: user acceptance of the four local artifacts; no publish, merge, tag, or G: synchronization yet.
+- [x] Surface a persistent `桌面设置` header action in desktop mode, keep the three-dot menu as a compatibility path, and show only the gear icon on narrow desktop widths.
+- [x] Replace the app SVG with the window/canvas + generation spark mark, generate the Tauri PNG/ICO/ICNS resources, and wire the icon list into `tauri.conf.json`.
+- [x] Pass Node 170/170, Studio size rules, TypeScript/Vite build, Rust checks, and a fresh `npm run desktop:build` with the icon configuration.
+- [x] Preserve the already verified v1.1.0 shell lifecycle, settings/debug-console, DPAPI, WebView2, portable ZIP, installer, web package, and web/desktop coexistence slices.
+- [ ] Next slice: user acceptance of the refreshed desktop icon and direct settings entry, followed by optional rebuild of the four local artifacts; no publish, merge, tag, or G: synchronization yet.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -18,9 +16,9 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `codex/desktop-v1.1.0` from the latest local commit and read `docs/NM-Image-Studio-v1.1.0-desktop-plan.md`.
+- Start here: continue on `codex/desktop-v1.1.0`; inspect the direct header settings action in `studio-web/src/App.tsx` and the icon list in `studio-web/src-tauri/tauri.conf.json`.
 - Do not redo: Tauri toolchain, tokenized random-port sidecar, settings/shortcuts/window-state slice, release console suppression, `gpt-5.6` migration, named-mutex single instance, Job Object cleanup, PyInstaller `onedir` decision or completed lifecycle smoke.
-- Verify next: user-run installation and offline-WebView2 acceptance on a clean machine; preserve the single-instance/Job Object, debug-console, DPAPI, and web/desktop isolation boundaries.
+- Verify next: user-run the rebuilt desktop EXE or installer and confirm the visible `桌面设置` action opens the full-window settings surface; preserve the single-instance/Job Object, debug-console, DPAPI, and web/desktop isolation boundaries.
 - Do not claim: Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.

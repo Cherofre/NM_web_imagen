@@ -4566,6 +4566,19 @@ function App() {
               <ChevronDown size={14} />
             </button>
             <div className="header-actions">
+              {desktopMode && (
+                <button
+                  type="button"
+                  className="desktop-settings-trigger"
+                  onClick={() => openDesktopSettings("general")}
+                  title={`${t("desktop.settings")} · Ctrl+,`}
+                  aria-label={`${t("desktop.settings")} · Ctrl+,`}
+                >
+                  <Settings size={16} />
+                  <span>{t("desktop.settings")}</span>
+                  <kbd>Ctrl+,</kbd>
+                </button>
+              )}
               <div className="language-switcher" role="group" aria-label={t("language.switcher")}>
                 <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
                 <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>

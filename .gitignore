@@ -5,6 +5,12 @@ logs/
 saved_images/
 outputs/
 *.png
+!studio-web/src-tauri/icons/32x32.png
+!studio-web/src-tauri/icons/64x64.png
+!studio-web/src-tauri/icons/128x128.png
+!studio-web/src-tauri/icons/128x128@2x.png
+!studio-web/src-tauri/icons/icon.png
+studio-web/src-tauri/icons/android/
 .chrome-debug/
 .playwright-mcp/
 .playwright-cli/

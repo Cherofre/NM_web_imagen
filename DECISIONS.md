@@ -1,6 +1,12 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-21 — Status: active: Desktop settings get a persistent header action labeled `桌面设置` with the `Ctrl+,` shortcut. The existing three-dot menu entry remains as a compatibility path, while narrow layouts collapse the new action to a gear-only button.
+- Reason: Settings are a desktop maintenance surface, not a rare overflow action. A visible entry lowers discovery cost without changing the web-mode header or adding a second settings implementation.
+- Consequences / follow-up: The direct action opens the same full-window settings surface at the `general` section. Backend debug-console access remains inside `存储与日志`, so the main header stays uncluttered.
+- 2026-08-21 — Status: active: Use a maintained SVG source for the application identity, rendered as a dark rounded window/canvas with an orange generation focus and black spark. Commit the generated Windows PNG/ICO resources and configure Tauri to consume the shared icon set.
+- Reason: The mark communicates image generation at taskbar/installer scale, remains legible in monochrome-ish desktop chrome, and avoids introducing an opaque raster-only asset that cannot be revised cleanly.
+- Consequences / follow-up: Android-specific files emitted by the cross-platform icon generator are ignored because this release targets Windows desktop; the Windows icon set is verified by the desktop source test and Tauri release build.
 - 2026-08-19 — Status: active: v1.1.0 ships four separate local artifacts: normal NSIS Setup with WebView2 download bootstrapper, offline-WebView2 NSIS Setup with the official standalone installer embedded, portable desktop ZIP, and the existing web portable ZIP. The web package remains a Python/browser launcher with default port 7861; the desktop package uses a Tauri shell, random sidecar port, and its own installed or package-local data root.
 - Reason: The user explicitly requires all package forms and web/desktop coexistence. Keeping web and desktop artifacts separate avoids port, data, updater, and launcher collisions while preserving the existing web workflow.
 - Alternatives considered: A single hybrid launcher, making desktop reuse the web package's `outputs\`, or forcing both modes onto port 7861. Those choices would create data races, confuse lifecycle ownership, or break existing web users.
