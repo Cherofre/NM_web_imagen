@@ -4566,6 +4566,10 @@ function App() {
               <ChevronDown size={14} />
             </button>
             <div className="header-actions">
+              <div className="language-switcher" role="group" aria-label={t("language.switcher")}>
+                <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
+                <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
+              </div>
               {desktopMode && (
                 <button
                   type="button"
@@ -4574,15 +4578,9 @@ function App() {
                   title={`${t("desktop.settings")} · Ctrl+,`}
                   aria-label={`${t("desktop.settings")} · Ctrl+,`}
                 >
-                  <Settings size={16} />
-                  <span>{t("desktop.settings")}</span>
-                  <kbd>Ctrl+,</kbd>
+                  <Settings size={17} />
                 </button>
               )}
-              <div className="language-switcher" role="group" aria-label={t("language.switcher")}>
-                <button type="button" className={language === "zh-CN" ? "active" : ""} onClick={() => setLanguage("zh-CN")}>{t("language.zh")}</button>
-                <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>{t("language.en")}</button>
-              </div>
               <details className="header-more-menu">
                 <summary aria-label={t("app.moreActions")} title={t("app.moreActions")}>
                   <Ellipsis size={18} />

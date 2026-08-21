@@ -4436,18 +4436,15 @@ button.primary-action:focus-visible,
 }
 
 .desktop-settings-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 40px;
-  padding: 0 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #fff;
   color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 750;
-  white-space: nowrap;
 }
 
 .desktop-settings-trigger:hover,
@@ -4459,18 +4456,6 @@ button.primary-action:focus-visible,
 
 .desktop-settings-trigger:active {
   transform: translateY(1px);
-}
-
-.desktop-settings-trigger kbd {
-  padding: 3px 5px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  background: var(--panel-muted);
-  color: var(--muted);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1;
 }
 
 .header-more-panel .danger-action {
@@ -5445,11 +5430,6 @@ button.primary-action:focus-visible,
     justify-content: flex-end;
     flex-wrap: nowrap;
     overflow: visible;
-  }
-
-  .desktop-settings-trigger span,
-  .desktop-settings-trigger kbd {
-    display: none;
   }
 
   .desktop-settings-trigger {
