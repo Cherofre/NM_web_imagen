@@ -3,7 +3,7 @@
 - 日期：2026-08-21
 - 分支：`codex/desktop-v1.1.0`
 - 范围：桌面安装版、离线 WebView2 安装版、桌面便携版、网页 ZIP、更新器、网页/桌面共存、旧配置与数据边界、发布包清洁度。
-- 结论：运行时与本机发布烟测通过；公开发布前仍有发布流程和外部环境门槛，暂不建议直接发布 GitHub Release。
+- 结论（预发布阶段）：运行时与本机发布烟测通过；公开发布前仍有发布流程和外部环境门槛。
 
 ## 已通过的测试矩阵
 
@@ -53,14 +53,14 @@
 
 ### P0/P1：发布闸门
 
-1. **尚未做真实 1.1.0 → 1.1.1 GitHub Release 端到端升级。** 当前 feed 只做了本地真实私钥和结构烟测；安装版 updater 下载、验签、替换、重启，以及便携版下载后保留 `data\`，都需要在测试 Release 上完成一次。
+1. **尚未做真实 1.1.0 → 1.1.1 GitHub Release 端到端升级。** 当前 feed 只做了本地真实私钥和结构烟测；安装版 updater 下载、验签、替换、重启，以及便携版下载后保留 `data\`，都需要在后续测试 Release 上完成一次。
 2. **EXE/安装器没有 Authenticode 签名。** `Get-AuthenticodeSignature` 对 Setup、Updater、离线 Setup 均为 `NotSigned`。这不会阻止本机运行，但会影响 SmartScreen、企业环境信任和首次安装体验；公开分发前建议使用受信任代码签名证书。
-3. **`package_desktop_updater.ps1` 的元数据顺序存在缺陷。** 它会把签名 NSIS 文件复制成普通 Setup 名称，却不重写普通 Setup manifest/SHA256。此次通过随后单独运行 `package_desktop_installer.ps1` 修正了本地 staging，但发布脚本本身仍应修复，否则下次容易生成哈希不一致的包。
+3. **`package_desktop_updater.ps1` 的元数据顺序曾存在缺陷。** 已修正为保留普通 Setup 的独立 manifest/SHA256，签名 NSIS 文件只输出为 Updater；正式重建时仍需用全新 staging 验证。
 4. **发布 staging 仍留有旧的 `v1.1.0-alpha.1` 三个文件。** 它们不在当前四类包内，但会污染人工挑选或上传资产的目录；正式发布前应使用全新空 staging，或明确只上传当前版本文件。
 
 ### P2：非阻断但应排期
 
-- `release_preflight.ps1` 仍默认检查仓库上级旧式 `NM_web_imagen-v<version>.zip`，而新脚本输出在 `_release/web/`；流程路径需要统一。
+- `release_preflight.ps1` 现在优先检查 `_release/web/`，并保留旧式上级 ZIP 回退兼容。
 - 当前 `studio-web/package-lock.json` 的构建链仍有 3 个 High、2 个 Low 的 `npm audit` 报告（Vite/PostCSS/nanoid/esbuild/Babel 相关）。现有 `node_modules` 是修复版本，最终运行包不携带构建工具，但干净 `npm ci` 仍会复现旧锁文件风险；应在后续版本更新锁文件并重跑完整构建。
 - 便携版更新只下载并验签 ZIP，仍需用户手动替换应用目录；自动回滚 helper 尚未实现。
 - 单实例已有窗口激活仍依赖唯一窗口标题 `NM Image Studio`；若未来允许多窗口或本地化标题，应改为更稳健的窗口标识。
@@ -68,15 +68,15 @@
 ## 未能在本机完成的验证
 
 - 没有第二台干净 Windows 10/11 机器可验证安装权限、杀毒软件、代理、无 WebView2、无 VC 运行库等差异。
-- 没有执行真实 GitHub Release 上传、签名资产下载和旧版本升级/回滚；按当前授权边界没有推送、打标签或发布 Release。
+- 本文档创建时尚未执行真实 GitHub Release 上传、签名资产下载和旧版本升级/回滚；正式发布完成后应在发布记录中补充 Release URL 和资产校验结果。
 - 没有使用真实代码签名证书做 SmartScreen/企业策略验证。
 - 没有对 1.0.x 的真实用户目录做破坏性升级演练；当前只做了代码级兼容测试和隔离检查。
 
 ## 发布建议
 
-当前版本可以进入“候选发布包/内部测试”阶段，但不应直接对外宣称更新链路已完全验证。公开发布前的最小收尾顺序是：
+当前版本可以进入正式发布收尾阶段；更新链路仍按后续测试 Release 单独验收。发布收尾顺序是：
 
-1. 修正 updater/Setup 元数据生成顺序，并在全新 staging 目录重建四类包。
+1. 在全新 staging 目录重建四类包。
 2. 清除旧 alpha 资产，只保留当前版本文件。
 3. 用测试 GitHub Release 完成一次 1.1.0 → 1.1.1 安装版升级和便携版下载校验。
 4. 若面向普通用户分发，给 Setup/Updater/离线 Setup 做 Authenticode 签名。

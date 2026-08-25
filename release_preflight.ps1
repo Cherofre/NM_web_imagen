@@ -525,7 +525,14 @@ Write-Host "Studio JS: $ExpectedJs"
 Write-Host "Studio CSS: $ExpectedCss"
 
 Write-Step "Local release artifacts"
-$VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
+$VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version-Web-x64.zip"
+if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
+  $VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version.zip"
+}
+if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
+  # Keep compatibility with the historical one-click web package location.
+  $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
+}
 Test-ZipClean -ZipPath $VersionedZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
 $LocalZipHash = Get-FileSha256 -Path $VersionedZip
 Write-Host "Local versioned package OK: $VersionedZip"

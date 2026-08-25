@@ -71,7 +71,19 @@ if ($null -eq $UpdaterSignature) {
 $InstallerOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Setup-x64.exe"
 $UpdaterOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Updater-x64.exe"
 $UpdaterSignatureOutput = $UpdaterOutput + ".sig"
-Copy-Item -LiteralPath $Installer.FullName -Destination $InstallerOutput -Force
+
+# The updater build emits a signed NSIS setup executable. Keep that artifact
+# separate from the ordinary installer package: the ordinary Setup manifest
+# and SHA256 must describe the unsigned online-bootstrapper build, not the
+# updater copy. If the ordinary package is missing, build it explicitly.
+if (-not (Test-Path -LiteralPath $InstallerOutput -PathType Leaf)) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\package_desktop_installer.ps1") `
+    -OutputPath $InstallerOutput `
+    -ReleaseVersion $ReleaseVersion
+  if ($LASTEXITCODE -ne 0) {
+    throw "Ordinary desktop Setup package failed with exit code $LASTEXITCODE."
+  }
+}
 Copy-Item -LiteralPath $Updater.FullName -Destination $UpdaterOutput -Force
 Copy-Item -LiteralPath $UpdaterSignature.FullName -Destination $UpdaterSignatureOutput -Force
 
