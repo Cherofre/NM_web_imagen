@@ -28,6 +28,23 @@ if ($Existing) {
 $InstallRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("NMImageStudioInstallSmoke_" + [guid]::NewGuid().ToString("N"))
 $InstallerProcess = $null
 $UninstallerProcess = $null
+$InstallDirRegistrySubKey = "Software\nmimagestudio\NM Image Studio"
+$PreviousInstallDirKeyExisted = $false
+$PreviousInstallDirValueExisted = $false
+$PreviousInstallDirValue = $null
+
+$PreviousInstallDirKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($InstallDirRegistrySubKey, $false)
+if ($null -ne $PreviousInstallDirKey) {
+  try {
+    $PreviousInstallDirKeyExisted = $true
+    $PreviousInstallDirValueExisted = @($PreviousInstallDirKey.GetValueNames()) -contains ""
+    if ($PreviousInstallDirValueExisted) {
+      $PreviousInstallDirValue = $PreviousInstallDirKey.GetValue("", $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    }
+  } finally {
+    $PreviousInstallDirKey.Dispose()
+  }
+}
 
 try {
   $InstallerProcess = Start-Process -FilePath $InstallerPath -ArgumentList @("/S", "/D=$InstallRoot") -PassThru -WindowStyle Hidden
@@ -74,5 +91,19 @@ try {
     if (-not $Removed -and (Test-Path -LiteralPath $InstallRoot)) {
       Write-Warning "Installer smoke passed, but Windows kept a temporary file locked: $InstallRoot"
     }
+  }
+  if ($PreviousInstallDirKeyExisted) {
+    $RestoreKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($InstallDirRegistrySubKey)
+    try {
+      if ($PreviousInstallDirValueExisted) {
+        $RestoreKey.SetValue("", $PreviousInstallDirValue, [Microsoft.Win32.RegistryValueKind]::String)
+      } else {
+        $RestoreKey.DeleteValue("", $false)
+      }
+    } finally {
+      $RestoreKey.Dispose()
+    }
+  } else {
+    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($InstallDirRegistrySubKey, $false)
   }
 }
