@@ -4,10 +4,10 @@
 - [x] Complete the signed updater implementation for installed and portable desktop modes, including the About-page state machine, task blocking, download progress, and web/desktop boundary.
 - [x] Generate and locally verify v1.1.0 Setup, offline WebView2 Setup, signed updater EXE, portable ZIP, web ZIP, signatures, no-BOM feeds, manifests and SHA256 sidecars.
 - [x] Pass the full local code/build/runtime/package matrix; see `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
-- [ ] Fix the updater packaging metadata order and rebuild from a clean staging directory so Setup and Updater metadata cannot diverge.
-- [ ] Remove old `v1.1.0-alpha.1` staging files and decide whether to unify `_release/web/` with the legacy `release_preflight.ps1` input path.
-- [ ] Manually test the running release EXE at `桌面设置 → 关于 → 检查更新`; until a Release feed exists, confirm the failure state is clear and the workbench remains usable.
-- [ ] Before publication, use a real signed test Release or local HTTPS feed for update-available, invalid-signature, install-from-old-version and portable download/replacement checks; add Authenticode signing if distributing to ordinary Windows users.
+- [x] Fix updater packaging metadata order and rebuild the v1.1.0 release assets.
+- [x] Publish GitHub Release `v1.1.0`, push `main` and tag `v1.1.0`.
+- [x] Synchronize web and desktop assets to both approved G: roots and pass destination preflight.
+- [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -18,10 +18,10 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `codex/desktop-v1.1.0`; the updater implementation is in `studio-web/src-tauri/src/updater.rs`, `studio-web/src/desktopUpdater.ts`, `scripts/package_desktop_updater.ps1`, and `scripts/generate_desktop_update_feed.ps1`.
+- Start here: continue on `main` / `v1.1.0`; the updater implementation is in `studio-web/src-tauri/src/updater.rs`, `studio-web/src/desktopUpdater.ts`, `scripts/package_desktop_updater.ps1`, and `scripts/generate_desktop_update_feed.ps1`.
 - Do not redo: the completed 171 Node + 251 Python tests, Tauri/PyInstaller build, normal/offline installer smoke, portable/web package smoke, coexistence smoke, signature/feed smoke, or local pre-release audit.
-- Verify next: repair clean-staging metadata, manually observe the no-feed About-page failure state, then use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states before any real GitHub Release.
-- Do not claim: a published updater feed, real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
+- Verify next: use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states.
+- Do not claim: a real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
 - Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.
@@ -30,7 +30,7 @@
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Pre-release audit: `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md` records the passed matrix, exact artifact hashes, current blockers, and machine/environment limits.
-- Release boundary: no push, merge, tag, GitHub Release or G: synchronization has been authorized for this branch.
+- Release boundary: v1.1.0 is published at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.0`; both G: destinations passed manifest and SHA256 verification.
 - Dirty worktree: current console/model follow-up and generated Studio assets are intentional; `.impeccable/` and `PRODUCT.md` are unrelated user files and must remain untouched.
 
 ## Previous v1.0.9 Handoff Notes

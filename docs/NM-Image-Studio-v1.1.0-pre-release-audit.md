@@ -1,9 +1,9 @@
 # NM Image Studio v1.1.0 预发布测试与审查
 
 - 日期：2026-08-21
-- 分支：`codex/desktop-v1.1.0`
+- 分支：`main`（tag `v1.1.0`）
 - 范围：桌面安装版、离线 WebView2 安装版、桌面便携版、网页 ZIP、更新器、网页/桌面共存、旧配置与数据边界、发布包清洁度。
-- 结论（预发布阶段）：运行时与本机发布烟测通过；公开发布前仍有发布流程和外部环境门槛。
+- 结论（已发布）：v1.1.0 GitHub Release、两处 G: 同步和本机发布烟测均完成；真实 1.1.0 → 1.1.1 升级、Authenticode 和干净机器差异仍列为后续风险。
 
 ## 已通过的测试矩阵
 
@@ -29,9 +29,9 @@
 | --- | ---: | --- |
 | `NM-Image-Studio-v1.1.0-Setup-x64.exe` | 26,302,945 | `6b4c1f940c7a8e8802cd8bad85ba7353fff785cb2a194c95dce8b24b50418ac9` |
 | `NM-Image-Studio-v1.1.0-Offline-WebView2-Setup-x64.exe` | 242,019,331 | `a8a148261f87b0e39bbe31ddcde58ee06199ec7cdc65d623c590026c9daf6e33` |
-| `NM-Image-Studio-v1.1.0-Portable-x64.zip` | 36,409,186 | `3d492857861b9a8e297296b1325308c0acc2b04cc65629c3d94f0b2684d97112` |
-| `NM-Image-Studio-v1.1.0-Updater-x64.exe` | 26,303,088 | `4b3c6eca3db857128fae94bf62c8b62ddc561fff0618394aaf24a0da0db78a1e` |
-| `NM_web_imagen-v1.1.0-Web-x64.zip` | 29,244,573 | 见同目录 `.sha256` |
+| `NM-Image-Studio-v1.1.0-Portable-x64.zip` | 36,408,550 | `65bb69cd03d96016f9d4346510440f3b5b04373c20c535b1b55165aadfe5c503` |
+| `NM-Image-Studio-v1.1.0-Updater-x64.exe` | 26,302,945 | `6b4c1f940c7a8e8802cd8bad85ba7353fff785cb2a194c95dce8b24b50418ac9` |
+| `NM_web_imagen-v1.1.0-Web-x64.zip` | 29,244,573 | `63cd8f8736f835c89ba07d01af41c9dda579fc3832cc9096cdda716c794d877f` |
 
 当前 `latest.json` 与 `portable-latest.json` 均为无 BOM、版本 1.1.0，URL、大小、SHA256 与当前 updater/Portable 文件一致；签名字段存在。
 
@@ -68,13 +68,19 @@
 ## 未能在本机完成的验证
 
 - 没有第二台干净 Windows 10/11 机器可验证安装权限、杀毒软件、代理、无 WebView2、无 VC 运行库等差异。
-- 本文档创建时尚未执行真实 GitHub Release 上传、签名资产下载和旧版本升级/回滚；正式发布完成后应在发布记录中补充 Release URL 和资产校验结果。
+- 本文档创建时尚未执行真实 GitHub Release 上传；现已完成 Release 上传和资产发布，但尚未执行旧版本升级/回滚。
 - 没有使用真实代码签名证书做 SmartScreen/企业策略验证。
 - 没有对 1.0.x 的真实用户目录做破坏性升级演练；当前只做了代码级兼容测试和隔离检查。
 
-## 发布建议
+## 发布记录
 
-当前版本可以进入正式发布收尾阶段；更新链路仍按后续测试 Release 单独验收。发布收尾顺序是：
+- GitHub `main` 已推送，annotated tag `v1.1.0` 已推送。
+- GitHub Release：`https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.0`。
+- 两处 G: 根均包含通过预检的 `NM_web_imagen` 网页目录、`NM_web_imagen-v1.1.0.zip` 和 `NM Image Studio Desktop` 桌面资产目录。
+
+## 后续建议
+
+当前版本已正式发布；更新链路仍按后续测试 Release 单独验收：
 
 1. 在全新 staging 目录重建四类包。
 2. 清除旧 alpha 资产，只保留当前版本文件。

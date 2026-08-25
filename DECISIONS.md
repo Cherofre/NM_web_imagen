@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-25 — Status: active: Publish v1.1.0 from `main` with separate web, normal installer, offline WebView2 installer, portable desktop, updater and feed assets; synchronize the clean web package and a `NM Image Studio Desktop` asset folder to both approved G: roots.
+- Reason: The user explicitly authorized the formal release and requested both distribution locations. Keeping web and desktop assets in separate directories preserves coexistence and the established web package layout.
+- Consequences / follow-up: GitHub Release is live at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.0`; a real 1.1.0 → 1.1.1 upgrade and Authenticode verification remain v1.1.1 follow-ups.
 - 2026-08-21 — Status: active: Treat the v1.1.0 desktop candidate as internally verified but not publicly releasable until clean-staging metadata, a real 1.1.0 → 1.1.1 upgrade, and (for ordinary Windows distribution) Authenticode signing are closed. The complete evidence lives in `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
 - Reason: Local smoke proves the application and package contents work on this Windows 11 x64 machine, but it cannot prove SmartScreen trust, no-WebView2 behavior, another-machine permissions, or a real Release upgrade. Separating “internal candidate” from “public release” prevents overstating those guarantees.
 - Consequences / follow-up: Keep all artifacts local, do not push/tag/release/sync G:, and require a fresh clean staging rebuild after the updater metadata-order fix. Legacy web preflight path differences and old alpha files must be resolved or explicitly excluded before upload.
