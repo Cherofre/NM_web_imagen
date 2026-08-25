@@ -4781,6 +4781,70 @@ button.primary-action:focus-visible,
   gap: 7px;
 }
 
+.desktop-settings-title.compact {
+  padding-bottom: 12px;
+}
+
+.desktop-settings-title h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.desktop-settings-title.compact p {
+  margin-top: 5px;
+}
+
+.desktop-storage-card {
+  margin-top: 18px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.desktop-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.desktop-storage-card > .desktop-path-hint {
+  display: block;
+  margin-top: 9px;
+}
+
+.desktop-migration-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.desktop-migration-preview code {
+  overflow: hidden;
+  color: var(--muted-strong);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-migration-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 13px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.desktop-migration-preview .primary-action {
+  justify-self: start;
+}
+
 .desktop-shortcut-list {
   border-top: 1px solid var(--line);
 }

@@ -66,6 +66,49 @@ export async function openDesktopDownloadsDirectory() {
   return true;
 }
 
+export async function chooseDesktopFolder(title: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<string | null>("desktop_choose_folder", { title });
+}
+
+export async function getDesktopDocumentsOutputsDirectory() {
+  if (!isDesktopRuntime()) return "";
+  return await invoke<string>("desktop_documents_outputs_directory");
+}
+
+export async function getDesktopDefaultOutputsDirectory() {
+  if (!isDesktopRuntime()) return "";
+  return await invoke<string>("desktop_default_outputs_directory");
+}
+
+export type DesktopMigrationScan = {
+  sourceRoot: string;
+  fileCount: number;
+  imageCount: number;
+  sessionCount: number;
+  historyCount: number;
+  totalBytes: number;
+};
+
+export async function scanDesktopMigration(source: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<DesktopMigrationScan>("desktop_scan_migration", { source });
+}
+
+export async function importDesktopData(source: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<{
+    scan: DesktopMigrationScan;
+    targetRoot: string;
+    backupRoot: string | null;
+  }>("desktop_import_data", { source });
+}
+
+export async function setDesktopOutputsDirectory(path: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<{ path: string; restartRequired: boolean }>("desktop_set_outputs_directory", { path });
+}
+
 export async function openBackendDebugConsole() {
   if (!isDesktopRuntime()) return false;
   await invoke("desktop_open_backend_console");

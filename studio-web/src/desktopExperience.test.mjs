@@ -20,6 +20,11 @@ test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /version: string;/);
   assert.match(runtimeSource, /desktop_open_outputs_directory/);
   assert.match(runtimeSource, /desktop_open_data_directory/);
+  assert.match(runtimeSource, /desktop_choose_folder/);
+  assert.match(runtimeSource, /desktop_scan_migration/);
+  assert.match(runtimeSource, /desktop_import_data/);
+  assert.match(runtimeSource, /desktop_set_outputs_directory/);
+  assert.match(runtimeSource, /desktop_default_outputs_directory/);
   assert.match(runtimeSource, /desktop_open_backend_log/);
   assert.match(runtimeSource, /openBackendDebugConsole\(\)/);
   assert.match(runtimeSource, /invoke\("desktop_open_backend_console"\)/);
@@ -86,10 +91,16 @@ test("release desktop builds hide the shell console while backend diagnostics st
   assert.match(tauriLibSource, /fn desktop_open_backend_console\(state: State<'_, DesktopRuntimeState>\)/);
   assert.match(tauriLibSource, /NM_IMAGE_STUDIO_BACKEND_LOG/);
   assert.match(tauriLibSource, /\.env\("IMAGE_TOOL_DESKTOP_MODE", "1"\)/);
+  assert.match(tauriLibSource, /\.env\("IMAGE_TOOL_OUTPUTS_ROOT", &outputs_root\)/);
   assert.match(tauriLibSource, /Get-Content -LiteralPath \$logPath -Tail 200 -Wait/);
   assert.match(tauriLibSource, /state\._backend_job\.assign\(&child\)/);
   assert.match(tauriLibSource, /\.env\("PYTHONUNBUFFERED", "1"\)/);
   assert.match(tauriLibSource, /desktop_open_backend_console,/);
+  assert.match(tauriLibSource, /desktop_choose_folder,/);
+  assert.match(tauriLibSource, /desktop_scan_migration,/);
+  assert.match(tauriLibSource, /desktop_import_data,/);
+  assert.match(tauriLibSource, /desktop_set_outputs_directory,/);
+  assert.match(tauriLibSource, /desktop_default_outputs_directory,/);
 });
 
 test("Windows desktop runtime enforces one shell and crash-cleans the backend", () => {

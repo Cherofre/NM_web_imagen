@@ -1,13 +1,11 @@
 # Next Actions
 
 ## Now
-- [x] Complete the signed updater implementation for installed and portable desktop modes, including the About-page state machine, task blocking, download progress, and web/desktop boundary.
-- [x] Generate and locally verify v1.1.0 Setup, offline WebView2 Setup, signed updater EXE, portable ZIP, web ZIP, signatures, no-BOM feeds, manifests and SHA256 sidecars.
-- [x] Pass the full local code/build/runtime/package matrix; see `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
-- [x] Fix updater packaging metadata order and rebuild the v1.1.0 release assets.
-- [x] Publish GitHub Release `v1.1.0`, push `main` and tag `v1.1.0`.
-- [x] Synchronize web and desktop assets to both approved G: roots and pass destination preflight.
-- [x] Add Chinese user-facing desktop filenames and an extracted portable folder with a one-click launcher to both G: roots.
+- [x] Publish and synchronize v1.1.0 web/desktop artifacts, signed updater metadata, Chinese distribution names and the extracted portable launcher.
+- [x] Pass the v1.1.0 local build/runtime/package matrix; see `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
+- [x] Add desktop storage migration scanning/import with automatic target backup for web and portable layouts.
+- [x] Add configurable desktop output root with Documents shortcut and custom Windows folder picker; restart is required after changing it.
+- [x] Rebuild the PyInstaller sidecar, Vite assets and Tauri release EXE with the storage changes.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
@@ -28,6 +26,8 @@
 - Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
 - Verification caveat: portable ZIP creation and extracted-package startup smoke passed with the dedicated scripts; a missing-WebView2 machine has not been simulated, so only the registry-check code path is compiled and reviewed.
+- Current feature caveat: the new portable smoke must be rerun after closing the already-running installed NM Image Studio instance; the failure observed on 2026-08-25 was the existing single-instance guard exiting the second shell with code 0, not a backend startup error.
+- Storage behavior: migration copies the selected `outputs`, `data\outputs`, or direct output directory into the current output root and renames the old target to a timestamped `.backup-*` sibling. Output-root changes persist in `desktop-storage.json` and take effect after restarting the desktop app.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Pre-release audit: `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md` records the passed matrix, exact artifact hashes, current blockers, and machine/environment limits.

@@ -32,6 +32,28 @@ struct DesktopRuntimeInfo {
     version: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MigrationScan {
+    source_root: String,
+    file_count: usize,
+    image_count: usize,
+    session_count: usize,
+    history_count: usize,
+    total_bytes: u64,
+}
+
+#[derive(Deserialize)]
+struct StorageSettings {
+    outputs_root: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OutputDirectoryChange {
+    path: String,
+    restart_required: bool,
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedWindowState {
@@ -69,6 +91,218 @@ fn desktop_runtime_info(state: State<'_, DesktopRuntimeState>) -> DesktopRuntime
 
 fn window_state_path(data_root: &Path) -> PathBuf {
     data_root.join("desktop-window.json")
+}
+
+fn storage_settings_path(data_root: &Path) -> PathBuf {
+    data_root.join("desktop-storage.json")
+}
+
+fn normalized_absolute_path(path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("failed to resolve current directory: {error}"))?
+            .join(path)
+    };
+    Ok(absolute)
+}
+
+fn is_same_or_nested(path: &Path, root: &Path) -> bool {
+    let path = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    let root = root
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    path == root || path.starts_with(&(root + "\\"))
+}
+
+fn configured_outputs_root(data_root: &Path) -> PathBuf {
+    let default_root = data_root.join("outputs");
+    let Ok(raw) = fs::read_to_string(storage_settings_path(data_root)) else {
+        return default_root;
+    };
+    let Ok(settings) = serde_json::from_str::<StorageSettings>(&raw) else {
+        return default_root;
+    };
+    let Some(value) = settings
+        .outputs_root
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return default_root;
+    };
+    let candidate = PathBuf::from(value);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        data_root.join(candidate)
+    }
+}
+
+fn write_storage_settings(data_root: &Path, outputs_root: &Path) -> Result<(), String> {
+    let path = storage_settings_path(data_root);
+    let temp = path.with_extension("json.tmp");
+    let payload = serde_json::json!({
+        "outputs_root": outputs_root.to_string_lossy(),
+    });
+    fs::write(
+        &temp,
+        serde_json::to_vec_pretty(&payload)
+            .map_err(|error| format!("failed to serialize storage settings: {error}"))?,
+    )
+    .map_err(|error| format!("failed to write storage settings: {error}"))?;
+    fs::rename(&temp, &path).map_err(|error| format!("failed to commit storage settings: {error}"))
+}
+
+fn is_image_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    )
+}
+
+fn collect_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries =
+        fs::read_dir(root).map_err(|error| format!("无法读取目录 {}: {error}", root.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("无法读取目录项: {error}"))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("无法读取文件类型 {}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            return Err(format!("迁移源包含不支持的符号链接: {}", path.display()));
+        }
+        if file_type.is_dir() {
+            collect_files(&path, files)?;
+        } else if file_type.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn migration_outputs_root(source: &Path) -> Result<PathBuf, String> {
+    let source = normalized_absolute_path(source)?;
+    let candidates = [
+        source.join("outputs"),
+        source.join("data").join("outputs"),
+        source,
+    ];
+    for candidate in candidates {
+        if !candidate.is_dir() {
+            continue;
+        }
+        if candidate.join("history.json").is_file()
+            || candidate.join("studio_sessions.json").is_file()
+            || candidate.join("session_refs").is_dir()
+            || candidate
+                .read_dir()
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .any(|entry| is_image_file(&entry.path()))
+        {
+            return Ok(candidate);
+        }
+    }
+    Err("所选目录中没有找到 outputs、会话或成图文件。".to_string())
+}
+
+fn json_array_count(path: &Path, key: &str) -> usize {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return 0;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return 0;
+    };
+    value
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0)
+}
+
+fn scan_migration_source(source: &Path) -> Result<MigrationScan, String> {
+    let source_root = migration_outputs_root(source)?;
+    let mut files = Vec::new();
+    collect_files(&source_root, &mut files)?;
+    let total_bytes = files
+        .iter()
+        .filter_map(|path| fs::metadata(path).ok().map(|meta| meta.len()))
+        .sum();
+    let image_count = files.iter().filter(|path| is_image_file(path)).count();
+    Ok(MigrationScan {
+        source_root: source_root.to_string_lossy().into_owned(),
+        file_count: files.len(),
+        image_count,
+        session_count: json_array_count(&source_root.join("studio_sessions.json"), "sessions"),
+        history_count: json_array_count(&source_root.join("history.json"), "entries"),
+        total_bytes,
+    })
+}
+
+fn copy_directory_contents(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir_all(target)
+        .map_err(|error| format!("无法创建目标目录 {}: {error}", target.display()))?;
+    let mut files = Vec::new();
+    collect_files(source, &mut files)?;
+    for source_file in files {
+        let relative = source_file
+            .strip_prefix(source)
+            .map_err(|error| format!("无法计算迁移相对路径: {error}"))?;
+        let target_file = target.join(relative);
+        if let Some(parent) = target_file.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("无法创建目标子目录 {}: {error}", parent.display()))?;
+        }
+        fs::copy(&source_file, &target_file).map_err(|error| {
+            format!(
+                "复制文件失败 {} -> {}: {error}",
+                source_file.display(),
+                target_file.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn backup_directory(path: &Path) -> Result<Option<PathBuf>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("outputs");
+    let backup = path.with_file_name(format!("{name}.backup-{stamp}"));
+    fs::rename(path, &backup)
+        .map_err(|error| format!("无法备份现有目录 {}: {error}", path.display()))?;
+    Ok(Some(backup))
+}
+
+fn replace_directory_contents(source: &Path, target: &Path) -> Result<Option<PathBuf>, String> {
+    let backup = backup_directory(target)?;
+    if let Err(error) = copy_directory_contents(source, target) {
+        let _ = fs::remove_dir_all(target);
+        if let Some(backup_path) = &backup {
+            let _ = fs::rename(backup_path, target);
+        }
+        return Err(error);
+    }
+    Ok(backup)
 }
 
 fn normalized_window_state(state: SavedWindowState) -> SavedWindowState {
@@ -203,6 +437,124 @@ fn desktop_open_outputs_directory(state: State<'_, DesktopRuntimeState>) -> Resu
 #[tauri::command]
 fn desktop_open_data_directory(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
     open_in_explorer(Path::new(&state.info.data_root), false)
+}
+
+#[cfg(windows)]
+fn choose_folder_dialog(title: &str) -> Result<Option<PathBuf>, String> {
+    const SCRIPT: &str = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = $env:NM_IMAGE_STUDIO_FOLDER_DIALOG_TITLE
+$dialog.ShowNewFolderButton = $true
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  [Console]::Write($dialog.SelectedPath)
+}
+"#;
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-STA",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("NM_IMAGE_STUDIO_FOLDER_DIALOG_TITLE", title)
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .creation_flags(0x08000000)
+        .output()
+        .map_err(|error| format!("无法打开文件夹选择器: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(selected)))
+    }
+}
+
+#[cfg(not(windows))]
+fn choose_folder_dialog(_title: &str) -> Result<Option<PathBuf>, String> {
+    Err("文件夹选择器仅支持 Windows 桌面版".to_string())
+}
+
+#[tauri::command]
+fn desktop_choose_folder(title: String) -> Result<Option<String>, String> {
+    Ok(choose_folder_dialog(&title)?.map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn desktop_documents_outputs_directory(app: tauri::AppHandle) -> Result<String, String> {
+    let documents = app
+        .path()
+        .document_dir()
+        .map_err(|error| format!("无法定位 Windows 文档目录: {error}"))?;
+    Ok(documents
+        .join("NM Image Studio")
+        .to_string_lossy()
+        .into_owned())
+}
+
+#[tauri::command]
+fn desktop_default_outputs_directory(state: State<'_, DesktopRuntimeState>) -> String {
+    Path::new(&state.info.data_root)
+        .join("outputs")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tauri::command]
+fn desktop_scan_migration(source: String) -> Result<MigrationScan, String> {
+    scan_migration_source(Path::new(&source))
+}
+
+#[tauri::command]
+fn desktop_import_data(
+    source: String,
+    state: State<'_, DesktopRuntimeState>,
+) -> Result<serde_json::Value, String> {
+    let source_root = migration_outputs_root(Path::new(&source))?;
+    let target_root = PathBuf::from(&state.info.outputs_root);
+    if is_same_or_nested(&source_root, &target_root)
+        || is_same_or_nested(&target_root, &source_root)
+    {
+        return Err("迁移源目录不能与当前存图目录相同或互相嵌套。".to_string());
+    }
+    let scan = scan_migration_source(&source_root)?;
+    let backup = replace_directory_contents(&source_root, &target_root)?;
+    Ok(serde_json::json!({
+        "scan": scan,
+        "targetRoot": target_root.to_string_lossy(),
+        "backupRoot": backup.map(|path| path.to_string_lossy().into_owned()),
+    }))
+}
+
+#[tauri::command]
+fn desktop_set_outputs_directory(
+    path: String,
+    state: State<'_, DesktopRuntimeState>,
+) -> Result<OutputDirectoryChange, String> {
+    let target_root = normalized_absolute_path(Path::new(&path))?;
+    let current_root = PathBuf::from(&state.info.outputs_root);
+    if is_same_or_nested(&target_root, &current_root)
+        || is_same_or_nested(&current_root, &target_root)
+    {
+        return Err("新的存图目录不能与当前目录相同或互相嵌套。".to_string());
+    }
+    fs::create_dir_all(&target_root)
+        .map_err(|error| format!("无法创建新的存图目录 {}: {error}", target_root.display()))?;
+    replace_directory_contents(&current_root, &target_root)?;
+    write_storage_settings(Path::new(&state.info.data_root), &target_root)?;
+    Ok(OutputDirectoryChange {
+        path: target_root.to_string_lossy().into_owned(),
+        restart_required: true,
+    })
 }
 
 #[tauri::command]
@@ -388,6 +740,12 @@ pub fn run() {
             desktop_runtime_info,
             desktop_open_outputs_directory,
             desktop_open_data_directory,
+            desktop_choose_folder,
+            desktop_documents_outputs_directory,
+            desktop_default_outputs_directory,
+            desktop_scan_migration,
+            desktop_import_data,
+            desktop_set_outputs_directory,
             desktop_open_backend_log,
             desktop_open_downloads_directory,
             desktop_open_backend_console,
@@ -413,7 +771,7 @@ pub fn run() {
                 app.path().app_local_data_dir()?
             };
             std::fs::create_dir_all(&data_root)?;
-            let outputs_root = data_root.join("outputs");
+            let outputs_root = configured_outputs_root(&data_root);
             std::fs::create_dir_all(&outputs_root)?;
             let log_path = data_root.join("desktop-backend.log");
             let saved_window = load_window_state(&data_root);
@@ -443,6 +801,7 @@ pub fn run() {
                 .args(["--host", "127.0.0.1", "--port", &port_text])
                 .current_dir(&data_root)
                 .env("IMAGE_TOOL_DATA_ROOT", &data_root)
+                .env("IMAGE_TOOL_OUTPUTS_ROOT", &outputs_root)
                 .env("IMAGE_TOOL_DESKTOP_MODE", "1")
                 .env("IMAGE_TOOL_DESKTOP_TOKEN", &token)
                 .env("PYTHONUNBUFFERED", "1")
@@ -539,4 +898,50 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "nm-image-studio-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn migration_detects_web_and_portable_layouts() {
+        let root = test_root("migration-layout");
+        let web_root = root.join("web");
+        let web_outputs = web_root.join("outputs");
+        fs::create_dir_all(web_outputs.join("session_refs")).unwrap();
+        fs::write(web_outputs.join("history.json"), br#"{"entries":[{}]}"#).unwrap();
+        fs::write(
+            web_outputs.join("studio_sessions.json"),
+            br#"{"sessions":[{}]}"#,
+        )
+        .unwrap();
+        fs::write(web_outputs.join("result.png"), b"png").unwrap();
+        let web_scan = scan_migration_source(&web_root).unwrap();
+        assert_eq!(web_scan.source_root, web_outputs.to_string_lossy());
+        assert_eq!(web_scan.session_count, 1);
+        assert_eq!(web_scan.history_count, 1);
+        assert_eq!(web_scan.image_count, 1);
+
+        let portable_root = root.join("portable");
+        let portable_outputs = portable_root.join("data").join("outputs");
+        fs::create_dir_all(&portable_outputs).unwrap();
+        fs::write(portable_outputs.join("history.json"), br#"{"entries":[]}"#).unwrap();
+        let portable_scan = scan_migration_source(&portable_root).unwrap();
+        assert_eq!(
+            portable_scan.source_root,
+            portable_outputs.to_string_lossy()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }

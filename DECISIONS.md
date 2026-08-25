@@ -1,6 +1,12 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-25 — Status: active: Desktop storage migration replaces the current output root only after scanning a user-selected old directory, and first renames the current target to a timestamped `.backup-*` sibling. It accepts a direct `outputs` folder, a web project root containing `outputs`, or a portable desktop root containing `data\outputs`.
+- Reason: Users need a practical web-to-desktop recovery path, but silent merges can duplicate sessions and overwrites are difficult to undo. A scan preview plus an automatic backup makes the operation understandable and recoverable without scanning the whole disk.
+- Consequences / follow-up: The current release does not merge conflicting records at the JSON identity level; it replaces the current output root after confirmation. A future migration wizard can add selective conflict policies if needed.
+- 2026-08-25 — Status: active: Desktop output storage is configurable through a persisted absolute `desktop-storage.json` setting. The backend receives `IMAGE_TOOL_OUTPUTS_ROOT`, while configuration, logs and window state remain under the desktop data root. The setting takes effect after a restart, and the UI offers `文档\\NM Image Studio` as a shortcut.
+- Reason: Generated images and their history/session metadata should be movable to a user-visible location without moving the application runtime or API configuration. Keeping the sidecar data root separate preserves installed/portable lifecycle behavior and web/desktop coexistence.
+- Consequences / follow-up: Portable users who move the whole ZIP should keep the default package-local `data\\outputs`; an external absolute output path is not bundled into a copied ZIP and must be moved separately.
 - 2026-08-25 — Status: active: Keep canonical ASCII release asset names for updater/feed compatibility, while publishing a separate Chinese-named desktop distribution layer on G: with the portable ZIP already extracted and a one-click launcher.
 - Reason: The updater feed and signed URLs are machine-facing; renaming those assets in place would add unnecessary Unicode URL and signature compatibility risk. Users primarily need clear install choices and a directly runnable local folder.
 - Consequences / follow-up: The G: desktop folder exposes `安装版`, `离线安装版`, `便携版` and `说明-如何选择版本.txt`; the updater is not presented as a manual launch target.

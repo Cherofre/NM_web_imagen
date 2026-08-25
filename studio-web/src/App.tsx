@@ -76,7 +76,11 @@ import {
 import { buildSubmissionFields } from "./submissionPayload";
 import {
   apiFetch,
+  chooseDesktopFolder,
+  getDesktopDefaultOutputsDirectory,
   getDesktopRuntimeInfo,
+  getDesktopDocumentsOutputsDirectory,
+  importDesktopData,
   isDesktopRuntime,
   isRuntimeOutputUrl,
   openBackendDebugConsole,
@@ -84,6 +88,9 @@ import {
   openDesktopPath,
   resetDesktopWindow,
   resolveRuntimeUrl,
+  scanDesktopMigration,
+  setDesktopOutputsDirectory,
+  type DesktopMigrationScan,
 } from "./desktopRuntime";
 import {
   checkDesktopUpdate,
@@ -1326,6 +1333,9 @@ function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(false);
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
+  const [desktopMigrationScan, setDesktopMigrationScan] = useState<DesktopMigrationScan | null>(null);
+  const [desktopMigrationSource, setDesktopMigrationSource] = useState("");
+  const [desktopStorageBusy, setDesktopStorageBusy] = useState(false);
   const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcutBindings>(() => loadDesktopShortcutBindings());
   const [capturingShortcut, setCapturingShortcut] = useState<DesktopShortcutAction | null>(null);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>("idle");
@@ -4203,6 +4213,120 @@ function App() {
     }
   }
 
+  function formatDesktopStorageBytes(value: number) {
+    if (!Number.isFinite(value) || value < 1024) return `${Math.max(0, Math.round(value))} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let amount = value;
+    let unit = "B";
+    for (const next of units) {
+      amount /= 1024;
+      unit = next;
+      if (amount < 1024) break;
+    }
+    return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`;
+  }
+
+  async function chooseDesktopMigrationSource() {
+    if (desktopStorageBusy || activeQueueCount > 0) {
+      setNotice(t("desktop.storageBusyHint"));
+      return;
+    }
+    setDesktopStorageBusy(true);
+    try {
+      const selected = await chooseDesktopFolder(t("desktop.chooseMigrationSource"));
+      if (!selected) return;
+      const scan = await scanDesktopMigration(selected);
+      if (!scan) return;
+      setDesktopMigrationSource(selected);
+      setDesktopMigrationScan(scan);
+    } catch (error) {
+      setDesktopMigrationSource("");
+      setDesktopMigrationScan(null);
+      setNotice(error instanceof Error ? error.message : t("desktop.migrationScanFailed"));
+    } finally {
+      setDesktopStorageBusy(false);
+    }
+  }
+
+  async function importDesktopMigration() {
+    if (!desktopMigrationSource || !desktopMigrationScan || desktopStorageBusy) return;
+    if (activeQueueCount > 0) {
+      setNotice(t("desktop.storageBusyHint"));
+      return;
+    }
+    const confirmed = window.confirm(t("desktop.migrationConfirm", {
+      sessions: desktopMigrationScan.sessionCount,
+      history: desktopMigrationScan.historyCount,
+      images: desktopMigrationScan.imageCount,
+    }));
+    if (!confirmed) return;
+    setDesktopStorageBusy(true);
+    try {
+      const result = await importDesktopData(desktopMigrationSource);
+      if (!result) return;
+      setNotice(t("desktop.migrationComplete"));
+      setDesktopMigrationSource("");
+      setDesktopMigrationScan(null);
+      window.setTimeout(() => window.location.reload(), 450);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.migrationFailed"));
+    } finally {
+      setDesktopStorageBusy(false);
+    }
+  }
+
+  async function chooseDesktopOutputsDirectory() {
+    if (desktopStorageBusy || activeQueueCount > 0) {
+      setNotice(t("desktop.storageBusyHint"));
+      return;
+    }
+    setDesktopStorageBusy(true);
+    try {
+      const selected = await chooseDesktopFolder(t("desktop.chooseOutputsDirectory"));
+      if (!selected) return;
+      const result = await setDesktopOutputsDirectory(selected);
+      if (result) setNotice(t("desktop.outputsChangedRestart"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+    } finally {
+      setDesktopStorageBusy(false);
+    }
+  }
+
+  async function useDesktopDocumentsOutputsDirectory() {
+    if (desktopStorageBusy || activeQueueCount > 0) {
+      setNotice(t("desktop.storageBusyHint"));
+      return;
+    }
+    setDesktopStorageBusy(true);
+    try {
+      const selected = await getDesktopDocumentsOutputsDirectory();
+      const result = await setDesktopOutputsDirectory(selected);
+      if (result) setNotice(t("desktop.outputsChangedRestart"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+    } finally {
+      setDesktopStorageBusy(false);
+    }
+  }
+
+  async function restoreDesktopDefaultOutputsDirectory() {
+    if (desktopStorageBusy || activeQueueCount > 0) {
+      setNotice(t("desktop.storageBusyHint"));
+      return;
+    }
+    setDesktopStorageBusy(true);
+    try {
+      const selected = await getDesktopDefaultOutputsDirectory();
+      const result = await setDesktopOutputsDirectory(selected);
+      if (result) setNotice(t("desktop.outputsChangedRestart"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+    } finally {
+      setDesktopStorageBusy(false);
+    }
+  }
+
   function copyPrompt(prompt: string) {
     void navigator.clipboard?.writeText(prompt);
     setNotice(t("status.promptCopied"));
@@ -5684,6 +5808,49 @@ function App() {
                       </div>
                     </section>
                   ))}
+                  <section className="desktop-storage-card">
+                    <div className="desktop-settings-title compact">
+                      <h3>{t("desktop.outputsLocationTitle")}</h3>
+                      <p>{t("desktop.outputsLocationHint")}</p>
+                    </div>
+                    <div className="desktop-storage-actions">
+                      <button type="button" onClick={() => void restoreDesktopDefaultOutputsDirectory()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                        {t("desktop.restoreDefaultOutputsFolder")}
+                      </button>
+                      <button type="button" onClick={() => void useDesktopDocumentsOutputsDirectory()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                        {t("desktop.useDocumentsFolder")}
+                      </button>
+                      <button type="button" onClick={() => void chooseDesktopOutputsDirectory()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                        {t("desktop.chooseOutputsFolder")}
+                      </button>
+                    </div>
+                    <p className="desktop-path-hint">{t("desktop.outputsChangeRestartHint")}</p>
+                  </section>
+                  <section className="desktop-storage-card">
+                    <div className="desktop-settings-title compact">
+                      <h3>{t("desktop.migrationTitle")}</h3>
+                      <p>{t("desktop.migrationHint")}</p>
+                    </div>
+                    <div className="desktop-storage-actions">
+                      <button type="button" onClick={() => void chooseDesktopMigrationSource()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                        {desktopStorageBusy ? t("desktop.migrationWorking") : t("desktop.chooseMigrationSource")}
+                      </button>
+                    </div>
+                    {desktopMigrationScan && (
+                      <div className="desktop-migration-preview" role="status" aria-live="polite">
+                        <code title={desktopMigrationScan.sourceRoot}>{desktopMigrationScan.sourceRoot}</code>
+                        <div className="desktop-migration-stats">
+                          <span>{t("desktop.migrationSessions", { count: desktopMigrationScan.sessionCount })}</span>
+                          <span>{t("desktop.migrationHistory", { count: desktopMigrationScan.historyCount })}</span>
+                          <span>{t("desktop.migrationImages", { count: desktopMigrationScan.imageCount })}</span>
+                          <span>{t("desktop.migrationSize", { value: formatDesktopStorageBytes(desktopMigrationScan.totalBytes) })}</span>
+                        </div>
+                        <button type="button" className="primary-action" onClick={() => void importDesktopMigration()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                          {t("desktop.importMigration")}
+                        </button>
+                      </div>
+                    )}
+                  </section>
                 </div>
               )}
 

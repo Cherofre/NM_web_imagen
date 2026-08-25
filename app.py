@@ -60,7 +60,7 @@ APP_ASSET_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 ROOT_DIR = Path(os.getenv("IMAGE_TOOL_DATA_ROOT") or APP_ASSET_ROOT).expanduser().resolve()
 STATIC_DIR = APP_ASSET_ROOT / "static"
 STUDIO_STATIC_DIR = STATIC_DIR / "studio"
-OUTPUTS_DIR = ROOT_DIR / "outputs"
+OUTPUTS_DIR = Path(os.getenv("IMAGE_TOOL_OUTPUTS_ROOT") or (ROOT_DIR / "outputs")).expanduser().resolve()
 OUTPUTS_URL_PREFIX = "/outputs"
 VERSION_FILE = APP_ASSET_ROOT / "VERSION"
 HISTORY_FILE = OUTPUTS_DIR / "history.json"
@@ -91,6 +91,15 @@ DESKTOP_CONFIG_SECRET_PREFIX = "dpapi:v1:"
 def compute_instance_id(root: Path = ROOT_DIR) -> str:
     normalized_root = str(Path(root).resolve()).replace("/", "\\").rstrip("\\").casefold()
     return hashlib.sha256(normalized_root.encode("utf-8")).hexdigest()[:20]
+
+
+def storage_path_display(path: Path) -> str:
+    """Return a stable user-facing path, relative when it belongs to the data root."""
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(ROOT_DIR)).replace("\\", "/")
+    except ValueError:
+        return str(resolved)
 
 DEFAULT_BANANA_BASE_URL = "https://banana-api.example.com"
 DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
@@ -1586,7 +1595,7 @@ def save_generated_images(
 
                 image["mime_type"] = mime_type
                 image["saved_name"] = filename
-                image["saved_path"] = str(output_path.relative_to(ROOT_DIR)).replace("\\", "/")
+                image["saved_path"] = storage_path_display(output_path)
                 image["saved_url"] = f"{OUTPUTS_URL_PREFIX}/{quote(filename)}"
                 image["save_status"] = "saved"
                 if dimensions:
@@ -2674,7 +2683,7 @@ def legacy_output_entries(known_names: set[str]) -> List[Dict[str, Any]]:
                     {
                         "name": path.name,
                         "saved_url": f"{OUTPUTS_URL_PREFIX}/{quote(path.name)}",
-                        "saved_path": str(path.relative_to(ROOT_DIR)).replace("\\", "/"),
+                        "saved_path": storage_path_display(path),
                         "mime_type": mimetypes.guess_type(path.name)[0] or "image/*",
                         "source": "legacy-output",
                     }
@@ -4148,7 +4157,7 @@ def create_app() -> FastAPI:
     async def generation_history(limit: int = 120) -> Dict[str, Any]:
         return {
             "ok": True,
-            "path": str(HISTORY_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(HISTORY_FILE),
             "entries": get_history_payload(limit),
         }
 
@@ -4157,7 +4166,7 @@ def create_app() -> FastAPI:
         state = read_studio_session_state()
         return {
             "ok": True,
-            "path": str(STUDIO_SESSIONS_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(STUDIO_SESSIONS_FILE),
             **state,
         }
 
@@ -4175,8 +4184,8 @@ def create_app() -> FastAPI:
             )
         return {
             "ok": True,
-            "path": str(STUDIO_SESSIONS_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
-            "reference_dir": str(SESSION_REFS_DIR.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(STUDIO_SESSIONS_FILE),
+            "reference_dir": storage_path_display(SESSION_REFS_DIR),
             **state,
         }
 
@@ -4192,7 +4201,7 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "entry": updated_entry,
-            "path": str(HISTORY_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(HISTORY_FILE),
             "entries": get_history_payload(limit),
         }
 
@@ -4214,7 +4223,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "deleted_id": entry_id,
             "deleted_files": deleted_files,
-            "path": str(HISTORY_FILE.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(HISTORY_FILE),
             "entries": get_history_payload(limit),
         }
 
@@ -4230,7 +4239,7 @@ def create_app() -> FastAPI:
 
         return {
             "ok": True,
-            "path": str(OUTPUTS_DIR.relative_to(ROOT_DIR)).replace("\\", "/"),
+            "path": storage_path_display(OUTPUTS_DIR),
         }
 
     @app.post("/api/chat/gpt-image-2")
