@@ -1,6 +1,9 @@
 # Decisions
 
 ## Active Decisions
+- 2026-08-25 — Status: active: Keep canonical ASCII release asset names for updater/feed compatibility, while publishing a separate Chinese-named desktop distribution layer on G: with the portable ZIP already extracted and a one-click launcher.
+- Reason: The updater feed and signed URLs are machine-facing; renaming those assets in place would add unnecessary Unicode URL and signature compatibility risk. Users primarily need clear install choices and a directly runnable local folder.
+- Consequences / follow-up: The G: desktop folder exposes `安装版`, `离线安装版`, `便携版` and `说明-如何选择版本.txt`; the updater is not presented as a manual launch target.
 - 2026-08-25 — Status: active: Publish v1.1.0 from `main` with separate web, normal installer, offline WebView2 installer, portable desktop, updater and feed assets; synchronize the clean web package and a `NM Image Studio Desktop` asset folder to both approved G: roots.
 - Reason: The user explicitly authorized the formal release and requested both distribution locations. Keeping web and desktop assets in separate directories preserves coexistence and the established web package layout.
 - Consequences / follow-up: GitHub Release is live at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.0`; a real 1.1.0 → 1.1.1 upgrade and Authenticode verification remain v1.1.1 follow-ups.

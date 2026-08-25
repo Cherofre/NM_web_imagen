@@ -7,6 +7,7 @@
 - [x] Fix updater packaging metadata order and rebuild the v1.1.0 release assets.
 - [x] Publish GitHub Release `v1.1.0`, push `main` and tag `v1.1.0`.
 - [x] Synchronize web and desktop assets to both approved G: roots and pass destination preflight.
+- [x] Add Chinese user-facing desktop filenames and an extracted portable folder with a one-click launcher to both G: roots.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
