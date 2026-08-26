@@ -133,6 +133,12 @@ fn is_same_or_nested(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(&(root + "\\"))
 }
 
+fn paths_equal_case_insensitive(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .replace('/', "\\")
+        .eq_ignore_ascii_case(&right.to_string_lossy().replace('/', "\\"))
+}
+
 fn configured_outputs_root(data_root: &Path) -> PathBuf {
     let default_root = data_root.join("outputs");
     let Ok(raw) = fs::read_to_string(storage_settings_path(data_root)) else {
@@ -206,7 +212,9 @@ fn migration_outputs_root(source: &Path) -> Result<PathBuf, String> {
     let source = normalized_absolute_path(source)?;
     let candidates = [
         source.join("outputs"),
+        source.join("output"),
         source.join("data").join("outputs"),
+        source.join("data").join("output"),
         source,
     ];
     for candidate in candidates {
@@ -574,6 +582,12 @@ fn desktop_set_outputs_directory(
     if is_same_or_nested(&target_root, &current_root)
         || is_same_or_nested(&current_root, &target_root)
     {
+        if paths_equal_case_insensitive(&target_root, &current_root) {
+            return Ok(OutputDirectoryChange {
+                path: target_root.to_string_lossy().into_owned(),
+                restart_required: false,
+            });
+        }
         return Err("新的存图目录不能与当前目录相同或互相嵌套。".to_string());
     }
     fs::create_dir_all(&target_root)
@@ -1090,6 +1104,14 @@ mod tests {
             portable_scan.source_root,
             portable_outputs.to_string_lossy()
         );
+
+        let direct_outputs = root.join("direct-outputs");
+        fs::create_dir_all(direct_outputs.join("session_refs")).unwrap();
+        fs::write(direct_outputs.join("history.json"), br#"{"entries":[]}"#).unwrap();
+        fs::write(direct_outputs.join("result.png"), b"png").unwrap();
+        let direct_scan = scan_migration_source(&direct_outputs).unwrap();
+        assert_eq!(direct_scan.source_root, direct_outputs.to_string_lossy());
+        assert_eq!(direct_scan.image_count, 1);
         let _ = fs::remove_dir_all(root);
     }
 }

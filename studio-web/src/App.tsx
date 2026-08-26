@@ -1332,6 +1332,18 @@ function isPreviewControlTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("button, a, .lightbox-zoom-tools"));
 }
 
+function desktopCommandError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error === "object") {
+    const value = error as { message?: unknown; error?: unknown; detail?: unknown };
+    for (const candidate of [value.message, value.error, value.detail]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+  }
+  return fallback;
+}
+
 function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
@@ -4377,7 +4389,7 @@ function App() {
     } catch (error) {
       setDesktopMigrationSource("");
       setDesktopMigrationScan(null);
-      setNotice(error instanceof Error ? error.message : t("desktop.migrationScanFailed"));
+      setNotice(desktopCommandError(error, t("desktop.migrationScanFailed")));
     } finally {
       setDesktopStorageBusy(false);
     }
@@ -4404,7 +4416,7 @@ function App() {
       setDesktopMigrationScan(null);
       window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t("desktop.migrationFailed"));
+      setNotice(desktopCommandError(error, t("desktop.migrationFailed")));
     } finally {
       setDesktopStorageBusy(false);
     }
@@ -4426,7 +4438,7 @@ function App() {
         setNotice(t("desktop.outputsChanged"));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+      setNotice(desktopCommandError(error, t("desktop.outputsChangeFailed")));
     } finally {
       setDesktopStorageBusy(false);
     }
@@ -4447,7 +4459,7 @@ function App() {
         setNotice(t("desktop.outputsChanged"));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+      setNotice(desktopCommandError(error, t("desktop.outputsChangeFailed")));
     } finally {
       setDesktopStorageBusy(false);
     }
@@ -4468,7 +4480,7 @@ function App() {
         setNotice(t("desktop.outputsChanged"));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
+      setNotice(desktopCommandError(error, t("desktop.outputsChangeFailed")));
     } finally {
       setDesktopStorageBusy(false);
     }

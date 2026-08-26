@@ -1163,7 +1163,9 @@ def switch_runtime_outputs_root(path: str) -> Path:
 
     with OUTPUTS_ROOT_LOCK:
         current = OUTPUTS_DIR.resolve()
-        if target == current or current in target.parents or target in current.parents:
+        if target == current or target.as_posix().casefold() == current.as_posix().casefold():
+            return current
+        if current in target.parents or target in current.parents:
             raise ValueError("新的存图目录不能与当前目录相同或互相嵌套")
 
         target_history = target / "history.json"

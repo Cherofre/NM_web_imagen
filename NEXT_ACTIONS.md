@@ -2,6 +2,8 @@
 
 ## Now
 - [x] Desktop notifications, taskbar attention, tray close behavior, test-notification action, unified storage buttons, and hot-switched output roots are implemented.
+- [x] Migration accepts both `output` and `outputs` layouts, treats selecting the current output folder as a no-op, and surfaces native folder-operation errors.
+- [ ] Rebuild the desktop EXE after the current instance is closed, then retry migration and storage switching with the selected folders.
 - [ ] Manually verify one generation, history refresh, open-output-folder, and reference-image flow after switching to a new output directory.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
 - [ ] After closing the running test EXE, rerun `npm run desktop:build` to refresh the release EXE with the notification regression fix, test button, and taskbar permission.
