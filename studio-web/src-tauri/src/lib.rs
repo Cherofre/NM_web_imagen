@@ -210,14 +210,16 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
 
 fn migration_outputs_root(source: &Path) -> Result<PathBuf, String> {
     let source = normalized_absolute_path(source)?;
+    let source = fs::canonicalize(&source)
+        .map_err(|error| format!("无法访问所选目录 {}: {error}", source.display()))?;
     let candidates = [
         source.join("outputs"),
         source.join("output"),
         source.join("data").join("outputs"),
         source.join("data").join("output"),
-        source,
+        source.clone(),
     ];
-    for candidate in candidates {
+    for candidate in &candidates {
         if !candidate.is_dir() {
             continue;
         }
@@ -232,10 +234,61 @@ fn migration_outputs_root(source: &Path) -> Result<PathBuf, String> {
                 .filter_map(Result::ok)
                 .any(|entry| is_image_file(&entry.path()))
         {
-            return Ok(candidate);
+            return Ok(candidate.clone());
         }
     }
-    Err("所选目录中没有找到 outputs、会话或成图文件。".to_string())
+
+    let mut pending = vec![(source.clone(), 0usize)];
+    let mut inspected = 0usize;
+    while let Some((directory, depth)) = pending.pop() {
+        if depth >= 3 || inspected >= 256 {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            if inspected >= 256 {
+                break;
+            }
+            inspected += 1;
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if matches!(
+                name.as_str(),
+                ".git" | ".runtime" | "node_modules" | "vendor"
+            ) {
+                continue;
+            }
+            if matches!(name.as_str(), "outputs" | "output") {
+                if path.join("history.json").is_file()
+                    || path.join("studio_sessions.json").is_file()
+                    || path.join("session_refs").is_dir()
+                    || path
+                        .read_dir()
+                        .ok()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Result::ok)
+                        .any(|child| is_image_file(&child.path()))
+                {
+                    return Ok(path);
+                }
+            }
+            pending.push((path, depth + 1));
+        }
+    }
+
+    Err(format!(
+        "所选目录 {} 中没有找到 outputs、output、会话或成图文件。",
+        source.display()
+    ))
 }
 
 fn json_array_count(path: &Path, key: &str) -> usize {
@@ -1090,7 +1143,7 @@ mod tests {
         .unwrap();
         fs::write(web_outputs.join("result.png"), b"png").unwrap();
         let web_scan = scan_migration_source(&web_root).unwrap();
-        assert_eq!(web_scan.source_root, web_outputs.to_string_lossy());
+        assert!(Path::new(&web_scan.source_root).ends_with(Path::new("web").join("outputs")));
         assert_eq!(web_scan.session_count, 1);
         assert_eq!(web_scan.history_count, 1);
         assert_eq!(web_scan.image_count, 1);
@@ -1100,18 +1153,28 @@ mod tests {
         fs::create_dir_all(&portable_outputs).unwrap();
         fs::write(portable_outputs.join("history.json"), br#"{"entries":[]}"#).unwrap();
         let portable_scan = scan_migration_source(&portable_root).unwrap();
-        assert_eq!(
-            portable_scan.source_root,
-            portable_outputs.to_string_lossy()
-        );
+        assert!(Path::new(&portable_scan.source_root)
+            .ends_with(Path::new("portable").join("data").join("outputs")));
 
         let direct_outputs = root.join("direct-outputs");
         fs::create_dir_all(direct_outputs.join("session_refs")).unwrap();
         fs::write(direct_outputs.join("history.json"), br#"{"entries":[]}"#).unwrap();
         fs::write(direct_outputs.join("result.png"), b"png").unwrap();
         let direct_scan = scan_migration_source(&direct_outputs).unwrap();
-        assert_eq!(direct_scan.source_root, direct_outputs.to_string_lossy());
+        assert!(Path::new(&direct_scan.source_root).ends_with(Path::new("direct-outputs")));
         assert_eq!(direct_scan.image_count, 1);
+
+        let nested_parent = root.join("share-root");
+        let nested_outputs = nested_parent.join("renamed-project").join("outputs");
+        fs::create_dir_all(&nested_outputs).unwrap();
+        fs::write(
+            nested_outputs.join("studio_sessions.json"),
+            br#"{"sessions":[]}"#,
+        )
+        .unwrap();
+        let nested_scan = scan_migration_source(&nested_parent).unwrap();
+        assert!(Path::new(&nested_scan.source_root)
+            .ends_with(Path::new("renamed-project").join("outputs")));
         let _ = fs::remove_dir_all(root);
     }
 }
