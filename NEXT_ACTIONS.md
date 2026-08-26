@@ -1,12 +1,7 @@
 # Next Actions
 
 ## Now
-- [x] Add Windows background generation notifications with a desktop setting and foreground suppression.
-- [x] Add a native tray menu and configurable close behavior: ask, minimize to tray, or exit.
-- [x] Add taskbar attention flashing for background generation completion/failure and clear it when the window is focused.
-- [x] Separate taskbar attention failures from Windows toast delivery and add a manual test-notification action.
-- [x] Make storage action buttons use the same desktop button style as the rest of settings.
-- [x] Switch the desktop output root in the running backend after the copy completes, so changing the save folder no longer requires restarting the desktop shell.
+- [x] Desktop notifications, taskbar attention, tray close behavior, test-notification action, unified storage buttons, and hot-switched output roots are implemented.
 - [ ] Manually verify one generation, history refresh, open-output-folder, and reference-image flow after switching to a new output directory.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
 - [ ] After closing the running test EXE, rerun `npm run desktop:build` to refresh the release EXE with the notification regression fix, test button, and taskbar permission.
