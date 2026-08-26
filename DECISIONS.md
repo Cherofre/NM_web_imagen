@@ -15,6 +15,12 @@
 - Reason: A minimized desktop app needs a visible completion cue without forcing a second modal or changing the web client.
 - Alternatives considered: Permanently change the window title, use a custom in-app badge only, or use the critical attention mode that also flashes the window. These are either ineffective for a minimized app or more disruptive than needed.
 - Consequences / follow-up: Direct uninstalled EXE notification attribution remains a Windows AppUserModel identity limitation; packaged installed builds must be checked separately.
+
+## 2026-08-26 - Taskbar Attention Is Independent Of Toast Permission
+- Status: active
+- Decision: Keep taskbar attention flashing enabled for background results even when the user disables Windows toast notifications. The notification toggle controls only the OS toast, not the taskbar completion cue.
+- Reason: A user may want a quiet system notification area while still needing a visible signal that a minimized generation finished.
+- Consequences / follow-up: Focus still clears the attention request; no new setting is needed for the taskbar cue in this slice.
 - 2026-08-25 — Status: active: Desktop storage migration replaces the current output root only after scanning a user-selected old directory, and first renames the current target to a timestamped `.backup-*` sibling. It accepts a direct `outputs` folder, a web project root containing `outputs`, or a portable desktop root containing `data\outputs`.
 - Reason: Users need a practical web-to-desktop recovery path, but silent merges can duplicate sessions and overwrites are difficult to undo. A scan preview plus an automatic backup makes the operation understandable and recoverable without scanning the whole disk.
 - Consequences / follow-up: The current release does not merge conflicting records at the JSON identity level; it replaces the current output root after confirmation. A future migration wizard can add selective conflict policies if needed.

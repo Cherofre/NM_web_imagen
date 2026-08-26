@@ -4302,10 +4302,11 @@ function App() {
   }
 
   async function notifyDesktopGeneration(title: string, body: string, sessionId: string, turnId: string) {
-    if (!desktopMode || !desktopNotifications) return;
+    if (!desktopMode) return;
     if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) return;
     try {
       await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+      if (!desktopNotifications) return;
       let granted = await isPermissionGranted();
       if (!granted) {
         granted = (await requestPermission()) === "granted";
