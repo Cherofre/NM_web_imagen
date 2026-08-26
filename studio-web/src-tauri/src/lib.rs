@@ -85,6 +85,7 @@ impl Default for SavedWindowState {
 
 struct DesktopRuntimeState {
     info: DesktopRuntimeInfo,
+    outputs_root: Mutex<String>,
     child: Mutex<Option<Child>>,
     window: Mutex<SavedWindowState>,
     close_allowed: AtomicBool,
@@ -94,7 +95,11 @@ struct DesktopRuntimeState {
 
 #[tauri::command]
 fn desktop_runtime_info(state: State<'_, DesktopRuntimeState>) -> DesktopRuntimeInfo {
-    state.info.clone()
+    let mut info = state.info.clone();
+    if let Ok(outputs_root) = state.outputs_root.lock() {
+        info.outputs_root = outputs_root.clone();
+    }
+    info
 }
 
 fn window_state_path(data_root: &Path) -> PathBuf {
@@ -436,7 +441,12 @@ fn open_in_explorer(path: &Path, _select_file: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn desktop_open_outputs_directory(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
-    let path = Path::new(&state.info.outputs_root);
+    let outputs_root = state
+        .outputs_root
+        .lock()
+        .map_err(|_| "无法读取当前存图目录".to_string())?
+        .clone();
+    let path = Path::new(&outputs_root);
     fs::create_dir_all(path)
         .map_err(|error| format!("failed to create outputs directory: {error}"))?;
     open_in_explorer(path, false)
@@ -528,7 +538,12 @@ fn desktop_import_data(
     state: State<'_, DesktopRuntimeState>,
 ) -> Result<serde_json::Value, String> {
     let source_root = migration_outputs_root(Path::new(&source))?;
-    let target_root = PathBuf::from(&state.info.outputs_root);
+    let current_outputs_root = state
+        .outputs_root
+        .lock()
+        .map_err(|_| "无法读取当前存图目录".to_string())?
+        .clone();
+    let target_root = PathBuf::from(current_outputs_root);
     if is_same_or_nested(&source_root, &target_root)
         || is_same_or_nested(&target_root, &source_root)
     {
@@ -549,7 +564,13 @@ fn desktop_set_outputs_directory(
     state: State<'_, DesktopRuntimeState>,
 ) -> Result<OutputDirectoryChange, String> {
     let target_root = normalized_absolute_path(Path::new(&path))?;
-    let current_root = PathBuf::from(&state.info.outputs_root);
+    let current_root = PathBuf::from(
+        state
+            .outputs_root
+            .lock()
+            .map_err(|_| "无法读取当前存图目录".to_string())?
+            .clone(),
+    );
     if is_same_or_nested(&target_root, &current_root)
         || is_same_or_nested(&current_root, &target_root)
     {
@@ -559,9 +580,14 @@ fn desktop_set_outputs_directory(
         .map_err(|error| format!("无法创建新的存图目录 {}: {error}", target_root.display()))?;
     replace_directory_contents(&current_root, &target_root)?;
     write_storage_settings(Path::new(&state.info.data_root), &target_root)?;
+    state
+        .outputs_root
+        .lock()
+        .map_err(|_| "无法更新当前存图目录".to_string())?
+        .clone_from(&target_root.to_string_lossy().into_owned());
     Ok(OutputDirectoryChange {
         path: target_root.to_string_lossy().into_owned(),
-        restart_required: true,
+        restart_required: false,
     })
 }
 
@@ -931,6 +957,7 @@ pub fn run() {
                     log_path: log_path.to_string_lossy().into_owned(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                 },
+                outputs_root: Mutex::new(outputs_root.to_string_lossy().into_owned()),
                 child: Mutex::new(Some(child)),
                 window: Mutex::new(saved_window),
                 close_allowed: AtomicBool::new(false),
@@ -975,7 +1002,9 @@ pub fn run() {
                     }
                     "outputs" => {
                         if let Some(state) = app.try_state::<DesktopRuntimeState>() {
-                            let _ = open_in_explorer(Path::new(&state.info.outputs_root), false);
+                            if let Ok(outputs_root) = state.outputs_root.lock() {
+                                let _ = open_in_explorer(Path::new(outputs_root.as_str()), false);
+                            }
                         }
                     }
                     "check-update" => {

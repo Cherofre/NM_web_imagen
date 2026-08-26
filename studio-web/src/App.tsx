@@ -93,6 +93,7 @@ import {
   resolveRuntimeUrl,
   scanDesktopMigration,
   setDesktopOutputsDirectory,
+  switchDesktopStorageRoot,
   exitDesktopApp,
   confirmDesktopClose,
   minimizeDesktopToTray,
@@ -1336,6 +1337,7 @@ function App() {
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
   const initialComposerPromptHeight = useRef(readStoredComposerPromptHeight());
   const desktopRuntime = useMemo(() => getDesktopRuntimeInfo(), []);
+  const [desktopOutputsRoot, setDesktopOutputsRoot] = useState(desktopRuntime.outputsRoot);
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
@@ -4418,7 +4420,11 @@ function App() {
       const selected = await chooseDesktopFolder(t("desktop.chooseOutputsDirectory"));
       if (!selected) return;
       const result = await setDesktopOutputsDirectory(selected);
-      if (result) setNotice(t("desktop.outputsChangedRestart"));
+      if (result) {
+        const runtime = await switchDesktopStorageRoot(result.path);
+        setDesktopOutputsRoot(runtime?.outputs_root || result.path);
+        setNotice(t("desktop.outputsChanged"));
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
     } finally {
@@ -4435,7 +4441,11 @@ function App() {
     try {
       const selected = await getDesktopDocumentsOutputsDirectory();
       const result = await setDesktopOutputsDirectory(selected);
-      if (result) setNotice(t("desktop.outputsChangedRestart"));
+      if (result) {
+        const runtime = await switchDesktopStorageRoot(result.path);
+        setDesktopOutputsRoot(runtime?.outputs_root || result.path);
+        setNotice(t("desktop.outputsChanged"));
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
     } finally {
@@ -4452,7 +4462,11 @@ function App() {
     try {
       const selected = await getDesktopDefaultOutputsDirectory();
       const result = await setDesktopOutputsDirectory(selected);
-      if (result) setNotice(t("desktop.outputsChangedRestart"));
+      if (result) {
+        const runtime = await switchDesktopStorageRoot(result.path);
+        setDesktopOutputsRoot(runtime?.outputs_root || result.path);
+        setNotice(t("desktop.outputsChanged"));
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("desktop.outputsChangeFailed"));
     } finally {
@@ -5947,7 +5961,7 @@ function App() {
                     <p>{t("desktop.storageHint")}</p>
                   </div>
                   {([
-                    ["outputs", FolderOpen, t("desktop.outputsDirectory"), desktopRuntime.outputsRoot],
+                    ["outputs", FolderOpen, t("desktop.outputsDirectory"), desktopOutputsRoot],
                     ["data", HardDrive, t("desktop.dataDirectory"), desktopRuntime.dataRoot],
                     ["log", FileText, t("desktop.backendLog"), desktopRuntime.logPath],
                   ] as const).map(([kind, Icon, label, path]) => (
@@ -5981,7 +5995,7 @@ function App() {
                         {t("desktop.chooseOutputsFolder")}
                       </button>
                     </div>
-                    <p className="desktop-path-hint">{t("desktop.outputsChangeRestartHint")}</p>
+                    <p className="desktop-path-hint">{t("desktop.outputsChangeHint")}</p>
                   </section>
                   <section className="desktop-storage-card">
                     <div className="desktop-settings-title compact">

@@ -4610,6 +4610,7 @@ button.primary-action:focus-visible,
 .desktop-setting-row button,
 .desktop-setting-row select,
 .desktop-path-actions button,
+.desktop-storage-actions button,
 .desktop-language-switcher button {
   display: inline-flex;
   align-items: center;
@@ -4631,6 +4632,8 @@ button.primary-action:focus-visible,
 .desktop-setting-row button:hover,
 .desktop-setting-row select:focus-visible,
 .desktop-path-actions button:hover,
+.desktop-storage-actions button:focus-visible,
+.desktop-storage-actions button:hover,
 .desktop-language-switcher button:hover,
 .desktop-language-switcher button.active {
   border-color: var(--line-strong);

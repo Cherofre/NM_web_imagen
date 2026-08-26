@@ -16,6 +16,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
@@ -67,6 +68,7 @@ HISTORY_FILE = OUTPUTS_DIR / "history.json"
 HISTORY_MAX_ENTRIES = 300
 STUDIO_SESSIONS_FILE = OUTPUTS_DIR / "studio_sessions.json"
 SESSION_REFS_DIR = OUTPUTS_DIR / "session_refs"
+OUTPUTS_ROOT_LOCK = threading.RLock()
 STUDIO_MAX_SESSIONS = 80
 STUDIO_MAX_TURNS = 80
 STUDIO_MAX_REFS_PER_TURN = 8
@@ -1145,6 +1147,54 @@ def pick_env_value(*names: str) -> str:
 
 def desktop_mode_enabled() -> bool:
     return os.getenv("IMAGE_TOOL_DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
+
+
+def switch_runtime_outputs_root(path: str) -> Path:
+    """切换桌面端运行中的存图目录，不需要重启 FastAPI。"""
+    global OUTPUTS_DIR, HISTORY_FILE, STUDIO_SESSIONS_FILE, SESSION_REFS_DIR
+
+    if not desktop_mode_enabled():
+        raise ValueError("运行时存图目录切换仅适用于桌面端")
+    target = Path(str(path or "").strip()).expanduser()
+    if not target.is_absolute():
+        raise ValueError("存图目录必须是绝对路径")
+    target = target.resolve()
+    target.mkdir(parents=True, exist_ok=True)
+
+    with OUTPUTS_ROOT_LOCK:
+        current = OUTPUTS_DIR.resolve()
+        if target == current or current in target.parents or target in current.parents:
+            raise ValueError("新的存图目录不能与当前目录相同或互相嵌套")
+
+        target_history = target / "history.json"
+        payload = read_json(target_history, None)
+        if payload is not None:
+            entries = history_entries_from_payload(payload)
+            changed = False
+            for entry in entries:
+                images = entry.get("images")
+                if not isinstance(images, list):
+                    continue
+                for image in images:
+                    if not isinstance(image, dict):
+                        continue
+                    name = Path(str(image.get("saved_name") or image.get("saved_path") or "")).name
+                    if not name:
+                        continue
+                    next_path = storage_path_display(target / name)
+                    next_url = f"{OUTPUTS_URL_PREFIX}/{quote(name)}"
+                    if image.get("saved_path") != next_path or image.get("saved_url") != next_url:
+                        image["saved_path"] = next_path
+                        image["saved_url"] = next_url
+                        changed = True
+            if changed:
+                atomic_write_json(target_history, history_payload(entries), backup=True)
+
+        OUTPUTS_DIR = target
+        HISTORY_FILE = target / "history.json"
+        STUDIO_SESSIONS_FILE = target / "studio_sessions.json"
+        SESSION_REFS_DIR = target / "session_refs"
+    return target
 
 
 class ConfigSecretError(ValueError):
@@ -4240,6 +4290,19 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "path": storage_path_display(OUTPUTS_DIR),
+        }
+
+    @app.post("/api/desktop/storage-root")
+    async def switch_desktop_storage_root(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            path = switch_runtime_outputs_root(str(payload.get("path") or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "path": str(path),
+            "outputs_root": str(path),
+            "restart_required": False,
         }
 
     @app.post("/api/chat/gpt-image-2")

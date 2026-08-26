@@ -109,6 +109,26 @@ export async function setDesktopOutputsDirectory(path: string) {
   return await invoke<{ path: string; restartRequired: boolean }>("desktop_set_outputs_directory", { path });
 }
 
+export async function switchDesktopStorageRoot(path: string) {
+  if (!isDesktopRuntime()) return null;
+  const response = await apiFetch("/api/desktop/storage-root", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      detail = String(payload.detail || payload.error || detail);
+    } catch {
+      // Keep the HTTP fallback when the backend response is not JSON.
+    }
+    throw new Error(detail);
+  }
+  return await response.json() as { ok: boolean; path: string; outputs_root: string; restart_required: boolean };
+}
+
 export async function openBackendDebugConsole() {
   if (!isDesktopRuntime()) return false;
   await invoke("desktop_open_backend_console");
