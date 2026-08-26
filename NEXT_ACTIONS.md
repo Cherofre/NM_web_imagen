@@ -5,6 +5,9 @@
 - [x] Add a native tray menu and configurable close behavior: ask, minimize to tray, or exit.
 - [x] Add taskbar attention flashing for background generation completion/failure and clear it when the window is focused.
 - [x] Separate taskbar attention failures from Windows toast delivery and add a manual test-notification action.
+- [x] Make storage action buttons use the same desktop button style as the rest of settings.
+- [x] Switch the desktop output root in the running backend after the copy completes, so changing the save folder no longer requires restarting the desktop shell.
+- [ ] Manually verify one generation, history refresh, open-output-folder, and reference-image flow after switching to a new output directory.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
 - [ ] After closing the running test EXE, rerun `npm run desktop:build` to refresh the release EXE with the notification regression fix, test button, and taskbar permission.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
@@ -30,7 +33,7 @@
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
 - Verification caveat: portable ZIP creation and extracted-package startup smoke passed with the dedicated scripts; a missing-WebView2 machine has not been simulated, so only the registry-check code path is compiled and reviewed.
 - Current feature caveat: the new portable smoke must be rerun after closing the already-running installed NM Image Studio instance; the failure observed on 2026-08-25 was the existing single-instance guard exiting the second shell with code 0, not a backend startup error.
-- Storage behavior: migration copies the selected `outputs`, `data\outputs`, or direct output directory into the current output root and renames the old target to a timestamped `.backup-*` sibling. Output-root changes persist in `desktop-storage.json` and take effect after restarting the desktop app.
+- Storage behavior: migration copies the selected `outputs`, `data\outputs`, or direct output directory into the current output root and renames the old target to a timestamped `.backup-*` sibling. Output-root changes persist in `desktop-storage.json`; the Tauri shell and running FastAPI sidecar now switch to the copied directory immediately.
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Pre-release audit: `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md` records the passed matrix, exact artifact hashes, current blockers, and machine/environment limits.

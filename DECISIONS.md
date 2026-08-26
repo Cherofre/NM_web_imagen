@@ -2,6 +2,13 @@
 
 ## Active Decisions
 
+## 2026-08-26 - Hot-Switch Desktop Output Root
+- Status: active
+- Decision: Keep the existing safe copy-and-backup operation, then update both the Tauri runtime path and the running FastAPI output-root globals through a desktop-only authenticated endpoint. The desktop window stays open and new generations, history, session references, output URLs, and open-folder actions use the new directory immediately.
+- Reason: Requiring a full desktop restart after a directory change is unnecessarily disruptive, while the current queue guard already prevents switching during active generation jobs.
+- Alternatives considered: Keep restart-required behavior; restart only the sidecar; merge directories in place. Restarting leaves stale UI state, and in-place merge makes conflict and rollback behavior less clear.
+- Consequences: A real desktop smoke test must confirm a post-switch generation and history/reference read. Web mode remains environment-driven and has no storage-root switch route.
+
 ## 2026-08-26 - Native Desktop Notifications And Tray Close Behavior
 - Status: active
 - Decision: Keep web mode unchanged. In the Windows Tauri shell, send generation success/failure notifications only when the window is not focused, expose a user-controlled notification toggle, add a tray menu for open/tasks/outputs/update/quit, and intercept the window close button with ask/minimize-to-tray/exit choices. Store these preferences in browser-local desktop settings because they are per-user shell preferences rather than backend data.
