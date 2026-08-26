@@ -4,11 +4,9 @@
 - [x] Desktop notifications, taskbar attention, tray close behavior, test-notification action, unified storage buttons, and hot-switched output roots are implemented.
 - [x] Harden migration source detection with canonical paths, bounded nested-folder discovery, and path-specific errors.
 - [x] Migration accepts both `output` and `outputs` layouts, treats selecting the current output folder as a no-op, and surfaces native folder-operation errors.
-- [ ] Rebuild the desktop EXE after the current instance is closed, then retry migration and storage switching with the selected folders.
+- [ ] After closing the current EXE, rebuild it and retry migration, storage switching, and one post-switch generation/history/reference flow.
 - [ ] Design and implement a first-launch preference wizard for language, storage location, notifications, and close behavior without interrupting existing upgrades.
-- [ ] Manually verify one generation, history refresh, open-output-folder, and reference-image flow after switching to a new output directory.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
-- [ ] After closing the running test EXE, rerun `npm run desktop:build` to refresh the release EXE with the notification regression fix, test button, and taskbar permission.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
