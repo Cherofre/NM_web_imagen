@@ -8,6 +8,13 @@
 - Reason: The desktop app needs background-friendly behavior without duplicating alerts while the user is looking at the result, and closing during queued work must be explicit.
 - Alternatives considered: Always notify; put tray actions in the main UI; silently cancel work on close; force tray-only close behavior. These either create noise, hide native actions, or risk losing active work without a decision.
 - Consequences / follow-up: Manual Windows acceptance is still required for notification permission, tray icon rendering, menu click-through, and close behavior. No release or G: synchronization is authorized until that pass is complete.
+
+## 2026-08-26 - Taskbar Attention For Background Results
+- Status: active
+- Decision: When a background generation completes or fails, request Windows informational user attention so the taskbar button flashes until the user focuses the app. Clear the attention request on the main window focus event. Keep the notification title prefixed with `NM Image Studio` so the content is unambiguous even when an uninstalled test executable is attributed by Windows to PowerShell.
+- Reason: A minimized desktop app needs a visible completion cue without forcing a second modal or changing the web client.
+- Alternatives considered: Permanently change the window title, use a custom in-app badge only, or use the critical attention mode that also flashes the window. These are either ineffective for a minimized app or more disruptive than needed.
+- Consequences / follow-up: Direct uninstalled EXE notification attribution remains a Windows AppUserModel identity limitation; packaged installed builds must be checked separately.
 - 2026-08-25 — Status: active: Desktop storage migration replaces the current output root only after scanning a user-selected old directory, and first renames the current target to a timestamped `.backup-*` sibling. It accepts a direct `outputs` folder, a web project root containing `outputs`, or a portable desktop root containing `data\outputs`.
 - Reason: Users need a practical web-to-desktop recovery path, but silent merges can duplicate sessions and overwrites are difficult to undo. A scan preview plus an automatic backup makes the operation understandable and recoverable without scanning the whole disk.
 - Consequences / follow-up: The current release does not merge conflicting records at the JSON identity level; it replaces the current output root after confirmation. A future migration wizard can add selective conflict policies if needed.

@@ -3,6 +3,7 @@
 ## Now
 - [x] Add Windows background generation notifications with a desktop setting and foreground suppression.
 - [x] Add a native tray menu and configurable close behavior: ask, minimize to tray, or exit.
+- [x] Add taskbar attention flashing for background generation completion/failure and clear it when the window is focused.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
@@ -20,6 +21,7 @@
 - Verify next: use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states.
 - Do not claim: a real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
 - Do not claim: manual tray/notification acceptance until the currently running installed instance is closed and the release EXE is tested alone.
+- Notification identity note: an uninstalled `target\release` EXE may be attributed to PowerShell by Windows; verify the packaged installed Setup for the NM Image Studio source name.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
 - Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.

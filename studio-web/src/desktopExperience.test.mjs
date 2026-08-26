@@ -72,6 +72,8 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(appSource, /desktop\.closeBehavior/);
   assert.match(appSource, /desktop-close-drawer/);
   assert.match(appSource, /sendNotification/);
+  assert.match(appSource, /requestUserAttention\(UserAttentionType\.Informational\)/);
+  assert.match(appSource, /NM Image Studio · \$\{title\}/);
 });
 
 test("desktop native shell exposes tray actions and close interception", () => {

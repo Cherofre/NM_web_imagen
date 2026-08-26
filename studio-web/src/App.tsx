@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { ChangeEvent, ClipboardEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
@@ -1788,6 +1789,9 @@ function App() {
     if (!desktopMode) return undefined;
     let disposed = false;
     const unlisten = Promise.all([
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) void getCurrentWindow().requestUserAttention(null);
+      }),
       listen("desktop-close-requested", () => {
         if (desktopCloseBehavior === "tray") {
           void minimizeDesktopToTray();
@@ -4301,11 +4305,12 @@ function App() {
     if (!desktopMode || !desktopNotifications) return;
     if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) return;
     try {
+      await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
       let granted = await isPermissionGranted();
       if (!granted) {
         granted = (await requestPermission()) === "granted";
       }
-      if (granted) sendNotification({ title, body, extra: { sessionId, turnId }, autoCancel: true });
+      if (granted) sendNotification({ title: `NM Image Studio · ${title}`, body, extra: { sessionId, turnId }, autoCancel: true });
     } catch {
       // Notification permission is optional. The in-app status remains authoritative.
     }
