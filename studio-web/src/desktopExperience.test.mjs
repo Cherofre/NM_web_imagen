@@ -26,6 +26,8 @@ test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /desktop_import_data/);
   assert.match(runtimeSource, /desktop_set_outputs_directory/);
   assert.match(runtimeSource, /desktop_default_outputs_directory/);
+  assert.match(runtimeSource, /desktop_onboarding_status/);
+  assert.match(runtimeSource, /desktop_complete_onboarding/);
   assert.match(runtimeSource, /desktop_open_backend_log/);
   assert.match(runtimeSource, /openBackendDebugConsole\(\)/);
   assert.match(runtimeSource, /invoke\("desktop_open_backend_console"\)/);
@@ -70,6 +72,10 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(i18nSource, /"desktop\.updateTitle":/);
   assert.match(appSource, /desktop\.updateInstallBlocked/);
   assert.match(appSource, /desktop\.notifications/);
+  assert.match(appSource, /desktopOnboardingOpen/);
+  assert.match(appSource, /desktop\.onboardingTitle/);
+  assert.match(appSource, /desktop\.onboardingSkip/);
+  assert.match(appSource, /desktop\.onboardingFinish/);
   assert.match(appSource, /desktop\.closeBehavior/);
   assert.match(appSource, /desktop-close-drawer/);
   assert.match(appSource, /sendNotification/);
@@ -88,6 +94,14 @@ test("desktop native shell exposes tray actions and close interception", () => {
   assert.match(tauriLibSource, /CloseRequested \{ api/);
   assert.match(tauriLibSource, /desktop_confirm_close/);
   assert.match(runtimeSource, /desktop_confirm_close/);
+});
+
+test("desktop migration scans common and bounded nested output layouts", () => {
+  assert.match(tauriLibSource, /source\.join\("outputs"\)/);
+  assert.match(tauriLibSource, /source\.join\("output"\)/);
+  assert.match(tauriLibSource, /source\.join\("data"\)\.join\("outputs"\)/);
+  assert.match(tauriLibSource, /depth >= 3/);
+  assert.match(tauriLibSource, /没有找到 outputs、output、会话或成图文件/);
 });
 
 test("desktop updater keeps the installed, portable and web boundaries explicit", () => {
@@ -121,6 +135,8 @@ test("release desktop builds hide the shell console while backend diagnostics st
   assert.match(tauriLibSource, /desktop_import_data,/);
   assert.match(tauriLibSource, /desktop_set_outputs_directory,/);
   assert.match(tauriLibSource, /desktop_default_outputs_directory,/);
+  assert.match(tauriLibSource, /desktop_onboarding_status,/);
+  assert.match(tauriLibSource, /desktop_complete_onboarding,/);
 });
 
 test("Windows desktop runtime enforces one shell and crash-cleans the backend", () => {

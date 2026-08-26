@@ -55,6 +55,11 @@ struct StorageSettings {
     outputs_root: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct OnboardingSettings {
+    completed: Option<bool>,
+}
+
 #[derive(Serialize)]
 struct OutputDirectoryChange {
     path: String,
@@ -108,6 +113,10 @@ fn window_state_path(data_root: &Path) -> PathBuf {
 
 fn storage_settings_path(data_root: &Path) -> PathBuf {
     data_root.join("desktop-storage.json")
+}
+
+fn onboarding_settings_path(data_root: &Path) -> PathBuf {
+    data_root.join("desktop-onboarding.json")
 }
 
 fn normalized_absolute_path(path: &Path) -> Result<PathBuf, String> {
@@ -174,6 +183,45 @@ fn write_storage_settings(data_root: &Path, outputs_root: &Path) -> Result<(), S
     )
     .map_err(|error| format!("failed to write storage settings: {error}"))?;
     fs::rename(&temp, &path).map_err(|error| format!("failed to commit storage settings: {error}"))
+}
+
+fn has_existing_desktop_data(data_root: &Path, outputs_root: &Path) -> bool {
+    [
+        data_root.join("config.local.json"),
+        data_root.join("desktop-storage.json"),
+        outputs_root.join("history.json"),
+        outputs_root.join("studio_sessions.json"),
+    ]
+    .iter()
+    .any(|path| path.is_file())
+        || outputs_root
+            .read_dir()
+            .ok()
+            .into_iter()
+            .flatten()
+            .any(|entry| entry.ok().is_some_and(|entry| entry.path().is_file()))
+}
+
+fn onboarding_completed(data_root: &Path, outputs_root: &Path) -> bool {
+    if let Ok(raw) = fs::read_to_string(onboarding_settings_path(data_root)) {
+        if let Ok(settings) = serde_json::from_str::<OnboardingSettings>(&raw) {
+            return settings.completed.unwrap_or(false);
+        }
+    }
+    has_existing_desktop_data(data_root, outputs_root)
+}
+
+fn write_onboarding_completed(data_root: &Path) -> Result<(), String> {
+    let path = onboarding_settings_path(data_root);
+    let temp = path.with_extension("json.tmp");
+    let payload = serde_json::json!({"completed": true});
+    fs::write(
+        &temp,
+        serde_json::to_vec_pretty(&payload)
+            .map_err(|error| format!("无法序列化首次启动设置: {error}"))?,
+    )
+    .map_err(|error| format!("无法写入首次启动设置: {error}"))?;
+    fs::rename(&temp, &path).map_err(|error| format!("无法保存首次启动设置: {error}"))
 }
 
 fn is_image_file(path: &Path) -> bool {
@@ -589,6 +637,22 @@ fn desktop_default_outputs_directory(state: State<'_, DesktopRuntimeState>) -> S
 }
 
 #[tauri::command]
+fn desktop_onboarding_status(state: State<'_, DesktopRuntimeState>) -> bool {
+    let data_root = Path::new(&state.info.data_root);
+    let outputs_root = state
+        .outputs_root
+        .lock()
+        .map(|value| PathBuf::from(value.clone()))
+        .unwrap_or_else(|_| data_root.join("outputs"));
+    onboarding_completed(data_root, &outputs_root)
+}
+
+#[tauri::command]
+fn desktop_complete_onboarding(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
+    write_onboarding_completed(Path::new(&state.info.data_root))
+}
+
+#[tauri::command]
 fn desktop_scan_migration(source: String) -> Result<MigrationScan, String> {
     scan_migration_source(Path::new(&source))
 }
@@ -892,6 +956,8 @@ pub fn run() {
             desktop_choose_folder,
             desktop_documents_outputs_directory,
             desktop_default_outputs_directory,
+            desktop_onboarding_status,
+            desktop_complete_onboarding,
             desktop_scan_migration,
             desktop_import_data,
             desktop_set_outputs_directory,

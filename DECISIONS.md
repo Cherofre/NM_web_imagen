@@ -2,6 +2,13 @@
 
 ## Active Decisions
 
+## 2026-08-26 - Skippable First-Launch Preference Wizard
+- Status: active
+- Decision: Show a three-step desktop-only onboarding dialog only when the new data root has no existing desktop configuration/output data and no completion marker. Let users choose language, output location, notifications, and close behavior, with an explicit skip action. Persist completion in `desktop-onboarding.json`; existing users and upgrades remain uninterrupted.
+- Reason: New users should not need to discover storage and behavior settings after launch, while showing a wizard to existing users could feel like an upgrade regression.
+- Alternatives considered: Always show the settings dialog; infer all preferences from Windows; add a separate installer wizard. Always showing interrupts upgrades, inference is not explicit enough for storage, and installer choices do not cover portable launches.
+- Consequences: The first-run flow needs one manual acceptance in a fresh portable or clean data root. Changing output location still uses the existing copy-and-hot-switch path and remains blocked while generation jobs are active.
+
 ## 2026-08-26 - Hot-Switch Desktop Output Root
 - Status: active
 - Decision: Keep the existing safe copy-and-backup operation, then update both the Tauri runtime path and the running FastAPI output-root globals through a desktop-only authenticated endpoint. The desktop window stays open and new generations, history, session references, output URLs, and open-folder actions use the new directory immediately.

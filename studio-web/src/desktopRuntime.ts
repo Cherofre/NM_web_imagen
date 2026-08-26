@@ -81,6 +81,17 @@ export async function getDesktopDefaultOutputsDirectory() {
   return await invoke<string>("desktop_default_outputs_directory");
 }
 
+export async function shouldShowDesktopOnboarding() {
+  if (!isDesktopRuntime()) return false;
+  return !(await invoke<boolean>("desktop_onboarding_status"));
+}
+
+export async function completeDesktopOnboarding() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_complete_onboarding");
+  return true;
+}
+
 export type DesktopMigrationScan = {
   sourceRoot: string;
   fileCount: number;

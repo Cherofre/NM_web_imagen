@@ -83,6 +83,8 @@ import {
   getDesktopDefaultOutputsDirectory,
   getDesktopRuntimeInfo,
   getDesktopDocumentsOutputsDirectory,
+  shouldShowDesktopOnboarding,
+  completeDesktopOnboarding,
   importDesktopData,
   isDesktopRuntime,
   isRuntimeOutputUrl,
@@ -1344,6 +1346,11 @@ function desktopCommandError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function sameDesktopPath(left: string, right: string) {
+  return left.trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase()
+    === right.trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
 function App() {
   const initialQueueJobs = useRef(normalizeStoredQueueJobs(loadJson(queueStorageKey, [])) as QueueJob[]);
   const initialSessionState = useRef(loadWorkbenchSessionState(initialQueueJobs.current));
@@ -1382,6 +1389,14 @@ function App() {
   const [desktopMigrationScan, setDesktopMigrationScan] = useState<DesktopMigrationScan | null>(null);
   const [desktopMigrationSource, setDesktopMigrationSource] = useState("");
   const [desktopStorageBusy, setDesktopStorageBusy] = useState(false);
+  const [desktopOnboardingOpen, setDesktopOnboardingOpen] = useState(false);
+  const [desktopOnboardingStep, setDesktopOnboardingStep] = useState(0);
+  const [desktopOnboardingLanguage, setDesktopOnboardingLanguage] = useState<AppLanguage>(language);
+  const [desktopOnboardingOutputsRoot, setDesktopOnboardingOutputsRoot] = useState(desktopRuntime.outputsRoot);
+  const [desktopOnboardingDefaultOutputsRoot, setDesktopOnboardingDefaultOutputsRoot] = useState(`${desktopRuntime.dataRoot}\\outputs`);
+  const [desktopOnboardingNotifications, setDesktopOnboardingNotifications] = useState(desktopNotifications);
+  const [desktopOnboardingCloseBehavior, setDesktopOnboardingCloseBehavior] = useState<DesktopCloseBehavior>(desktopCloseBehavior);
+  const [desktopOnboardingBusy, setDesktopOnboardingBusy] = useState(false);
   const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcutBindings>(() => loadDesktopShortcutBindings());
   const [capturingShortcut, setCapturingShortcut] = useState<DesktopShortcutAction | null>(null);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>("idle");
@@ -1438,6 +1453,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const t = useMemo(() => createTranslator(language), [language]);
+  const onboardingT = useMemo(() => createTranslator(desktopOnboardingLanguage), [desktopOnboardingLanguage]);
   const listText = (items: string[]) => items.join(language === "en" ? ", " : "、");
   const isDefaultSessionTitle = (title: string) => title === "新对话" || title === "New chat" || title === t("session.new");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1798,6 +1814,30 @@ function App() {
   useEffect(() => {
     localStorage.setItem(DESKTOP_CLOSE_BEHAVIOR_STORAGE_KEY, desktopCloseBehavior);
   }, [desktopCloseBehavior]);
+
+  useEffect(() => {
+    if (!desktopMode) return undefined;
+    let disposed = false;
+    void shouldShowDesktopOnboarding()
+      .then((shouldShow) => {
+        if (disposed || !shouldShow) return;
+        setDesktopOnboardingLanguage(language);
+        setDesktopOnboardingOutputsRoot(desktopOutputsRoot);
+        void getDesktopDefaultOutputsDirectory().then((path) => {
+          if (path) setDesktopOnboardingDefaultOutputsRoot(path);
+        }).catch(() => undefined);
+        setDesktopOnboardingNotifications(desktopNotifications);
+        setDesktopOnboardingCloseBehavior(desktopCloseBehavior);
+        setDesktopOnboardingStep(0);
+        setDesktopOnboardingOpen(true);
+      })
+      .catch(() => {
+        // A failed first-run probe must not block the normal desktop UI.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [desktopMode]);
 
   useEffect(() => {
     if (!desktopMode) return undefined;
@@ -4373,6 +4413,75 @@ function App() {
     return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`;
   }
 
+  async function chooseDesktopOnboardingOutputsDirectory() {
+    if (desktopOnboardingBusy) return;
+    setDesktopOnboardingBusy(true);
+    try {
+      const selected = await chooseDesktopFolder(onboardingT("desktop.onboardingChooseFolder"));
+      if (selected) setDesktopOnboardingOutputsRoot(selected);
+    } catch (error) {
+      setNotice(desktopCommandError(error, onboardingT("desktop.onboardingFolderFailed")));
+    } finally {
+      setDesktopOnboardingBusy(false);
+    }
+  }
+
+  async function useDesktopOnboardingDocumentsDirectory() {
+    if (desktopOnboardingBusy) return;
+    setDesktopOnboardingBusy(true);
+    try {
+      const selected = await getDesktopDocumentsOutputsDirectory();
+      if (selected) setDesktopOnboardingOutputsRoot(selected);
+    } catch (error) {
+      setNotice(desktopCommandError(error, onboardingT("desktop.onboardingFolderFailed")));
+    } finally {
+      setDesktopOnboardingBusy(false);
+    }
+  }
+
+  async function finishDesktopOnboarding() {
+    if (desktopOnboardingBusy) return;
+    if (activeQueueCount > 0) {
+      setNotice(onboardingT("desktop.onboardingWaitForTasks"));
+      return;
+    }
+    setDesktopOnboardingBusy(true);
+    try {
+      if (!sameDesktopPath(desktopOnboardingOutputsRoot, desktopOutputsRoot)) {
+        const result = await setDesktopOutputsDirectory(desktopOnboardingOutputsRoot);
+        if (result) {
+          const runtime = await switchDesktopStorageRoot(result.path);
+          setDesktopOutputsRoot(runtime?.outputs_root || result.path);
+        }
+      }
+      setLanguage(desktopOnboardingLanguage);
+      setDesktopNotifications(desktopOnboardingNotifications);
+      setDesktopCloseBehavior(desktopOnboardingCloseBehavior);
+      await completeDesktopOnboarding();
+      setDesktopOnboardingOpen(false);
+      setDesktopOnboardingStep(0);
+      setNotice(onboardingT("desktop.onboardingSaved"));
+    } catch (error) {
+      setNotice(desktopCommandError(error, onboardingT("desktop.onboardingSaveFailed")));
+    } finally {
+      setDesktopOnboardingBusy(false);
+    }
+  }
+
+  async function skipDesktopOnboarding() {
+    if (desktopOnboardingBusy) return;
+    setDesktopOnboardingBusy(true);
+    try {
+      await completeDesktopOnboarding();
+      setDesktopOnboardingOpen(false);
+      setDesktopOnboardingStep(0);
+    } catch (error) {
+      setNotice(desktopCommandError(error, onboardingT("desktop.onboardingSaveFailed")));
+    } finally {
+      setDesktopOnboardingBusy(false);
+    }
+  }
+
   async function chooseDesktopMigrationSource() {
     if (desktopStorageBusy || activeQueueCount > 0) {
       setNotice(t("desktop.storageBusyHint"));
@@ -5865,6 +5974,97 @@ function App() {
           </div>
         </form>
       </section>
+
+      {desktopMode && desktopOnboardingOpen && (
+        <div className="desktop-onboarding-shell">
+          <section className="desktop-onboarding-surface" role="dialog" aria-modal="true" aria-label={onboardingT("desktop.onboardingTitle")} tabIndex={-1}>
+            <header className="desktop-onboarding-header">
+              <div className="desktop-onboarding-brand"><span className="desktop-onboarding-mark"><Monitor size={18} /></span><span>NM Image Studio</span></div>
+              <span className="desktop-onboarding-progress">{desktopOnboardingStep + 1} / 3</span>
+            </header>
+            <div className="desktop-onboarding-content">
+              {desktopOnboardingStep === 0 && (
+                <div className="desktop-onboarding-step desktop-onboarding-welcome">
+                  <div className="desktop-onboarding-hero-icon"><Sparkles size={26} /></div>
+                  <p className="desktop-onboarding-eyebrow">{onboardingT("desktop.onboardingEyebrow")}</p>
+                  <h1>{onboardingT("desktop.onboardingTitle")}</h1>
+                  <p>{onboardingT("desktop.onboardingIntro")}</p>
+                  <div className="desktop-onboarding-summary">
+                    <span><HardDrive size={16} /> {onboardingT("desktop.onboardingStorageSummary")}</span>
+                    <span><Monitor size={16} /> {onboardingT("desktop.onboardingBehaviorSummary")}</span>
+                  </div>
+                </div>
+              )}
+
+              {desktopOnboardingStep === 1 && (
+                <div className="desktop-onboarding-step">
+                  <div className="desktop-onboarding-heading">
+                    <p className="desktop-onboarding-eyebrow">{onboardingT("desktop.onboardingStepLabel", { step: 1 })}</p>
+                    <h1>{onboardingT("desktop.onboardingLanguageStorageTitle")}</h1>
+                    <p>{onboardingT("desktop.onboardingLanguageStorageHint")}</p>
+                  </div>
+                  <div className="desktop-onboarding-field">
+                    <strong>{onboardingT("desktop.onboardingLanguage")}</strong>
+                    <div className="desktop-language-switcher" role="group" aria-label={onboardingT("language.switcher")}>
+                      <button type="button" className={desktopOnboardingLanguage === "zh-CN" ? "active" : ""} onClick={() => setDesktopOnboardingLanguage("zh-CN")}>{onboardingT("language.zh")}</button>
+                      <button type="button" className={desktopOnboardingLanguage === "en" ? "active" : ""} onClick={() => setDesktopOnboardingLanguage("en")}>{onboardingT("language.en")}</button>
+                    </div>
+                  </div>
+                  <div className="desktop-onboarding-field">
+                    <strong>{onboardingT("desktop.onboardingStorage")}</strong>
+                    <div className="desktop-onboarding-storage-options">
+                      <button type="button" className={sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDefaultOutputsRoot) ? "selected" : ""} onClick={() => setDesktopOnboardingOutputsRoot(desktopOnboardingDefaultOutputsRoot)}>
+                        <span>{onboardingT("desktop.onboardingUseDefault")}</span><code>{desktopOnboardingDefaultOutputsRoot}</code>
+                      </button>
+                      <button type="button" className={desktopOnboardingOutputsRoot.toLowerCase().includes("nm image studio") ? "selected" : ""} onClick={() => void useDesktopOnboardingDocumentsDirectory()} disabled={desktopOnboardingBusy}>
+                        <span>{onboardingT("desktop.onboardingUseDocuments")}</span><code>{onboardingT("desktop.onboardingDocumentsPath")}</code>
+                      </button>
+                      <button type="button" className={!sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDefaultOutputsRoot) && !desktopOnboardingOutputsRoot.toLowerCase().includes("nm image studio") ? "selected" : ""} onClick={() => void chooseDesktopOnboardingOutputsDirectory()} disabled={desktopOnboardingBusy}>
+                        <span>{onboardingT("desktop.onboardingChooseFolder")}</span><code>{desktopOnboardingOutputsRoot}</code>
+                      </button>
+                    </div>
+                    <p className="desktop-onboarding-help">{onboardingT("desktop.onboardingStorageHint")}</p>
+                  </div>
+                </div>
+              )}
+
+              {desktopOnboardingStep === 2 && (
+                <div className="desktop-onboarding-step">
+                  <div className="desktop-onboarding-heading">
+                    <p className="desktop-onboarding-eyebrow">{onboardingT("desktop.onboardingStepLabel", { step: 2 })}</p>
+                    <h1>{onboardingT("desktop.onboardingBehaviorTitle")}</h1>
+                    <p>{onboardingT("desktop.onboardingBehaviorHint")}</p>
+                  </div>
+                  <label className="desktop-onboarding-checkbox">
+                    <input type="checkbox" checked={desktopOnboardingNotifications} onChange={(event) => setDesktopOnboardingNotifications(event.target.checked)} />
+                    <span><strong>{onboardingT("desktop.onboardingNotifications")}</strong><small>{onboardingT("desktop.onboardingNotificationsHint")}</small></span>
+                  </label>
+                  <div className="desktop-onboarding-field">
+                    <strong>{onboardingT("desktop.onboardingCloseBehavior")}</strong>
+                    <select value={desktopOnboardingCloseBehavior} onChange={(event) => setDesktopOnboardingCloseBehavior(event.target.value as DesktopCloseBehavior)}>
+                      <option value="ask">{onboardingT("desktop.closeAsk")}</option>
+                      <option value="tray">{onboardingT("desktop.closeTray")}</option>
+                      <option value="exit">{onboardingT("desktop.closeExit")}</option>
+                    </select>
+                  </div>
+                  <div className="desktop-onboarding-final-note"><HardDrive size={16} /><span>{onboardingT("desktop.onboardingFinalHint", { path: desktopOnboardingOutputsRoot })}</span></div>
+                </div>
+              )}
+            </div>
+            <footer className="desktop-onboarding-actions">
+              <button type="button" className="desktop-onboarding-skip" onClick={() => void skipDesktopOnboarding()} disabled={desktopOnboardingBusy}>{onboardingT("desktop.onboardingSkip")}</button>
+              <span className="desktop-onboarding-actions-right">
+                {desktopOnboardingStep > 0 && <button type="button" onClick={() => setDesktopOnboardingStep((step) => step - 1)} disabled={desktopOnboardingBusy}>{onboardingT("desktop.onboardingBack")}</button>}
+                {desktopOnboardingStep < 2 ? (
+                  <button type="button" className="primary-action" onClick={() => setDesktopOnboardingStep((step) => step + 1)} disabled={desktopOnboardingBusy}>{onboardingT("desktop.onboardingNext")}</button>
+                ) : (
+                  <button type="button" className="primary-action" onClick={() => void finishDesktopOnboarding()} disabled={desktopOnboardingBusy}>{desktopOnboardingBusy ? onboardingT("desktop.onboardingSaving") : onboardingT("desktop.onboardingFinish")}</button>
+                )}
+              </span>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {desktopMode && desktopSettingsOpen && (
         <div className="desktop-settings-shell">
