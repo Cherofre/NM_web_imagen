@@ -4,6 +4,7 @@
 - [x] Desktop notifications, taskbar attention, tray close behavior, test-notification action, unified storage buttons, and hot-switched output roots are implemented.
 - [x] Harden migration source detection with canonical paths, bounded nested-folder discovery, and path-specific errors.
 - [x] Migration accepts both `output` and `outputs` layouts, treats selecting the current output folder as a no-op, and surfaces native folder-operation errors.
+- [x] Sanitize Windows folder-picker output when host diagnostics are appended to the selected path.
 - [ ] After closing the current EXE, rebuild it and retry migration, storage switching, and one post-switch generation/history/reference flow.
 - [x] Implement a skippable first-launch preference wizard for language, storage location, notifications, and close behavior without interrupting existing upgrades.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.

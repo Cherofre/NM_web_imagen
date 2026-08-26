@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-08-26 - Sanitize Folder Picker Output
+- Status: active
+- Decision: Treat the Windows folder dialog stdout as untrusted text and select the longest existing directory prefix when diagnostics are appended without a newline. Keep direct existing paths and cancel behavior unchanged.
+- Reason: The user's environment returned repeated `SharedMemory read faild` text concatenated directly to a valid selected path, which made `canonicalize` reject an otherwise valid migration directory.
+- Consequences: The desktop EXE must be rebuilt for the guard to take effect; the sanitizer is covered by a Rust unit test and prevents this host-specific output issue from reaching migration/storage path handling.
+
 ## 2026-08-26 - Skippable First-Launch Preference Wizard
 - Status: active
 - Decision: Show a three-step desktop-only onboarding dialog only when the new data root has no existing desktop configuration/output data and no completion marker. Let users choose language, output location, notifications, and close behavior, with an explicit skip action. Persist completion in `desktop-onboarding.json`; existing users and upgrades remain uninterrupted.

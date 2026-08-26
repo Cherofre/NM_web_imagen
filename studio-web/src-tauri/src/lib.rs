@@ -561,6 +561,49 @@ fn desktop_open_outputs_directory(state: State<'_, DesktopRuntimeState>) -> Resu
     open_in_explorer(path, false)
 }
 
+fn sanitize_folder_dialog_output(raw: &str) -> Result<PathBuf, String> {
+    let normalized = raw
+        .trim_matches(['\u{feff}', '\0', '\r', '\n', ' ', '\t'])
+        .replace('\0', "");
+    if normalized.is_empty() {
+        return Err("文件夹选择器没有返回目录".to_string());
+    }
+
+    let mut best: Option<PathBuf> = None;
+    for line in normalized.lines() {
+        let line = line.trim_matches(['\u{feff}', '\0', '\r', '\n', ' ', '\t']);
+        if line.is_empty() {
+            continue;
+        }
+        let direct = Path::new(line);
+        if direct.is_dir() {
+            best = Some(direct.to_path_buf());
+            continue;
+        }
+
+        // Some Windows host/debug environments append diagnostic text to the
+        // dialog's stdout without a newline. Keep the longest existing folder
+        // prefix instead of passing that polluted string to canonicalize().
+        for (index, _) in line.char_indices().skip(3) {
+            let candidate = &line[..index];
+            if Path::new(candidate).is_dir()
+                && best.as_ref().map_or(true, |current| {
+                    candidate.len() > current.to_string_lossy().len()
+                })
+            {
+                best = Some(PathBuf::from(candidate));
+            }
+        }
+    }
+
+    best.ok_or_else(|| {
+        format!(
+            "文件夹选择器返回了无效路径: {}",
+            normalized.chars().take(240).collect::<String>()
+        )
+    })
+}
+
 #[tauri::command]
 fn desktop_open_data_directory(state: State<'_, DesktopRuntimeState>) -> Result<(), String> {
     open_in_explorer(Path::new(&state.info.data_root), false)
@@ -598,11 +641,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if selected.is_empty() {
+    let selected = String::from_utf8_lossy(&output.stdout).to_string();
+    if selected.trim().is_empty() {
         Ok(None)
     } else {
-        Ok(Some(PathBuf::from(selected)))
+        Ok(Some(sanitize_folder_dialog_output(&selected)?))
     }
 }
 
@@ -1241,6 +1284,19 @@ mod tests {
         let nested_scan = scan_migration_source(&nested_parent).unwrap();
         assert!(Path::new(&nested_scan.source_root)
             .ends_with(Path::new("renamed-project").join("outputs")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_dialog_output_ignores_appended_diagnostics() {
+        let root = test_root("folder-dialog-output");
+        fs::create_dir_all(&root).unwrap();
+        let polluted = format!(
+            "{}SharedMemory read faild SharedMemory read faild",
+            root.display()
+        );
+        let sanitized = sanitize_folder_dialog_output(&polluted).unwrap();
+        assert_eq!(sanitized, root);
         let _ = fs::remove_dir_all(root);
     }
 }
