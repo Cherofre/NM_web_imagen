@@ -121,6 +121,30 @@ export async function resetDesktopWindow() {
   return true;
 }
 
+export async function exitDesktopApp() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_exit");
+  return true;
+}
+
+export async function minimizeDesktopToTray() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_minimize_to_tray");
+  return true;
+}
+
+export async function showDesktopApp() {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_show_main_window");
+  return true;
+}
+
+export async function confirmDesktopClose(behavior: "tray" | "exit") {
+  if (!isDesktopRuntime()) return false;
+  await invoke("desktop_confirm_close", { behavior });
+  return true;
+}
+
 function runtimePath(value: string) {
   try {
     const url = new URL(value, window.location.origin);

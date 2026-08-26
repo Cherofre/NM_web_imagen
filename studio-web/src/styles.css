@@ -4608,6 +4608,7 @@ button.primary-action:focus-visible,
 .desktop-settings-close,
 .desktop-settings-nav button,
 .desktop-setting-row button,
+.desktop-setting-row select,
 .desktop-path-actions button,
 .desktop-language-switcher button {
   display: inline-flex;
@@ -4628,6 +4629,7 @@ button.primary-action:focus-visible,
 .desktop-settings-close:focus-visible,
 .desktop-settings-nav button:hover,
 .desktop-setting-row button:hover,
+.desktop-setting-row select:focus-visible,
 .desktop-path-actions button:hover,
 .desktop-language-switcher button:hover,
 .desktop-language-switcher button.active {
@@ -4779,6 +4781,19 @@ button.primary-action:focus-visible,
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 7px;
+}
+
+.desktop-setting-row select {
+  min-width: 150px;
+  min-height: 38px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.desktop-close-copy {
+  margin: 0;
+  color: var(--muted-strong);
+  line-height: 1.55;
 }
 
 .desktop-settings-title.compact {

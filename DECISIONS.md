@@ -1,6 +1,13 @@
 # Decisions
 
 ## Active Decisions
+
+## 2026-08-26 - Native Desktop Notifications And Tray Close Behavior
+- Status: active
+- Decision: Keep web mode unchanged. In the Windows Tauri shell, send generation success/failure notifications only when the window is not focused, expose a user-controlled notification toggle, add a tray menu for open/tasks/outputs/update/quit, and intercept the window close button with ask/minimize-to-tray/exit choices. Store these preferences in browser-local desktop settings because they are per-user shell preferences rather than backend data.
+- Reason: The desktop app needs background-friendly behavior without duplicating alerts while the user is looking at the result, and closing during queued work must be explicit.
+- Alternatives considered: Always notify; put tray actions in the main UI; silently cancel work on close; force tray-only close behavior. These either create noise, hide native actions, or risk losing active work without a decision.
+- Consequences / follow-up: Manual Windows acceptance is still required for notification permission, tray icon rendering, menu click-through, and close behavior. No release or G: synchronization is authorized until that pass is complete.
 - 2026-08-25 — Status: active: Desktop storage migration replaces the current output root only after scanning a user-selected old directory, and first renames the current target to a timestamped `.backup-*` sibling. It accepts a direct `outputs` folder, a web project root containing `outputs`, or a portable desktop root containing `data\outputs`.
 - Reason: Users need a practical web-to-desktop recovery path, but silent merges can duplicate sessions and overwrites are difficult to undo. A scan preview plus an automatic backup makes the operation understandable and recoverable without scanning the whole disk.
 - Consequences / follow-up: The current release does not merge conflicting records at the JSON identity level; it replaces the current output root after confirmation. A future migration wizard can add selective conflict policies if needed.

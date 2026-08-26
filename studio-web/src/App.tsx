@@ -40,6 +40,8 @@ import {
   ZoomOut,
   X,
 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { ChangeEvent, ClipboardEvent, type CSSProperties, DragEvent, FocusEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SyntheticEvent, WheelEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   GPT_CUSTOM_SIZE_MAX,
@@ -90,6 +92,10 @@ import {
   resolveRuntimeUrl,
   scanDesktopMigration,
   setDesktopOutputsDirectory,
+  exitDesktopApp,
+  confirmDesktopClose,
+  minimizeDesktopToTray,
+  showDesktopApp,
   type DesktopMigrationScan,
 } from "./desktopRuntime";
 import {
@@ -456,6 +462,27 @@ const HISTORY_QUICK_POPOVER_SIZE = { width: 340, height: 340 };
 const ACTION_MENU_SELECTOR = "details.header-more-menu, details.image-more-actions";
 const OPEN_ACTION_MENU_SELECTOR = "details.header-more-menu[open], details.image-more-actions[open]";
 const DESKTOP_SHORTCUT_STORAGE_KEY = "image-generate-web-tool:desktop-shortcuts-v1";
+const DESKTOP_NOTIFICATION_STORAGE_KEY = "image-generate-web-tool:desktop-notifications-v1";
+const DESKTOP_CLOSE_BEHAVIOR_STORAGE_KEY = "image-generate-web-tool:desktop-close-behavior-v1";
+type DesktopCloseBehavior = "ask" | "tray" | "exit";
+
+function loadDesktopBoolean(key: string, fallback: boolean) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function loadDesktopCloseBehavior(): DesktopCloseBehavior {
+  try {
+    const value = localStorage.getItem(DESKTOP_CLOSE_BEHAVIOR_STORAGE_KEY);
+    return value === "tray" || value === "exit" ? value : "ask";
+  } catch {
+    return "ask";
+  }
+}
 const DEFAULT_DESKTOP_SHORTCUTS: DesktopShortcutBindings = {
   newSession: "Ctrl+N",
   addReference: "Ctrl+O",
@@ -1333,6 +1360,10 @@ function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(false);
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
+  const [desktopNotifications, setDesktopNotifications] = useState(() => loadDesktopBoolean(DESKTOP_NOTIFICATION_STORAGE_KEY, true));
+  const [desktopCloseBehavior, setDesktopCloseBehavior] = useState<DesktopCloseBehavior>(() => loadDesktopCloseBehavior());
+  const [desktopClosePromptOpen, setDesktopClosePromptOpen] = useState(false);
+  const [desktopCloseRemember, setDesktopCloseRemember] = useState(false);
   const [desktopMigrationScan, setDesktopMigrationScan] = useState<DesktopMigrationScan | null>(null);
   const [desktopMigrationSource, setDesktopMigrationSource] = useState("");
   const [desktopStorageBusy, setDesktopStorageBusy] = useState(false);
@@ -1744,6 +1775,52 @@ function App() {
   useEffect(() => {
     localStorage.setItem(DESKTOP_SHORTCUT_STORAGE_KEY, JSON.stringify(desktopShortcuts));
   }, [desktopShortcuts]);
+
+  useEffect(() => {
+    localStorage.setItem(DESKTOP_NOTIFICATION_STORAGE_KEY, String(desktopNotifications));
+  }, [desktopNotifications]);
+
+  useEffect(() => {
+    localStorage.setItem(DESKTOP_CLOSE_BEHAVIOR_STORAGE_KEY, desktopCloseBehavior);
+  }, [desktopCloseBehavior]);
+
+  useEffect(() => {
+    if (!desktopMode) return undefined;
+    let disposed = false;
+    const unlisten = Promise.all([
+      listen("desktop-close-requested", () => {
+        if (desktopCloseBehavior === "tray") {
+          void minimizeDesktopToTray();
+        } else if (desktopCloseBehavior === "exit") {
+          void exitDesktopApp();
+        } else if (!disposed) {
+          setDesktopCloseRemember(false);
+          setDesktopClosePromptOpen(true);
+        }
+      }),
+      listen("desktop-tray-queue", () => {
+        setQueueOpen(true);
+      }),
+      listen("desktop-tray-check-update", () => {
+        openDesktopSettings("about");
+        void handleDesktopCheckUpdate(false);
+      }),
+      onAction((notification) => {
+        const sessionId = typeof notification.extra?.sessionId === "string" ? notification.extra.sessionId : "";
+        const turnId = typeof notification.extra?.turnId === "string" ? notification.extra.turnId : "";
+        void showDesktopApp();
+        if (sessionId) setActiveSessionId(sessionId);
+        if (turnId) window.setTimeout(() => document.getElementById(`turn-${turnId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
+      }),
+    ]);
+    return () => {
+      disposed = true;
+      void unlisten.then((cleanups) => cleanups.forEach((cleanup) => {
+        if (typeof cleanup === "function") void cleanup();
+        else void cleanup.unregister();
+      }));
+    };
+  }, [desktopMode, desktopCloseBehavior]);
 
   useEffect(() => {
     const nextJob = nextQueuedGenerationJob(queueJobs);
@@ -3778,6 +3855,12 @@ function App() {
       stickToConversationEndIfNearBottom();
       setStatus(responsePayload.ok ? t("status.generationReturned", { count: images.length }) : t("status.generationNoImages"));
       setNotice(responsePayload.ok ? t("status.imagesSaved") : t("status.checkResponse"));
+      void notifyDesktopGeneration(
+        responsePayload.ok ? t("desktop.notificationSuccessTitle") : t("desktop.notificationFailureTitle"),
+        responsePayload.ok ? t("desktop.notificationSuccessBody", { count: images.length }) : t("desktop.notificationFailureBody"),
+        payload.sessionId,
+        payload.turnId,
+      );
       updateQueueJob(jobId, {
         status: responsePayload.ok ? "success" : "error",
         finishedAt,
@@ -3819,6 +3902,7 @@ function App() {
       stickToConversationEndIfNearBottom();
       setStatus(message === t("status.generationCanceled") ? t("status.generationCanceled") : t("status.generationFailed"));
       setNotice(wasCanceled ? cancellationNotice(language) : message);
+      if (!wasCanceled) void notifyDesktopGeneration(t("desktop.notificationFailureTitle"), message, payload.sessionId, payload.turnId);
       updateQueueJob(jobId, {
         status: message === t("status.generationCanceled") ? "canceled" : "error",
         finishedAt,
@@ -4210,6 +4294,20 @@ function App() {
       setNotice(t("desktop.windowReset"));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("desktop.windowResetFailed"));
+    }
+  }
+
+  async function notifyDesktopGeneration(title: string, body: string, sessionId: string, turnId: string) {
+    if (!desktopMode || !desktopNotifications) return;
+    if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) return;
+    try {
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        granted = (await requestPermission()) === "granted";
+      }
+      if (granted) sendNotification({ title, body, extra: { sessionId, turnId }, autoCancel: true });
+    } catch {
+      // Notification permission is optional. The in-app status remains authoritative.
     }
   }
 
@@ -5776,6 +5874,27 @@ function App() {
                     </div>
                     <button type="button" onClick={() => void resetWindowLayout()}>{t("desktop.resetWindow")}</button>
                   </section>
+                  <section className="desktop-setting-row">
+                    <div>
+                      <strong>{t("desktop.notifications")}</strong>
+                      <span>{t("desktop.notificationsHint")}</span>
+                    </div>
+                    <label className="desktop-update-toggle">
+                      <input type="checkbox" checked={desktopNotifications} onChange={(event) => setDesktopNotifications(event.target.checked)} />
+                      <span>{desktopNotifications ? t("common.enabled") : t("common.disabled")}</span>
+                    </label>
+                  </section>
+                  <section className="desktop-setting-row">
+                    <div>
+                      <strong>{t("desktop.closeBehavior")}</strong>
+                      <span>{t("desktop.closeBehaviorHint")}</span>
+                    </div>
+                    <select value={desktopCloseBehavior} onChange={(event) => setDesktopCloseBehavior(event.target.value as DesktopCloseBehavior)}>
+                      <option value="ask">{t("desktop.closeAsk")}</option>
+                      <option value="tray">{t("desktop.closeTray")}</option>
+                      <option value="exit">{t("desktop.closeExit")}</option>
+                    </select>
+                  </section>
                   <div className="desktop-settings-note">
                     <Monitor size={17} />
                     <span>{t("desktop.windowSavedAutomatically")}</span>
@@ -5982,6 +6101,31 @@ function App() {
               )}
             </div>
           </div>
+          </section>
+        </div>
+      )}
+
+      {desktopMode && desktopClosePromptOpen && (
+        <div className="drawer-shell desktop-close-shell">
+          <button className="drawer-backdrop" type="button" aria-label={t("desktop.closeCancel")} onClick={() => setDesktopClosePromptOpen(false)} />
+          <section className="drawer desktop-close-drawer" role="dialog" aria-modal="true" aria-label={t("desktop.closeTitle")} tabIndex={-1}>
+            <div className="drawer-head">
+              <div>
+                <p>{t("desktop.general")}</p>
+                <h2>{t("desktop.closeTitle")}</h2>
+              </div>
+              <button type="button" onClick={() => setDesktopClosePromptOpen(false)} aria-label={t("desktop.closeCancel")} title={t("common.close")}><X size={18} /></button>
+            </div>
+            <p className="desktop-close-copy">{activeQueueCount > 0 ? t("desktop.closeWithTasksMessage", { count: activeQueueCount }) : t("desktop.closeMessage")}</p>
+            <label className="multi-image-confirm-check">
+              <input type="checkbox" checked={desktopCloseRemember} onChange={(event) => setDesktopCloseRemember(event.target.checked)} />
+              <span>{t("desktop.closeRemember")}</span>
+            </label>
+            <div className="drawer-actions">
+              <button type="button" onClick={() => { if (desktopCloseRemember) setDesktopCloseBehavior("tray"); setDesktopClosePromptOpen(false); void confirmDesktopClose("tray"); }}>{t("desktop.closeToTray")}</button>
+              <button type="button" className="primary-action" onClick={() => { if (desktopCloseRemember) setDesktopCloseBehavior("exit"); setDesktopClosePromptOpen(false); void confirmDesktopClose("exit"); }}>{t("desktop.closeNow")}</button>
+              <button type="button" onClick={() => setDesktopClosePromptOpen(false)}>{t("desktop.closeCancel")}</button>
+            </div>
           </section>
         </div>
       )}

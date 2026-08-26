@@ -5,11 +5,18 @@ use std::{
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::TrayIconBuilder,
+    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow,
+};
 use uuid::Uuid;
 
 #[cfg(windows)]
@@ -80,6 +87,7 @@ struct DesktopRuntimeState {
     info: DesktopRuntimeInfo,
     child: Mutex<Option<Child>>,
     window: Mutex<SavedWindowState>,
+    close_allowed: AtomicBool,
     #[cfg(windows)]
     _backend_job: BackendJob,
 }
@@ -637,6 +645,53 @@ fn desktop_open_backend_console(state: State<'_, DesktopRuntimeState>) -> Result
 }
 
 #[tauri::command]
+fn desktop_exit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn desktop_minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?
+        .hide()
+        .map_err(|error| format!("failed to hide main window: {error}"))
+}
+
+#[tauri::command]
+fn desktop_show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    show_main_window(&app)
+}
+
+#[tauri::command]
+fn desktop_confirm_close(
+    app: tauri::AppHandle,
+    behavior: String,
+    state: State<'_, DesktopRuntimeState>,
+) -> Result<(), String> {
+    match behavior.as_str() {
+        "tray" => desktop_minimize_to_tray(app),
+        "exit" => {
+            state.close_allowed.store(true, Ordering::SeqCst);
+            app.exit(0);
+            Ok(())
+        }
+        _ => Err("unsupported close behavior".to_string()),
+    }
+}
+
+fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show main window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus main window: {error}"))
+}
+
+#[tauri::command]
 fn desktop_reset_window_state(
     app: tauri::AppHandle,
     state: State<'_, DesktopRuntimeState>,
@@ -735,6 +790,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(updater::DesktopUpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
@@ -749,6 +805,10 @@ pub fn run() {
             desktop_open_backend_log,
             desktop_open_downloads_directory,
             desktop_open_backend_console,
+            desktop_exit,
+            desktop_minimize_to_tray,
+            desktop_show_main_window,
+            desktop_confirm_close,
             desktop_reset_window_state,
             updater::desktop_check_update,
             updater::desktop_download_update,
@@ -873,9 +933,62 @@ pub fn run() {
                 },
                 child: Mutex::new(Some(child)),
                 window: Mutex::new(saved_window),
+                close_allowed: AtomicBool::new(false),
                 #[cfg(windows)]
                 _backend_job: backend_job,
             });
+
+            let open = MenuItem::with_id(
+                app,
+                "open",
+                "打开 NM Image Studio / Open",
+                true,
+                None::<&str>,
+            )?;
+            let queue =
+                MenuItem::with_id(app, "queue", "查看任务队列 / Tasks", true, None::<&str>)?;
+            let outputs =
+                MenuItem::with_id(app, "outputs", "打开存图夹 / Outputs", true, None::<&str>)?;
+            let check_update = MenuItem::with_id(
+                app,
+                "check-update",
+                "检查更新 / Check updates",
+                true,
+                None::<&str>,
+            )?;
+            let quit = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(
+                app,
+                &[&open, &queue, &outputs, &separator, &check_update, &quit],
+            )?;
+            let mut tray = TrayIconBuilder::with_id("nm-image-studio-tray")
+                .menu(&menu)
+                .tooltip("NM Image Studio")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => {
+                        let _ = show_main_window(app);
+                    }
+                    "queue" => {
+                        let _ = app.emit("desktop-tray-queue", ());
+                        let _ = show_main_window(app);
+                    }
+                    "outputs" => {
+                        if let Some(state) = app.try_state::<DesktopRuntimeState>() {
+                            let _ = open_in_explorer(Path::new(&state.info.outputs_root), false);
+                        }
+                    }
+                    "check-update" => {
+                        let _ = app.emit("desktop-tray-check-update", ());
+                        let _ = show_main_window(app);
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray = tray.icon(icon);
+            }
+            tray.build(app)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -886,9 +999,15 @@ pub fn run() {
             tauri::WindowEvent::Moved(_)
             | tauri::WindowEvent::Resized(_)
             | tauri::WindowEvent::ScaleFactorChanged { .. } => capture_window_state(handle),
-            tauri::WindowEvent::CloseRequested { .. } => {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 capture_window_state(handle);
                 save_window_state(handle);
+                if let Some(state) = handle.try_state::<DesktopRuntimeState>() {
+                    if !state.close_allowed.swap(false, Ordering::SeqCst) {
+                        api.prevent_close();
+                        let _ = handle.emit("desktop-close-requested", ());
+                    }
+                }
             }
             _ => {}
         },

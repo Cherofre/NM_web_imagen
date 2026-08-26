@@ -68,6 +68,19 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(i18nSource, /"desktop\.shortcutsReset":/);
   assert.match(i18nSource, /"desktop\.updateTitle":/);
   assert.match(appSource, /desktop\.updateInstallBlocked/);
+  assert.match(appSource, /desktop\.notifications/);
+  assert.match(appSource, /desktop\.closeBehavior/);
+  assert.match(appSource, /desktop-close-drawer/);
+  assert.match(appSource, /sendNotification/);
+});
+
+test("desktop native shell exposes tray actions and close interception", () => {
+  assert.match(tauriLibSource, /TrayIconBuilder/);
+  assert.match(tauriLibSource, /desktop-tray-queue/);
+  assert.match(tauriLibSource, /desktop-tray-check-update/);
+  assert.match(tauriLibSource, /CloseRequested \{ api/);
+  assert.match(tauriLibSource, /desktop_confirm_close/);
+  assert.match(runtimeSource, /desktop_confirm_close/);
 });
 
 test("desktop updater keeps the installed, portable and web boundaries explicit", () => {

@@ -1,11 +1,9 @@
 # Next Actions
 
 ## Now
-- [x] Publish and synchronize v1.1.0 web/desktop artifacts, signed updater metadata, Chinese distribution names and the extracted portable launcher.
-- [x] Pass the v1.1.0 local build/runtime/package matrix; see `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md`.
-- [x] Add desktop storage migration scanning/import with automatic target backup for web and portable layouts.
-- [x] Add configurable desktop output root with Documents shortcut and custom Windows folder picker; restart is required after changing it.
-- [x] Rebuild the PyInstaller sidecar, Vite assets and Tauri release EXE with the storage changes.
+- [x] Add Windows background generation notifications with a desktop setting and foreground suppression.
+- [x] Add a native tray menu and configurable close behavior: ask, minimize to tray, or exit.
+- [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
@@ -17,10 +15,11 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `main` / `v1.1.0`; the updater implementation is in `studio-web/src-tauri/src/updater.rs`, `studio-web/src/desktopUpdater.ts`, `scripts/package_desktop_updater.ps1`, and `scripts/generate_desktop_update_feed.ps1`.
+- Start here: continue on `codex/desktop-distribution-cn`; notification/tray implementation is in `studio-web/src-tauri/src/lib.rs`, `studio-web/src/App.tsx`, `studio-web/src/desktopRuntime.ts`, and `studio-web/src/i18n.ts`.
 - Do not redo: the completed 171 Node + 251 Python tests, Tauri/PyInstaller build, normal/offline installer smoke, portable/web package smoke, coexistence smoke, signature/feed smoke, or local pre-release audit.
 - Verify next: use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states.
 - Do not claim: a real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
+- Do not claim: manual tray/notification acceptance until the currently running installed instance is closed and the release EXE is tested alone.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
 - Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.
