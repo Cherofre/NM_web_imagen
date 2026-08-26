@@ -5,6 +5,7 @@
 - [x] Add a native tray menu and configurable close behavior: ask, minimize to tray, or exit.
 - [x] Add taskbar attention flashing for background generation completion/failure and clear it when the window is focused.
 - [ ] Manually verify tray menu, close dialog, notification permission and click-through on Windows with no other NM Image Studio instance running.
+- [ ] After closing the running test EXE, rerun `npm run desktop:build` to refresh the release EXE with the latest taskbar attention change.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
