@@ -4733,6 +4733,13 @@ button.primary-action:focus-visible,
   gap: 5px;
 }
 
+.desktop-setting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .desktop-language-switcher button {
   min-width: 54px;
 }
@@ -5154,9 +5161,15 @@ button.primary-action:focus-visible,
   }
 
   .desktop-setting-row > button,
+  .desktop-setting-actions,
   .desktop-language-switcher,
   .desktop-path-actions {
     justify-self: start;
+  }
+
+  .desktop-setting-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .desktop-path-actions {

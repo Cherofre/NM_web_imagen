@@ -4304,16 +4304,45 @@ function App() {
   async function notifyDesktopGeneration(title: string, body: string, sessionId: string, turnId: string) {
     if (!desktopMode) return;
     if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) return;
+
     try {
       await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
-      if (!desktopNotifications) return;
+    } catch {
+      // Taskbar attention is best-effort and must never suppress the Windows toast.
+    }
+
+    if (!desktopNotifications) return;
+    try {
       let granted = await isPermissionGranted();
       if (!granted) {
         granted = (await requestPermission()) === "granted";
       }
       if (granted) sendNotification({ title: `NM Image Studio · ${title}`, body, extra: { sessionId, turnId }, autoCancel: true });
     } catch {
-      // Notification permission is optional. The in-app status remains authoritative.
+      // Windows toast permission is optional. The in-app status remains authoritative.
+    }
+  }
+
+  async function sendDesktopTestNotification() {
+    if (!desktopMode || !desktopNotifications) {
+      setNotice(t("desktop.notificationTestEnableFirst"));
+      return;
+    }
+    try {
+      let granted = await isPermissionGranted();
+      if (!granted) granted = (await requestPermission()) === "granted";
+      if (!granted) {
+        setNotice(t("desktop.notificationPermissionDenied"));
+        return;
+      }
+      sendNotification({
+        title: t("desktop.notificationTestTitle"),
+        body: t("desktop.notificationTestBody"),
+        autoCancel: true,
+      });
+      setNotice(t("desktop.notificationTestSent"));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("desktop.notificationTestFailed"));
     }
   }
 
@@ -5885,10 +5914,13 @@ function App() {
                       <strong>{t("desktop.notifications")}</strong>
                       <span>{t("desktop.notificationsHint")}</span>
                     </div>
-                    <label className="desktop-update-toggle">
-                      <input type="checkbox" checked={desktopNotifications} onChange={(event) => setDesktopNotifications(event.target.checked)} />
-                      <span>{desktopNotifications ? t("common.enabled") : t("common.disabled")}</span>
-                    </label>
+                    <div className="desktop-setting-actions">
+                      <label className="desktop-update-toggle">
+                        <input type="checkbox" checked={desktopNotifications} onChange={(event) => setDesktopNotifications(event.target.checked)} />
+                        <span>{desktopNotifications ? t("common.enabled") : t("common.disabled")}</span>
+                      </label>
+                      <button type="button" onClick={() => void sendDesktopTestNotification()}>{t("desktop.notificationTest")}</button>
+                    </div>
                   </section>
                   <section className="desktop-setting-row">
                     <div>

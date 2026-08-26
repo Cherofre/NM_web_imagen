@@ -21,6 +21,12 @@
 - Decision: Keep taskbar attention flashing enabled for background results even when the user disables Windows toast notifications. The notification toggle controls only the OS toast, not the taskbar completion cue.
 - Reason: A user may want a quiet system notification area while still needing a visible signal that a minimized generation finished.
 - Consequences / follow-up: Focus still clears the attention request; no new setting is needed for the taskbar cue in this slice.
+
+## 2026-08-26 - Notification Delivery Must Not Depend On Taskbar Attention
+- Status: active
+- Decision: Treat taskbar attention and Windows toast as independent best-effort operations. A failure from `requestUserAttention` must never prevent permission checking or toast delivery. Add a visible test-notification action in desktop settings for diagnosis.
+- Reason: The initial combined error boundary caused a regression where no toast appeared when the taskbar API or capability was unavailable.
+- Consequences / follow-up: The desktop capability now explicitly grants `core:window:allow-request-user-attention`; the final installed release still needs manual verification after rebuilding with the running test instance closed.
 - 2026-08-25 — Status: active: Desktop storage migration replaces the current output root only after scanning a user-selected old directory, and first renames the current target to a timestamped `.backup-*` sibling. It accepts a direct `outputs` folder, a web project root containing `outputs`, or a portable desktop root containing `data\outputs`.
 - Reason: Users need a practical web-to-desktop recovery path, but silent merges can duplicate sessions and overwrites are difficult to undo. A scan preview plus an automatic backup makes the operation understandable and recoverable without scanning the whole disk.
 - Consequences / follow-up: The current release does not merge conflicting records at the JSON identity level; it replaces the current output root after confirmation. A future migration wizard can add selective conflict policies if needed.

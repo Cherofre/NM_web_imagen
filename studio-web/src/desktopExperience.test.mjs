@@ -5,6 +5,7 @@ import test from "node:test";
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const runtimeSource = readFileSync(new URL("./desktopRuntime.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const capabilitiesSource = readFileSync(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8");
 const i18nSource = readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
 const updaterSource = readFileSync(new URL("./desktopUpdater.ts", import.meta.url), "utf8");
 const tauriUpdaterSource = readFileSync(new URL("../src-tauri/src/updater.rs", import.meta.url), "utf8");
@@ -74,7 +75,10 @@ test("desktop app provides a modal settings surface and standard shortcuts", () 
   assert.match(appSource, /sendNotification/);
   assert.match(appSource, /requestUserAttention\(UserAttentionType\.Informational\)/);
   assert.match(appSource, /NM Image Studio · \$\{title\}/);
-  assert.match(appSource, /requestUserAttention\(UserAttentionType\.Informational\)[\s\S]*if \(!desktopNotifications\) return/);
+  assert.match(appSource, /requestUserAttention\(UserAttentionType\.Informational\)[\s\S]*Taskbar attention is best-effort[\s\S]*if \(!desktopNotifications\) return[\s\S]*isPermissionGranted/);
+  assert.match(appSource, /sendDesktopTestNotification/);
+  assert.match(i18nSource, /"desktop\.notificationTest": "发送测试通知"/);
+  assert.match(capabilitiesSource, /core:window:allow-request-user-attention/);
 });
 
 test("desktop native shell exposes tray actions and close interception", () => {
