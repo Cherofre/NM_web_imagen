@@ -475,6 +475,8 @@ test("image previews expose download and canvas zoom controls", () => {
   assert.match(appSource, /downloadImage\(previewImage\.src, previewImage\.name\)/);
   assert.match(appSource, /pathname\.startsWith\("\/outputs\/"\)/);
   assert.match(appSource, /parsed\.searchParams\.set\("download", "1"\)/);
+  assert.match(appSource, /saveImageAs\(src, name\)/);
+  assert.match(appSource, /openDownloadsFolder\(\)/);
   assert.match(appSource, /<div className="lightbox-zoom-tools" aria-label=\{t\("preview\.zoomControls"\)\}>/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomIn"\)\}/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomOut"\)\}/);
