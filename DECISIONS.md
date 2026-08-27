@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-08-27 - Modern Explorer-Style Folder Picker
+- Status: active
+- Decision: Use the Windows Vista+ `IFileDialog` with `FOS_PICKFOLDERS` for desktop directory selection, with a localized title and `选择此文件夹` confirmation label, instead of the legacy WinForms `FolderBrowserDialog` tree.
+- Reason: The legacy picker opened as a small tree-only window that made browsing large or external directory trees difficult. The modern system dialog keeps native Windows behavior while providing Explorer navigation, address-bar access and a resizable window.
+- Consequences: The Windows desktop build now links the cached `windows` crate for COM/Shell APIs. Web mode and non-Windows builds keep their existing boundaries; manual Windows acceptance should confirm cancel, drive navigation, network locations and folder creation.
+
 ## 2026-08-26 - Sanitize Folder Picker Output
 - Status: active
 - Decision: Treat the Windows folder dialog stdout as untrusted text and select the longest existing directory prefix when diagnostics are appended without a newline. Keep direct existing paths and cancel behavior unchanged.

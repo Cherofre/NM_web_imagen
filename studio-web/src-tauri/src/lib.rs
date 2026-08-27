@@ -24,6 +24,20 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 mod windows_runtime;
 #[cfg(windows)]
+use windows::{
+    core::{PCWSTR, PWSTR},
+    Win32::{
+        System::Com::{
+            CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        },
+        UI::Shell::{
+            FileOpenDialog, IFileDialog, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST,
+            FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+        },
+    },
+};
+#[cfg(windows)]
 use windows_runtime::{ensure_webview2_runtime, BackendJob, SingleInstanceGuard};
 mod updater;
 
@@ -561,6 +575,7 @@ fn desktop_open_outputs_directory(state: State<'_, DesktopRuntimeState>) -> Resu
     open_in_explorer(path, false)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn sanitize_folder_dialog_output(raw: &str) -> Result<PathBuf, String> {
     let normalized = raw
         .trim_matches(['\u{feff}', '\0', '\r', '\n', ' ', '\t'])
@@ -611,41 +626,61 @@ fn desktop_open_data_directory(state: State<'_, DesktopRuntimeState>) -> Result<
 
 #[cfg(windows)]
 fn choose_folder_dialog(title: &str) -> Result<Option<PathBuf>, String> {
-    const SCRIPT: &str = r#"
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = $env:NM_IMAGE_STUDIO_FOLDER_DIALOG_TITLE
-$dialog.ShowNewFolderButton = $true
-$result = $dialog.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-  [Console]::Write($dialog.SelectedPath)
-}
-"#;
-    let output = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-STA",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            SCRIPT,
-        ])
-        .env("NM_IMAGE_STUDIO_FOLDER_DIALOG_TITLE", title)
-        .stdin(Stdio::null())
-        .stderr(Stdio::piped())
-        .creation_flags(0x08000000)
-        .output()
-        .map_err(|error| format!("无法打开文件夹选择器: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    let selected = String::from_utf8_lossy(&output.stdout).to_string();
-    if selected.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(sanitize_folder_dialog_output(&selected)?))
+    let title_wide: Vec<u16> = title.encode_utf16().chain([0]).collect();
+    let ok_label_wide: Vec<u16> = "选择此文件夹".encode_utf16().chain([0]).collect();
+
+    unsafe {
+        let init_result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if init_result.0 < 0 {
+            return Err(format!(
+                "无法初始化 Windows 文件夹选择器: HRESULT 0x{:08X}",
+                init_result.0 as u32
+            ));
+        }
+
+        let result = (|| {
+            let dialog: IFileDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
+                .map_err(|error| format!("无法创建 Windows 文件夹选择器: {error}"))?;
+            dialog
+                .SetTitle(PCWSTR(title_wide.as_ptr()))
+                .map_err(|error| format!("无法设置文件夹选择器标题: {error}"))?;
+            dialog
+                .SetOkButtonLabel(PCWSTR(ok_label_wide.as_ptr()))
+                .map_err(|error| format!("无法设置文件夹选择器按钮: {error}"))?;
+            dialog
+                .SetOptions(
+                    FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR,
+                )
+                .map_err(|error| format!("无法配置文件夹选择器: {error}"))?;
+
+            match dialog.Show(None) {
+                Ok(()) => {
+                    let item = dialog
+                        .GetResult()
+                        .map_err(|error| format!("无法读取所选文件夹: {error}"))?;
+                    let display_name = item
+                        .GetDisplayName(SIGDN_FILESYSPATH)
+                        .map_err(|error| format!("无法读取所选文件夹路径: {error}"))?;
+                    if display_name.0.is_null() {
+                        return Ok(None);
+                    }
+                    let path_result = PWSTR(display_name.0).to_string();
+                    CoTaskMemFree(Some(display_name.0 as *const std::ffi::c_void));
+                    let path = path_result
+                        .map_err(|error| format!("所选文件夹路径不是有效的 UTF-16: {error}"))?;
+                    if path.trim().is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(PathBuf::from(path)))
+                    }
+                }
+                Err(error) if error.code().0 as u32 == 0x8007_04C7 => Ok(None),
+                Err(error) => Err(format!("文件夹选择器打开失败: {error}")),
+            }
+        })();
+
+        CoUninitialize();
+        result
     }
 }
 
