@@ -823,6 +823,79 @@ fn desktop_open_downloads_directory(app: tauri::AppHandle) -> Result<(), String>
     }
 }
 
+#[tauri::command]
+fn desktop_download_output(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    relative_path: String,
+    name: Option<String>,
+) -> Result<String, String> {
+    let relative = relative_path.replace('/', "\\");
+    let relative_path = Path::new(&relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("图片路径无效".to_string());
+    }
+
+    let outputs_root = state
+        .outputs_root
+        .lock()
+        .map_err(|_| "无法读取存图目录".to_string())?
+        .clone();
+    let root = fs::canonicalize(&outputs_root).map_err(|_| "存图目录不存在".to_string())?;
+    let source =
+        fs::canonicalize(root.join(relative_path)).map_err(|_| "图片不存在".to_string())?;
+    if !source.starts_with(&root) {
+        return Err("图片路径无效".to_string());
+    }
+
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("下载目录不可用: {error}"))?;
+    fs::create_dir_all(&downloads).map_err(|error| format!("无法创建下载目录: {error}"))?;
+
+    let requested_name = name.unwrap_or_default();
+    let requested_name = Path::new(&requested_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| source.file_name().and_then(|value| value.to_str()))
+        .unwrap_or("image.png");
+    let safe_name = requested_name.replace(['\r', '\n'], "");
+    let safe_name = if safe_name.trim().is_empty() {
+        "image.png"
+    } else {
+        safe_name.as_str()
+    };
+    let safe_name_path = Path::new(safe_name);
+    let stem = safe_name_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image");
+    let extension = safe_name_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+    let mut target = downloads.join(safe_name);
+    let mut index = 1u32;
+    while target.exists() {
+        target = downloads.join(format!("{stem} ({index}){extension}"));
+        index += 1;
+    }
+    fs::copy(&source, &target).map_err(|error| format!("保存图片失败: {error}"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 #[cfg(windows)]
 fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
     const SCRIPT: &str = r#"
@@ -1041,6 +1114,7 @@ pub fn run() {
             desktop_set_outputs_directory,
             desktop_open_backend_log,
             desktop_open_downloads_directory,
+            desktop_download_output,
             desktop_open_backend_console,
             desktop_exit,
             desktop_minimize_to_tray,

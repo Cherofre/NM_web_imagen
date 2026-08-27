@@ -29,6 +29,7 @@ test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /desktop_onboarding_status/);
   assert.match(runtimeSource, /desktop_complete_onboarding/);
   assert.match(runtimeSource, /desktop_open_backend_log/);
+  assert.match(runtimeSource, /downloadDesktopOutput/);
   assert.match(runtimeSource, /openBackendDebugConsole\(\)/);
   assert.match(runtimeSource, /invoke\("desktop_open_backend_console"\)/);
   assert.match(runtimeSource, /desktop_reset_window_state/);

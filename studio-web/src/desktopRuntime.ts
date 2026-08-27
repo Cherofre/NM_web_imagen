@@ -66,6 +66,12 @@ export async function openDesktopDownloadsDirectory() {
   return true;
 }
 
+export async function downloadDesktopOutput(relativePath: string, name: string) {
+  if (!isDesktopRuntime()) return false;
+  await invoke<string>("desktop_download_output", { relativePath, name });
+  return true;
+}
+
 export async function chooseDesktopFolder(title: string) {
   if (!isDesktopRuntime()) return null;
   return await invoke<string | null>("desktop_choose_folder", { title });

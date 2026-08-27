@@ -80,6 +80,7 @@ import { buildSubmissionFields } from "./submissionPayload";
 import {
   apiFetch,
   chooseDesktopFolder,
+  downloadDesktopOutput,
   getDesktopDefaultOutputsDirectory,
   getDesktopRuntimeInfo,
   getDesktopDocumentsOutputsDirectory,
@@ -679,6 +680,11 @@ async function downloadImageFile(src: string, name: string) {
   // so WebView2/the browser performs the download without a cross-origin Blob
   // fetch (rendering an <img> does not imply fetch() permission).
   if (parsed?.pathname.startsWith("/outputs/")) {
+    if (isDesktopRuntime()) {
+      const relativePath = decodeURIComponent(parsed.pathname.slice("/outputs/".length));
+      await downloadDesktopOutput(relativePath, name || "image.png");
+      return;
+    }
     parsed.searchParams.set("download", "1");
     const anchor = document.createElement("a");
     anchor.href = parsed.toString();
