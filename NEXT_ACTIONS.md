@@ -3,7 +3,7 @@
 ## Now
 - [x] Desktop notifications/taskbar/tray behavior, unified storage buttons, hot-switched output roots, migration discovery (`output`/`outputs` plus bounded nested search), and folder-picker path sanitization are implemented.
 - [x] Close the current EXE/backend before building, then rebuild the release desktop artifacts with `npm run desktop:build` (completed 2026-08-27 after clarifying migration copy).
-- [ ] Manually verify the rebuilt EXE: migration, storage switching, one post-switch generation/history/reference flow, tray, close behavior, and notifications.
+- [ ] Manually verify the rebuilt EXE: modern folder picker navigation/cancel/create-folder, migration, storage switching, one post-switch generation/history/reference flow, tray, close behavior, and notifications.
 - [x] Implement a skippable first-launch preference wizard for language, storage location, notifications, and close behavior without interrupting existing upgrades.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
