@@ -1824,9 +1824,91 @@ def studio_session_state_from_payload(payload: Any) -> Dict[str, Any]:
     }
 
 
+def _recover_studio_session_images(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore image references lost from older session snapshots.
+
+    Session history intentionally stores only compact metadata, while the
+    authoritative image records remain in ``history.json`` and the outputs
+    directory.  Older desktop builds could write turns with an empty
+    ``images`` array or references containing only a filename.  Recover those
+    records on read so the UI can render existing files without embedding
+    large base64 payloads back into the session document.
+    """
+    sessions = state.get("sessions")
+    if not isinstance(sessions, list):
+        return state
+
+    history_by_id: Dict[str, Dict[str, Any]] = {}
+    try:
+        for entry in read_history_entries():
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(entry.get("id") or "").strip()
+            if entry_id:
+                history_by_id[entry_id] = normalize_history_entry(entry)
+    except Exception:
+        history_by_id = {}
+
+    def recover_output_by_name(name: Any) -> Optional[Path]:
+        filename = Path(str(name or "").strip()).name
+        if not filename or filename != str(name or "").strip():
+            return None
+        try:
+            candidate = resolve_output_image(OUTPUTS_DIR, filename)
+            return candidate if candidate.is_file() else None
+        except (ImageSafetyError, OSError, ValueError):
+            return None
+
+    recovered_sessions: List[Dict[str, Any]] = []
+    for raw_session in sessions:
+        if not isinstance(raw_session, dict):
+            recovered_sessions.append(raw_session)
+            continue
+        session = dict(raw_session)
+        recovered_turns: List[Any] = []
+        for raw_turn in session.get("turns", []):
+            if not isinstance(raw_turn, dict):
+                recovered_turns.append(raw_turn)
+                continue
+            turn = dict(raw_turn)
+            images = turn.get("images")
+            if not isinstance(images, list) or not images:
+                history_id = str((turn.get("meta") or {}).get("history_id") or "").strip()
+                history_entry = history_by_id.get(history_id)
+                history_images = history_entry.get("images") if isinstance(history_entry, dict) else None
+                if isinstance(history_images, list) and history_images:
+                    turn["images"] = [dict(image) for image in history_images if isinstance(image, dict)]
+
+            snapshots = turn.get("referenceSnapshots")
+            if isinstance(snapshots, list):
+                recovered_snapshots: List[Any] = []
+                for raw_snapshot in snapshots:
+                    if not isinstance(raw_snapshot, dict):
+                        recovered_snapshots.append(raw_snapshot)
+                        continue
+                    snapshot = dict(raw_snapshot)
+                    if not str(snapshot.get("src") or "").strip():
+                        output_path = recover_output_by_name(snapshot.get("name"))
+                        if output_path:
+                            try:
+                                snapshot["src"] = f"{OUTPUTS_URL_PREFIX}/{quote(output_path.name)}"
+                                with output_path.open("rb") as handle:
+                                    snapshot["mime_type"] = detect_raster_mime(handle.read(16))
+                                snapshot["size"] = output_path.stat().st_size
+                            except (OSError, ImageSafetyError):
+                                pass
+                    recovered_snapshots.append(snapshot)
+                turn["referenceSnapshots"] = recovered_snapshots
+            recovered_turns.append(turn)
+        session["turns"] = recovered_turns
+        recovered_sessions.append(session)
+
+    return {**state, "sessions": recovered_sessions}
+
+
 def read_studio_session_state() -> Dict[str, Any]:
     payload = read_json(STUDIO_SESSIONS_FILE, empty_studio_session_state())
-    return studio_session_state_from_payload(payload)
+    return _recover_studio_session_images(studio_session_state_from_payload(payload))
 
 
 class SessionRevisionConflict(Exception):

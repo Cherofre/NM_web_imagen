@@ -1168,6 +1168,73 @@ class StudioSessionTests(unittest.TestCase):
         self.assertEqual({"same.png", "same.jpg"}, set(legacy_ids))
         self.assertNotEqual(legacy_ids["same.png"], legacy_ids["same.jpg"])
 
+    def test_studio_sessions_recover_images_from_history_and_output_names(self) -> None:
+        recovered = self.outputs / "recovered.png"
+        recovered.write_bytes(PNG_1X1_RAW)
+        (self.outputs / "history.json").write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "id": "history-recovered",
+                            "created_at": "2026-07-10T10:00:00Z",
+                            "engine": "gpt-image-2",
+                            "prompt": "恢复测试",
+                            "images": [
+                                {
+                                    "name": recovered.name,
+                                    "saved_name": recovered.name,
+                                    "saved_url": f"/outputs/{recovered.name}",
+                                    "saved_path": f"outputs/{recovered.name}",
+                                    "mime_type": "image/png",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (self.outputs / "studio_sessions.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "revision": 2,
+                    "active_session_id": "session-1",
+                    "sessions": [
+                        {
+                            "id": "session-1",
+                            "title": "恢复测试",
+                            "createdAt": "2026-07-10T10:00:00Z",
+                            "updatedAt": "2026-07-10T10:00:00Z",
+                            "turns": [
+                                {
+                                    "id": "turn-1",
+                                    "engine": "gpt-image-2",
+                                    "mode": "generate",
+                                    "prompt": "恢复测试",
+                                    "createdAt": "2026-07-10T10:00:00Z",
+                                    "status": "success",
+                                    "images": [],
+                                    "meta": {"history_id": "history-recovered"},
+                                    "referenceSnapshots": [{"id": "ref-1", "name": recovered.name}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        response = self.client.get("/api/studio/sessions")
+        self.assertEqual(200, response.status_code)
+        turn = response.json()["sessions"][0]["turns"][0]
+        self.assertEqual(turn["images"][0]["saved_url"], f"/outputs/{recovered.name}")
+        self.assertEqual(turn["referenceSnapshots"][0]["src"], f"/outputs/{recovered.name}")
+
     def test_legacy_output_delete_removes_only_the_requested_file(self) -> None:
         self.outputs.mkdir(parents=True, exist_ok=True)
         same_png = self.outputs / "same.png"
