@@ -1883,7 +1883,7 @@ button.primary-action:focus-visible,
   transition: background 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
 }
 
-.image-overlay-actions > a.image-download-action {
+.image-overlay-actions > button.image-download-action {
   width: 36px;
   padding: 0;
 }

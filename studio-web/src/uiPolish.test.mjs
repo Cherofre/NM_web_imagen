@@ -472,13 +472,13 @@ test("config drawer exposes separate generation and chat diagnostics", () => {
 });
 
 test("image previews expose download and canvas zoom controls", () => {
-  assert.match(appSource, /<a href=\{resolveRuntimeUrl\(previewImage\.src\)\} download=\{previewImage\.name\}/);
+  assert.match(appSource, /downloadImage\(previewImage\.src, previewImage\.name\)/);
   assert.match(appSource, /<div className="lightbox-zoom-tools" aria-label=\{t\("preview\.zoomControls"\)\}>/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomIn"\)\}/);
   assert.match(appSource, /aria-label=\{t\("preview\.zoomOut"\)\}/);
   assert.match(appSource, /title=\{t\("preview\.fit"\)\}/);
   assert.match(appSource, /\{Math\.round\(previewZoom \* 100\)\}%/);
-  const headerStart = appSource.indexOf("<a href={resolveRuntimeUrl(previewImage.src)} download={previewImage.name}");
+  const headerStart = appSource.indexOf("downloadImage(previewImage.src, previewImage.name)");
   const headerEnd = appSource.indexOf("</span>", headerStart);
   assert.notEqual(headerStart, -1, "Missing preview header action area");
   assert.notEqual(headerEnd, -1, "Missing preview header action close");

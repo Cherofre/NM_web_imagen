@@ -665,6 +665,22 @@ function imageSrc(image?: GeneratedImage) {
   return "";
 }
 
+async function downloadImageFile(src: string, name: string) {
+  if (!src) return;
+  const response = await fetch(resolveRuntimeUrl(src));
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = name || "image.png";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
 function imageName(image?: GeneratedImage, index = 0) {
   return image?.saved_name || image?.name || `image-${index + 1}.png`;
 }
@@ -3186,6 +3202,14 @@ function App() {
     openPreviewImage({ src, name: file.name, objectUrl: true, sourceFile: file });
   }
 
+  async function downloadImage(src: string, name: string) {
+    try {
+      await downloadImageFile(src, name);
+    } catch {
+      setNotice(t("status.downloadFailed"));
+    }
+  }
+
   function openPreviewImage(next: PreviewImage) {
     previewMaskRequestRef.current += 1;
     setPreviewMaskLoading(false);
@@ -5322,7 +5346,7 @@ function App() {
                             <span>{job.status === "queued" ? `${jobMeta} · ${t("queue.queued")}` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>
                           </button>
                           <div className="queue-job-side">
-                            {thumbSrc ? <a href={thumbSrc} download={thumbName} title={t("preview.download")}><Download size={14} /></a> : null}
+                            {thumbSrc ? <button type="button" onClick={() => void downloadImage(thumbSrc, thumbName)} title={t("preview.download")} aria-label={t("preview.download")}><Download size={14} /></button> : null}
                           </div>
                           <div className="queue-job-actions" aria-label={t("queue.actions")}>
                             {(job.status === "running" || job.status === "queued") && (
@@ -5543,9 +5567,9 @@ function App() {
                                     {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
                                     <span>{t("preview.editMask")}</span>
                                   </button>
-                                  <a className="image-download-action" href={src} download={name} title={t("image.download")} aria-label={t("image.download")}>
+                                  <button type="button" className="image-download-action" onClick={() => void downloadImage(src, name)} title={t("image.download")} aria-label={t("image.download")}>
                                     <Download size={15} />
-                                  </a>
+                                  </button>
                                 </div>
                               </div>
                               {!sharedImageDimensionsLabel(turn.images) && dimensions && (
@@ -7100,7 +7124,7 @@ function App() {
                 {!previewImage.isMaskSnapshot && (
                   <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
                 )}
-                <a href={resolveRuntimeUrl(previewImage.src)} download={previewImage.name} title={t("preview.download")}><Download size={18} /></a>
+                <button type="button" onClick={() => void downloadImage(previewImage.src, previewImage.name)} title={t("preview.download")} aria-label={t("preview.download")}><Download size={18} /></button>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>
