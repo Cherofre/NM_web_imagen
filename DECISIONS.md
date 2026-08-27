@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-08-27 - 多种图片保存动作
+- Status: proposed
+- Decision: 桌面端将“下载”作为结果图片的主操作，执行快速保存到系统 Downloads；“另存为…”使用原生保存对话框；保存后提供“打开下载文件夹”。现有“打开存图夹”继续指向原始输出目录，不与下载副本混淆。网页端沿用浏览器下载能力，另存为不承诺自定义原生对话框。
+- Reason: 快速下载、指定位置保存和查看源文件是三种不同意图；明确区分目录和结果，能减少用户找不到文件或误以为移动了原图的问题。将次要动作收进更多菜单可保持图片预览区紧凑。
+- Consequences: 需要新增桌面原生 Save File 命令、下载副本路径反馈和文件夹跳转；应覆盖重复文件名、取消保存、不可写目录、旧历史图片与网页/桌面共存。
+
 ## 2026-08-27 - Modern Explorer-Style Folder Picker
 - Status: active
 - Decision: Use the Windows Vista+ `IFileDialog` with `FOS_PICKFOLDERS` for desktop directory selection, with a localized title and `选择此文件夹` confirmation label, instead of the legacy WinForms `FolderBrowserDialog` tree.
