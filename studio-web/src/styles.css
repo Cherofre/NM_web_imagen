@@ -5115,8 +5115,25 @@ button.primary-action:focus-visible,
   line-height: 1.45;
 }
 
-.desktop-migration-preview .primary-action {
+.desktop-migration-replace-action {
   justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.desktop-migration-replace-action:hover,
+.desktop-migration-replace-action:focus-visible {
+  border-color: rgba(180, 83, 9, 0.42);
+  background: #ffedd5;
+  color: #9a3412;
+  outline: none;
 }
 
 .desktop-shortcut-list {

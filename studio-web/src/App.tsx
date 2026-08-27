@@ -6228,7 +6228,7 @@ function App() {
                           <span>{t("desktop.migrationImages", { count: desktopMigrationScan.imageCount })}</span>
                           <span>{t("desktop.migrationSize", { value: formatDesktopStorageBytes(desktopMigrationScan.totalBytes) })}</span>
                         </div>
-                        <button type="button" className="primary-action" onClick={() => void importDesktopMigration()} disabled={desktopStorageBusy || activeQueueCount > 0}>
+                        <button type="button" className="desktop-migration-replace-action" onClick={() => void importDesktopMigration()} disabled={desktopStorageBusy || activeQueueCount > 0}>
                           {t("desktop.importMigration")}
                         </button>
                       </div>
