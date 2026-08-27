@@ -667,7 +667,32 @@ function imageSrc(image?: GeneratedImage) {
 
 async function downloadImageFile(src: string, name: string) {
   if (!src) return;
-  const response = await fetch(resolveRuntimeUrl(src));
+  const resolved = resolveRuntimeUrl(src);
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(resolved, window.location.origin);
+  } catch {
+    parsed = null;
+  }
+
+  // Generated files are served by our backend.  Use its attachment response
+  // so WebView2/the browser performs the download without a cross-origin Blob
+  // fetch (rendering an <img> does not imply fetch() permission).
+  if (parsed?.pathname.startsWith("/outputs/")) {
+    parsed.searchParams.set("download", "1");
+    const anchor = document.createElement("a");
+    anchor.href = parsed.toString();
+    anchor.download = name || "image.png";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return;
+  }
+
+  // Keep Blob support for local preview files (data/blob URLs) and any other
+  // same-origin source that does not go through the outputs endpoint.
+  const response = await fetch(resolved);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);

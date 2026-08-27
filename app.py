@@ -4225,7 +4225,7 @@ def create_app() -> FastAPI:
         return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/outputs/{relative_path:path}")
-    async def output_image(relative_path: str) -> FileResponse:
+    async def output_image(relative_path: str, request: Request) -> FileResponse:
         try:
             path = resolve_output_image(OUTPUTS_DIR, relative_path)
             with path.open("rb") as handle:
@@ -4235,6 +4235,19 @@ def create_app() -> FastAPI:
         response = FileResponse(path, media_type=mime_type)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "private, max-age=3600"
+        # Let the desktop/WebView download the file directly.  This avoids a
+        # cross-origin fetch + Blob read, which can be blocked even when the
+        # same image is allowed to render in an <img> element.
+        download_requested = str(request.query_params.get("download") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if download_requested:
+            filename = path.name.replace("\r", "").replace("\n", "")
+            response.headers["Content-Disposition"] = (
+                f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
+            )
         return response
 
     @app.get("/api/health")
