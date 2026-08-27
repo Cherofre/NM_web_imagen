@@ -682,8 +682,26 @@ async function downloadImageFile(src: string, name: string) {
   if (parsed?.pathname.startsWith("/outputs/")) {
     if (isDesktopRuntime()) {
       const relativePath = decodeURIComponent(parsed.pathname.slice("/outputs/".length));
-      await downloadDesktopOutput(relativePath, name || "image.png");
-      return;
+      try {
+        await downloadDesktopOutput(relativePath, name || "image.png");
+        return;
+      } catch {
+        // Fall back to the authenticated API path if a stale shell or an
+        // older installed build does not expose the native command yet.
+        const response = await apiFetch(`${parsed.pathname}${parsed.search}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = name || "image.png";
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        return;
+      }
     }
     parsed.searchParams.set("download", "1");
     const anchor = document.createElement("a");
@@ -3236,6 +3254,7 @@ function App() {
   async function downloadImage(src: string, name: string) {
     try {
       await downloadImageFile(src, name);
+      setNotice(t("status.downloaded"));
     } catch {
       setNotice(t("status.downloadFailed"));
     }
