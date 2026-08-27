@@ -94,6 +94,7 @@ import {
   openDesktopPath,
   resetDesktopWindow,
   resolveRuntimeUrl,
+  saveDesktopOutputAs,
   scanDesktopMigration,
   setDesktopOutputsDirectory,
   switchDesktopStorageRoot,
@@ -3260,6 +3261,38 @@ function App() {
     }
   }
 
+  async function saveImageAs(src: string, name: string) {
+    try {
+      const resolved = resolveRuntimeUrl(src);
+      const parsed = new URL(resolved, window.location.origin);
+      if (isDesktopRuntime() && parsed.pathname.startsWith("/outputs/")) {
+        const relativePath = decodeURIComponent(parsed.pathname.slice("/outputs/".length));
+        const savedPath = await saveDesktopOutputAs(relativePath, name || "image.png");
+        if (savedPath) {
+          setNotice(t("status.savedAs"));
+          return;
+        }
+        return;
+      }
+      await downloadImageFile(src, name);
+      setNotice(t("status.savedAs"));
+    } catch {
+      setNotice(t("status.saveAsFailed"));
+    }
+  }
+
+  async function openDownloadsFolder() {
+    try {
+      if (isDesktopRuntime()) {
+        await openDesktopDownloadsDirectory();
+      } else {
+        setNotice(t("status.browserDownloadsHint"));
+      }
+    } catch {
+      setNotice(t("status.openDownloadsFailed"));
+    }
+  }
+
   function openPreviewImage(next: PreviewImage) {
     previewMaskRequestRef.current += 1;
     setPreviewMaskLoading(false);
@@ -5639,6 +5672,8 @@ function App() {
                                     <button type="button" onClick={() => copyPrompt(turn.prompt)}><Copy size={14} /> <span>{t("image.copyPrompt")}</span></button>
                                     <button type="button" onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /> <span>{t("image.applyPrompt")}</span></button>
                                     <button type="button" onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled}><ImagePlus size={14} /> <span>{t("reference.addAsReference")}</span></button>
+                                    <button type="button" onClick={() => void saveImageAs(src, name)}><Download size={14} /> <span>{t("image.saveAs")}</span></button>
+                                    {isDesktopRuntime() && <button type="button" onClick={() => void openDownloadsFolder()}><FolderOpen size={14} /> <span>{t("image.openDownloads")}</span></button>}
                                     <a href={src} target="_blank" rel="noreferrer"><ExternalLink size={14} /> <span>{t("image.open")}</span></a>
                                   </div>
                                 </details>
@@ -7175,6 +7210,7 @@ function App() {
                   <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
                 )}
                 <button type="button" onClick={() => void downloadImage(previewImage.src, previewImage.name)} title={t("preview.download")} aria-label={t("preview.download")}><Download size={18} /></button>
+                <button type="button" onClick={() => void saveImageAs(previewImage.src, previewImage.name)} title={t("image.saveAs")} aria-label={t("image.saveAs")}><FolderOpen size={18} /></button>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>

@@ -32,8 +32,8 @@ use windows::{
             COINIT_APARTMENTTHREADED,
         },
         UI::Shell::{
-            FileOpenDialog, IFileDialog, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST,
-            FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+            FileOpenDialog, FileSaveDialog, IFileDialog, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR,
+            FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
         },
     },
 };
@@ -897,6 +897,134 @@ fn desktop_download_output(
 }
 
 #[cfg(windows)]
+fn choose_save_file_dialog(title: &str, suggested_name: &str) -> Result<Option<PathBuf>, String> {
+    let title_wide: Vec<u16> = title.encode_utf16().chain([0]).collect();
+    let ok_label_wide: Vec<u16> = "保存".encode_utf16().chain([0]).collect();
+    let name_wide: Vec<u16> = suggested_name.encode_utf16().chain([0]).collect();
+
+    unsafe {
+        let init_result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if init_result.0 < 0 {
+            return Err(format!(
+                "无法初始化 Windows 保存对话框: HRESULT 0x{:08X}",
+                init_result.0 as u32
+            ));
+        }
+        let result = (|| {
+            let dialog: IFileDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)
+                .map_err(|error| format!("无法创建 Windows 保存对话框: {error}"))?;
+            dialog
+                .SetTitle(PCWSTR(title_wide.as_ptr()))
+                .map_err(|error| format!("无法设置保存对话框标题: {error}"))?;
+            dialog
+                .SetOkButtonLabel(PCWSTR(ok_label_wide.as_ptr()))
+                .map_err(|error| format!("无法设置保存按钮: {error}"))?;
+            dialog
+                .SetFileName(PCWSTR(name_wide.as_ptr()))
+                .map_err(|error| format!("无法设置默认文件名: {error}"))?;
+            dialog
+                .SetDefaultExtension(windows::core::PCWSTR(
+                    "png"
+                        .encode_utf16()
+                        .chain([0])
+                        .collect::<Vec<u16>>()
+                        .as_ptr(),
+                ))
+                .map_err(|error| format!("无法设置默认扩展名: {error}"))?;
+            dialog
+                .SetOptions(
+                    FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_OVERWRITEPROMPT,
+                )
+                .map_err(|error| format!("无法配置保存对话框: {error}"))?;
+            match dialog.Show(None) {
+                Ok(()) => {
+                    let item = dialog
+                        .GetResult()
+                        .map_err(|error| format!("无法读取保存路径: {error}"))?;
+                    let display_name = item
+                        .GetDisplayName(SIGDN_FILESYSPATH)
+                        .map_err(|error| format!("无法读取保存路径: {error}"))?;
+                    if display_name.0.is_null() {
+                        return Ok(None);
+                    }
+                    let path_result = PWSTR(display_name.0).to_string();
+                    CoTaskMemFree(Some(display_name.0 as *const std::ffi::c_void));
+                    let path = path_result
+                        .map_err(|error| format!("保存路径不是有效的 UTF-16: {error}"))?;
+                    if path.trim().is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(PathBuf::from(path)))
+                    }
+                }
+                Err(error) if error.code().0 as u32 == 0x8007_04C7 => Ok(None),
+                Err(error) => Err(format!("保存对话框打开失败: {error}")),
+            }
+        })();
+        CoUninitialize();
+        result
+    }
+}
+
+#[cfg(not(windows))]
+fn choose_save_file_dialog(_title: &str, _suggested_name: &str) -> Result<Option<PathBuf>, String> {
+    Err("保存对话框仅支持 Windows 桌面版".to_string())
+}
+
+#[tauri::command]
+fn desktop_save_output_as(
+    state: State<'_, DesktopRuntimeState>,
+    relative_path: String,
+    suggested_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let relative = relative_path.replace('/', "\\");
+    let relative_path = Path::new(&relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("图片路径无效".to_string());
+    }
+    let outputs_root = state
+        .outputs_root
+        .lock()
+        .map_err(|_| "无法读取存图目录".to_string())?
+        .clone();
+    let root = fs::canonicalize(&outputs_root).map_err(|_| "存图目录不存在".to_string())?;
+    let source =
+        fs::canonicalize(root.join(relative_path)).map_err(|_| "图片不存在".to_string())?;
+    if !source.starts_with(&root) {
+        return Err("图片路径无效".to_string());
+    }
+    let fallback_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image.png");
+    let suggested_name = suggested_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_name)
+        .replace(['\r', '\n'], "");
+    let Some(target) = choose_save_file_dialog("图片另存为", &suggested_name)? else {
+        return Ok(None);
+    };
+    if target.is_dir() {
+        return Err("请选择文件名，而不是文件夹".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建目标目录: {error}"))?;
+    }
+    fs::copy(&source, &target).map_err(|error| format!("另存为失败: {error}"))?;
+    Ok(Some(target.to_string_lossy().into_owned()))
+}
+
+#[cfg(windows)]
 fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
     const SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
@@ -1115,6 +1243,7 @@ pub fn run() {
             desktop_open_backend_log,
             desktop_open_downloads_directory,
             desktop_download_output,
+            desktop_save_output_as,
             desktop_open_backend_console,
             desktop_exit,
             desktop_minimize_to_tray,

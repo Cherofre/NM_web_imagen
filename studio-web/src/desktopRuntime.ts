@@ -71,6 +71,11 @@ export async function downloadDesktopOutput(relativePath: string, name: string) 
   return await invoke<string>("desktop_download_output", { relativePath, name });
 }
 
+export async function saveDesktopOutputAs(relativePath: string, name: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<string | null>("desktop_save_output_as", { relativePath, suggestedName: name });
+}
+
 export async function chooseDesktopFolder(title: string) {
   if (!isDesktopRuntime()) return null;
   return await invoke<string | null>("desktop_choose_folder", { title });
