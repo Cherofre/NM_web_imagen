@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-08-29 - v1.1.1 发布边界
+- Status: active
+- Decision: 发布 v1.1.1 的网页包、普通安装器、离线 WebView2 安装器和便携包，并同步两处 G: 分发目录；不上传旧版 updater 或伪造新的 updater 签名 feed。
+- Reason: 本次环境没有可用的 Tauri updater 私钥，使用旧版签名二进制会造成版本/签名语义错误；手动安装包仍可完整交付桌面和网页功能。
+- Consequences: 已安装的 v1.1.0 客户端暂不能通过内置检查更新自动跳到 v1.1.1，需要手动安装 v1.1.1。恢复同一签名私钥后，应单独生成并发布新的 updater/feed，再验证升级流程。
+
 ## 2026-08-28 - v1.1.1 候选版本边界
 - Status: active
 - Decision: 将当前桌面可用性修复分支的候选版本统一提升为 `1.1.1`，同步 VERSION、Tauri/Cargo 元数据、版本化烟测默认值和发布断言；先生成并验证本地产物，暂不复用 `v1.1.0` 标签或执行 GitHub/G 盘发布。

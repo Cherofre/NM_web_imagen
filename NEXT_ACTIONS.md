@@ -1,11 +1,10 @@
 # Next Actions
 
 ## Now
-- [x] Bump the local release candidate to v1.1.1 across VERSION, Tauri/Cargo metadata, versioned smoke defaults and release assertions; rebuild and verify local artifacts (2026-08-28).
-- [ ] After manual desktop acceptance, decide whether to publish v1.1.1 and synchronize both approved G: roots; do not reuse the v1.1.0 tag.
+- [x] Bump to v1.1.1, publish GitHub Release `v1.1.1`, and synchronize both approved G: roots without reusing the v1.1.0 tag (2026-08-29).
 - [x] Desktop notifications/taskbar/tray behavior, unified storage buttons, hot-switched output roots, migration discovery (`output`/`outputs` plus bounded nested search), and folder-picker path sanitization are implemented.
 - [x] Add a separate localized “打开文件夹 / Open folder” action to the post-download toast and remove the pre-download folder action from the image “更多” menu.
-- [ ] Manually verify the rebuilt EXE's native UI flows (wizard, folder picker, migration, storage switch, save/download/open-folder, tray/notifications/shortcuts) on a clean or currently approved test install.
+- [ ] Manually verify the published v1.1.1 desktop UI flows (wizard, folder picker, migration, storage switch, save/download/open-folder, tray/notifications/shortcuts) on a clean or currently approved test install.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
@@ -34,7 +33,7 @@
 - Packaging recommendation: one Setup EXE for installation; one portable ZIP containing the complete application folder; do not use PyInstaller `onefile` for the runtime.
 - Security note: per-run API/output tokens are proven; five Node build-chain audit findings remain and should be handled with a controlled Vite major upgrade in the formal branch.
 - Pre-release audit: `docs/NM-Image-Studio-v1.1.0-pre-release-audit.md` records the passed matrix, exact artifact hashes, current blockers, and machine/environment limits.
-- Release boundary: v1.1.0 is published at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.0`; both G: destinations passed manifest and SHA256 verification.
+- Release boundary: v1.1.1 is published at `https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.1`; both G: destinations passed manifest and SHA256 verification. This release contains manual-install packages only; updater/feed remains at v1.1.0 until the signing key is restored.
 - Dirty worktree: current console/model follow-up and generated Studio assets are intentional; `.impeccable/` and `PRODUCT.md` are unrelated user files and must remain untouched.
 
 ## Previous v1.0.9 Handoff Notes
