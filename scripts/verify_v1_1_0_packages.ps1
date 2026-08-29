@@ -17,7 +17,7 @@ if ($CargoText -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
   throw "Cargo package version was not found."
 }
 $CargoVersion = $Matches[1]
-if ($Version -ne "1.1.0" -or $TauriConfig.version -ne $Version -or $CargoVersion -ne $Version) {
+if ($Version -ne "1.1.1" -or $TauriConfig.version -ne $Version -or $CargoVersion -ne $Version) {
   throw "Release versions are not synchronized: VERSION=$Version, Tauri=$($TauriConfig.version), Cargo=$CargoVersion"
 }
 

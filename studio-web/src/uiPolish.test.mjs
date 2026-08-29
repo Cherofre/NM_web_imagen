@@ -492,6 +492,22 @@ test("image previews expose download and canvas zoom controls", () => {
   assert.match(cssBlock(".lightbox-stage img"), /scale\(var\(--preview-zoom, 1\)\);/);
 });
 
+test("download notice offers a localized folder action after saving", () => {
+  assert.match(appSource, /const \[noticeAction, setNoticeAction\] = useState<"open-downloads" \| null>\(null\);/);
+  assert.match(appSource, /if \(isDesktopRuntime\(\)\) \{\s*setNoticeWithAction\(t\("status\.downloaded"\), "open-downloads"\);\s*\} else \{\s*setNotice\(t\("status\.downloaded"\)\);/);
+  assert.match(appSource, /async function openDownloadFolderFromNotice\(\)[\s\S]*const opened = await openDownloadsFolder\(\);[\s\S]*if \(opened\) setNotice\(""\);/);
+  assert.match(appSource, /noticeAction === "open-downloads"[\s\S]*className="toast-action"[\s\S]*t\("status\.openDownloads"\)/);
+  const imageMenuStart = appSource.indexOf('className="image-more-menu"');
+  const imageMenuEnd = appSource.indexOf('</div>', imageMenuStart);
+  assert.notEqual(imageMenuStart, -1, "Missing image more menu");
+  assert.doesNotMatch(appSource.slice(imageMenuStart, imageMenuEnd), /openDownloadsFolder/);
+  assert.match(cssBlock(".toast-action"), /background:\s*var\(--ink\);[\s\S]*color:\s*#fff;[\s\S]*white-space:\s*nowrap;/);
+  assert.match(i18nSource, /"image\.saveAs": "另存为…"/);
+  assert.match(i18nSource, /"image\.saveAs": "Save as…"/);
+  assert.match(i18nSource, /"status\.openDownloads": "打开文件夹"/);
+  assert.match(i18nSource, /"status\.openDownloads": "Open folder"/);
+});
+
 test("image preview canvas supports wheel zoom and drag panning", () => {
   assert.match(appSource, /const \[previewPan, setPreviewPan\] = useState\(\{ x: 0, y: 0 \}\);/);
   assert.match(appSource, /function handlePreviewWheel\(event: WheelEvent<HTMLDivElement>\)/);

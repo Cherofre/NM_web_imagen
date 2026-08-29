@@ -1516,10 +1516,19 @@ function App() {
   const [hasPromptedForConfig, setHasPromptedForConfig] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNoticeState] = useState("");
+  const [noticeAction, setNoticeAction] = useState<"open-downloads" | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const t = useMemo(() => createTranslator(language), [language]);
   const onboardingT = useMemo(() => createTranslator(desktopOnboardingLanguage), [desktopOnboardingLanguage]);
+  function setNotice(message: string) {
+    setNoticeAction(null);
+    setNoticeState(message);
+  }
+  function setNoticeWithAction(message: string, action: "open-downloads") {
+    setNoticeState(message);
+    setNoticeAction(action);
+  }
   const listText = (items: string[]) => items.join(language === "en" ? ", " : "、");
   const isDefaultSessionTitle = (title: string) => title === "新对话" || title === "New chat" || title === t("session.new");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -3255,7 +3264,11 @@ function App() {
   async function downloadImage(src: string, name: string) {
     try {
       await downloadImageFile(src, name);
-      setNotice(t("status.downloaded"));
+      if (isDesktopRuntime()) {
+        setNoticeWithAction(t("status.downloaded"), "open-downloads");
+      } else {
+        setNotice(t("status.downloaded"));
+      }
     } catch {
       setNotice(t("status.downloadFailed"));
     }
@@ -3281,16 +3294,24 @@ function App() {
     }
   }
 
-  async function openDownloadsFolder() {
+  async function openDownloadsFolder(): Promise<boolean> {
     try {
       if (isDesktopRuntime()) {
         await openDesktopDownloadsDirectory();
+        return true;
       } else {
         setNotice(t("status.browserDownloadsHint"));
+        return false;
       }
     } catch {
       setNotice(t("status.openDownloadsFailed"));
+      return false;
     }
+  }
+
+  async function openDownloadFolderFromNotice() {
+    const opened = await openDownloadsFolder();
+    if (opened) setNotice("");
   }
 
   function openPreviewImage(next: PreviewImage) {
@@ -5673,7 +5694,6 @@ function App() {
                                     <button type="button" onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /> <span>{t("image.applyPrompt")}</span></button>
                                     <button type="button" onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled}><ImagePlus size={14} /> <span>{t("reference.addAsReference")}</span></button>
                                     <button type="button" onClick={() => void saveImageAs(src, name)}><Download size={14} /> <span>{t("image.saveAs")}</span></button>
-                                    {isDesktopRuntime() && <button type="button" onClick={() => void openDownloadsFolder()}><FolderOpen size={14} /> <span>{t("image.openDownloads")}</span></button>}
                                     <a href={src} target="_blank" rel="noreferrer"><ExternalLink size={14} /> <span>{t("image.open")}</span></a>
                                   </div>
                                 </details>
@@ -6393,7 +6413,7 @@ function App() {
                     <p>{t("desktop.aboutHint")}</p>
                   </div>
                   <dl className="desktop-about-list">
-                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.0"}</dd></div>
+                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.1"}</dd></div>
                     <div><dt>{t("desktop.runtime")}</dt><dd>Tauri 2 + FastAPI</dd></div>
                     <div><dt>{t("desktop.dataDirectory")}</dt><dd><code>{desktopRuntime.dataRoot}</code></dd></div>
                   </dl>
@@ -7211,6 +7231,7 @@ function App() {
                 )}
                 <button type="button" onClick={() => void downloadImage(previewImage.src, previewImage.name)} title={t("preview.download")} aria-label={t("preview.download")}><Download size={18} /></button>
                 <button type="button" onClick={() => void saveImageAs(previewImage.src, previewImage.name)} title={t("image.saveAs")} aria-label={t("image.saveAs")}><FolderOpen size={18} /></button>
+                <a href={resolveRuntimeUrl(previewImage.src)} target="_blank" rel="noreferrer" title={t("image.open")} aria-label={t("image.open")}><ExternalLink size={18} /></a>
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>
@@ -7252,6 +7273,15 @@ function App() {
       {notice && (
         <div className="toast" role="status">
           <span>{notice}</span>
+          {noticeAction === "open-downloads" && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => void openDownloadFolderFromNotice()}
+            >
+              {t("status.openDownloads")}
+            </button>
+          )}
           <button type="button" onClick={() => setNotice("")}>×</button>
         </div>
       )}

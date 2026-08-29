@@ -5929,7 +5929,7 @@ button.primary-action:focus-visible,
   font-size: 13px;
 }
 
-.toast button {
+.toast > button:not(.toast-action) {
   display: grid;
   place-items: center;
   width: 26px;
@@ -5938,6 +5938,26 @@ button.primary-action:focus-visible,
   border-radius: 9px;
   background: #f5f5f4;
   color: var(--muted);
+}
+
+.toast-action {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.toast-action:hover {
+  background: #2b2927;
+}
+
+.toast-action:focus-visible {
+  outline: 2px solid rgba(28, 25, 23, 0.52);
+  outline-offset: 2px;
 }
 
 .drop-overlay {

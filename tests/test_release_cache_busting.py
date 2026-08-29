@@ -428,7 +428,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.1.0", version)
+        self.assertEqual("1.1.1", version)
 
     def test_start_script_opens_versioned_url(self) -> None:
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")

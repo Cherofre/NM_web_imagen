@@ -13,7 +13,8 @@ try {
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
-  $InstallerPath = Join-Path $RepoRoot "_release\desktop\NM-Image-Studio-v1.1.0-Setup-x64.exe"
+  $Version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Encoding UTF8 -TotalCount 1).Trim()
+  $InstallerPath = Join-Path $RepoRoot "_release\desktop\NM-Image-Studio-v$Version-Setup-x64.exe"
 }
 if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
   throw "Installer was not found: $InstallerPath"

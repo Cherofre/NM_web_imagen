@@ -13,11 +13,12 @@ try {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
+$Version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Encoding UTF8 -TotalCount 1).Trim()
 if ([string]::IsNullOrWhiteSpace($WebZipPath)) {
-  $WebZipPath = Join-Path $RepoRoot "_release\web\NM_web_imagen-v1.1.0-Web-x64.zip"
+  $WebZipPath = Join-Path $RepoRoot "_release\web\NM_web_imagen-v$Version-Web-x64.zip"
 }
 if ([string]::IsNullOrWhiteSpace($DesktopZipPath)) {
-  $DesktopZipPath = Join-Path $RepoRoot "_release\desktop\NM-Image-Studio-v1.1.0-Portable-x64.zip"
+  $DesktopZipPath = Join-Path $RepoRoot "_release\desktop\NM-Image-Studio-v$Version-Portable-x64.zip"
 }
 foreach ($Path in @($WebZipPath, $DesktopZipPath)) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {

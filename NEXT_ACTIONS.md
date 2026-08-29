@@ -1,11 +1,11 @@
 # Next Actions
 
 ## Now
+- [x] Bump the local release candidate to v1.1.1 across VERSION, Tauri/Cargo metadata, versioned smoke defaults and release assertions; rebuild and verify local artifacts (2026-08-28).
+- [ ] After manual desktop acceptance, decide whether to publish v1.1.1 and synchronize both approved G: roots; do not reuse the v1.1.0 tag.
 - [x] Desktop notifications/taskbar/tray behavior, unified storage buttons, hot-switched output roots, migration discovery (`output`/`outputs` plus bounded nested search), and folder-picker path sanitization are implemented.
-- [x] Close the current EXE/backend before building, then rebuild the release desktop artifacts with `npm run desktop:build` (completed 2026-08-27 after clarifying migration copy).
-- [ ] Manually verify the rebuilt EXE: modern folder picker navigation/cancel/create-folder, migration, storage switching, one post-switch generation/history/reference flow, tray, close behavior, and notifications.
-- [ ] Manually verify image saving in the rebuilt EXE: 下载 saves to Downloads, 另存为 opens the Windows Save dialog and preserves the selected filename, and 打开下载文件夹 opens the expected folder.
-- [x] Implement a skippable first-launch preference wizard for language, storage location, notifications, and close behavior without interrupting existing upgrades.
+- [x] Add a separate localized “打开文件夹 / Open folder” action to the post-download toast and remove the pre-download folder action from the image “更多” menu.
+- [ ] Manually verify the rebuilt EXE's native UI flows (wizard, folder picker, migration, storage switch, save/download/open-folder, tray/notifications/shortcuts) on a clean or currently approved test install.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
 
 ## Previous v1.0.9 Checklist
@@ -17,13 +17,14 @@
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
 ## Handoff Notes
-- Start here: continue on `codex/desktop-distribution-cn`; notification/tray implementation is in `studio-web/src-tauri/src/lib.rs`, `studio-web/src/App.tsx`, `studio-web/src/desktopRuntime.ts`, and `studio-web/src/i18n.ts`.
+- Start here: continue on `codex/desktop-distribution-cn`; the latest download-toast change is in `studio-web/src/App.tsx`, `studio-web/src/i18n.ts`, `studio-web/src/styles.css`, and `studio-web/src/uiPolish.test.mjs`.
 - Do not redo: the completed 171 Node + 251 Python tests, Tauri/PyInstaller build, normal/offline installer smoke, portable/web package smoke, coexistence smoke, signature/feed smoke, or local pre-release audit.
 - Verify next: use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states.
-- Do not claim: a real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, or full drag/drop/clipboard/mask/DPI acceptance.
+- Do not claim: a real 1.1.0 → 1.1.1 upgrade, Authenticode signing, clean-machine no-WebView2 UI acceptance, a true single-file runtime, full drag/drop/clipboard/mask/DPI acceptance, or installer extraction smoke on this already-installed machine.
 - Do not claim: manual tray/notification acceptance until the currently running installed instance is closed and the release EXE is tested alone.
 - Notification identity note: an uninstalled `target\release` EXE may be attributed to PowerShell by Windows; verify the packaged installed Setup for the NM Image Studio source name.
 - Debug-console usage: open the release EXE, press `Ctrl+,`, choose `存储与日志`, then click `打开调试窗口`; this tails the current backend log and does not restart the sidecar.
+- Download feedback: after desktop 下载 succeeds, the toast offers `打开文件夹`; clicking it opens the system Downloads directory and dismisses the toast on success. Web mode keeps the browser download-list hint.
 - Shortcut usage: open `桌面设置 → 快捷键`, click a binding, press a combination containing Ctrl/Alt/Meta, or use `清空` to disable it. `恢复默认` resets all six desktop-global shortcuts. Enter and Shift+Enter remain input behavior.
 - Updater boundary: About now exposes the implemented desktop update surface. Installed builds use the Tauri signed Setup updater artifact; portable builds download a signed ZIP without self-replacement; web mode remains outside the updater. No silent update, automatic rollback helper, or publication is implemented.
 - DPAPI boundary: only the Tauri desktop sidecar sets `IMAGE_TOOL_DESKTOP_MODE=1`; web mode keeps the existing plaintext `config.local.json` compatibility path. Desktop plaintext config is migrated in place on first read, while `.bak` is rewritten with encrypted content.
