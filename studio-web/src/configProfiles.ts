@@ -126,6 +126,27 @@ export function syncActiveProfileForm(
   ));
 }
 
+/** Fields that are scoped to a single profile and must never leak across a switch. */
+const PROFILE_SCOPED_FORM_KEYS = ["api_key", "credential_ref", "credential_pair_id", "model_options", "model_type_options", "chat_model_options", "chat_enabled"];
+
+/**
+ * Form state when switching to another profile.
+ *
+ * Most fields keep the current value when the target profile does not define
+ * them (the drawer treats them as optional), but the cached image model
+ * catalogue is per endpoint: a profile that has never fetched one must not
+ * inherit the ids of the relay the user is switching away from.
+ */
+export function profileFormSnapshot<T extends ConfigForm>(current: T, form: ConfigForm): T {
+  const next = { ...current, ...form } as T;
+  PROFILE_SCOPED_FORM_KEYS.forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(form, key)) {
+      (next as ConfigForm)[key] = "";
+    }
+  });
+  return next;
+}
+
 export function buildConfigPayload(
   activeEngine: Engine,
   profiles: ConfigProfile[],

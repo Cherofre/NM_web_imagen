@@ -4,6 +4,7 @@ import {
   buildConfigPayload,
   deriveConfigDisplayName,
   normalizeConfigProfiles,
+  profileFormSnapshot,
 } from "./configProfiles.ts";
 
 const gptForm = {
@@ -61,4 +62,27 @@ test("buildConfigPayload keeps forms for v1.0.2 compatibility", () => {
   assert.equal(payload.version, 2);
   assert.equal(payload.forms["gpt-image-2-form"].base_url, "https://api.openai.com/v1");
   assert.equal(payload.profiles[0].name, "公司接口");
+});
+
+test("switching profiles never inherits another relay's cached model list", () => {
+  const current = { ...gptForm, model: "flare", model_options: "flare\nsunburst" };
+
+  const withoutCatalogue = profileFormSnapshot(current, {
+    api_key: "sk-other",
+    base_url: "https://other.example/v1",
+  });
+  assert.equal(withoutCatalogue.base_url, "https://other.example/v1");
+  assert.equal(withoutCatalogue.model, "flare");
+  assert.equal(withoutCatalogue.model_options, "", "a fresh profile must start with an empty catalogue");
+
+  const withCatalogue = profileFormSnapshot(current, {
+    api_key: "sk-third",
+    base_url: "https://third.example/v1",
+    model: "alpha",
+    model_options: "alpha\nbeta",
+  });
+  assert.equal(withCatalogue.model_options, "alpha\nbeta");
+
+  const explicitlyEmpty = profileFormSnapshot(current, { model_options: "" });
+  assert.equal(explicitlyEmpty.model_options, "");
 });

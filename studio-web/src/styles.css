@@ -2309,6 +2309,107 @@ button.primary-action:focus-visible,
   color: #fff;
 }
 
+.image-model-wrap {
+  min-width: 0;
+}
+
+.composer-toolbar button.image-model-trigger {
+  gap: 7px;
+  max-width: min(230px, 30vw);
+  min-width: 0;
+  padding: 0 11px;
+}
+
+.image-model-popover {
+  width: min(360px, calc(100vw - 44px));
+  max-height: min(520px, calc(100vh - 220px));
+  overflow-y: auto;
+}
+
+/* Model ids are long and arbitrary, so they get one row each instead of a grid. */
+.choice-grid.image-models {
+  grid-template-columns: minmax(0, 1fr);
+  max-height: min(240px, 32vh);
+  overflow-y: auto;
+}
+
+.choice-grid.image-models button {
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 0 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-model-heading-row {
+  align-items: center;
+}
+
+.image-model-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.image-model-fetch-button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid rgba(8, 116, 67, 0.26);
+  border-radius: 10px;
+  background: #f3fbf7;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Keep the focus state in the app's soft language instead of the generic
+   outline, which reads as a heavy black box on a small button. */
+.image-model-fetch-button:hover,
+.image-model-fetch-button:focus-visible {
+  outline: 0;
+  border-color: rgba(8, 116, 67, 0.42);
+  background: #ecfdf5;
+  color: #14532d;
+}
+
+.image-model-fetch-button:disabled {
+  border-color: var(--line);
+  background: #fafaf9;
+  color: var(--muted);
+}
+
+/* Profile editor: the fetch action sits on the model input's row, right side.
+   `.field input` sets width:100%, so these rules stay scoped under `.field`
+   (equal specificity elsewhere would lose on source order). */
+.field .image-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field .image-model-row input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.field .image-model-row .image-model-fetch-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+
+.image-model-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .size-preset-section {
   display: grid;
   gap: 8px;
@@ -3396,9 +3497,100 @@ button.primary-action:focus-visible,
   line-height: 1.5;
 }
 
+/* Rule that separates the chat fields from the connection fields above them. */
+.chat-config-section {
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+/* Switches in the config drawer hug their label: a full width box around one
+   checkbox reads as an off-centre, oddly tall row next to the input fields. */
+.connection-fields .toggle {
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
+  height: auto;
+  min-height: 42px;
+}
+
+/* Configuration drawer: title and engine tabs share one line. */
+.connection-drawer-head {
+  align-items: center;
+  gap: 14px;
+}
+
+.connection-drawer-head h2 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+.connection-drawer-head > button:last-child {
+  margin-left: auto;
+}
+
+/* Compact segmented control: `mode-tabs` sized for a drawer header, not a bar. */
+.drawer-engine-tabs {
+  justify-self: start;
+  align-self: center;
+  gap: 2px;
+  padding: 3px;
+}
+
+.drawer-engine-tabs button {
+  width: auto;
+  min-width: 0;
+  min-height: 27px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* Import target hint for drag and drop, kept to one short line. */
+.drawer-drop-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.connection-drawer.drag-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+}
+
+.connection-drawer.drag-active .drawer-drop-hint {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* A model the profile has not actually read from the endpoint yet. */
+.choice-grid.image-models button.unlisted {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.choice-grid.image-models button.unlisted.selected {
+  color: var(--accent-ink);
+}
+
+/* Engine tabs inside the config drawer: both engines are managed from here. */
+.drawer-engine-tabs {
+  margin: 0 0 14px;
+  align-self: flex-start;
+}
+
 .stacked-field {
   display: grid;
   gap: 8px;
+}
+
+/* Composer label shown in place of the mode switch when the profile has no chat. */
+.submit-mode-static {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 0 4px;
 }
 
 .toggle {
@@ -4203,8 +4395,10 @@ button.primary-action:focus-visible,
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
-  width: min(1100px, calc(100vw - 28px));
-  height: min(900px, calc(100vh - 28px));
+  /* A preview is only useful if it is big: fill the window and keep just a thin
+     margin, so the stage gets the whole screen instead of a 1100x900 card. */
+  width: min(1760px, calc(100vw - 24px));
+  height: min(1100px, calc(100vh - 24px));
   padding: 12px;
   border-radius: var(--radius-xl);
   background: #111;
@@ -4391,8 +4585,9 @@ button.primary-action:focus-visible,
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 10px;
-  width: min(1240px, calc(100vw - 28px));
-  height: min(920px, calc(100vh - 28px));
+  /* Painting a mask needs room: same near-full-window size as the preview. */
+  width: min(1760px, calc(100vw - 24px));
+  height: min(1100px, calc(100vh - 24px));
   padding: 12px;
   border-radius: var(--radius-lg);
   background: #111;

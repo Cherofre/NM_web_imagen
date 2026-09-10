@@ -2,6 +2,70 @@
 
 ## Active Decisions
 
+## 2026-09-10 - v1.1.2 打包放行与发行清单白名单
+- Status: active
+- Decision: 用户明确授权在本轮最终检查通过后直接同步两处 G 盘目录并发布 GitHub Release `v1.1.2`。发行方式沿用安装器/便携包手动升级，自动更新签名链路不参与本次发布。
+- Decision: 发行清单白名单新增 `static/studio/assets/<name>-<8位hash>.(js|css)`，用于接受 1.1.2 新增的 Studio 代码分块（桌面缩放用的 `webview-*.js`）。规则放在 `index-*.js`/`index-*.css` 计数规则之后，保证「至少一个 index 资源」的断言仍然成立；三份校验脚本（`package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1`）同步修改。
+- Reason: 实测 `npm run web:package` 直接失败——`Release manifest contains an unknown file: static/studio/assets/webview-BciZp75t.js`。白名单只认 `index-*`，而新增能力会让 Vite 产出额外分块；这属于打包脚本的回归，不是产品缺陷。
+- Consequences: 以后新增任何代码分块都不再需要改脚本；但仍然只允许 `static/studio/assets/` 下的哈希资源，其他未知路径继续硬失败。`tests/test_release_cache_busting.py` 增加断言，确保三份脚本都保留该规则且顺序正确。
+- Decision: 本机已安装 1.1.1，`scripts/smoke_desktop_installer.ps1` 按设计拒绝运行；真实覆盖升级不在本轮自动化范围内，作为已知未验证项写入发布台账，交由用户按 `docs/v1.1.2-acceptance-checklist.md` 验收。
+- Reason: 直接在本机跑安装器会干扰用户正在使用的 1.1.1 安装和数据目录。
+
+## 2026-09-10 - v1.1.2 配置审查修复
+- Status: active
+- Decision: 用 `credential_pair_id` 明确连接配对；缺少标识的旧候选配置按独立连接加载，不猜测另一侧档案。新导入档案清除外部配对关系；匹配同地址本机档案时保留其已有配对。
+- Decision: 导入时按完整地址核对 Key 归属，同 ID 异地址另建无 Key 档案；保持 URL 路径大小写。保存完整活动表单，由后端连接字段白名单统一过滤。
+- Decision: 模型请求绑定档案 ID、地址和 Key 的快照，切换或修改后抛弃旧响应；双引擎快照均清除缺失的档案私有字段。
+- Consequences: F1–F5 已修复并加入行为回归；仍需重启开发实例以重建包含新配置字段的后端，再做桌面/打包验收。本轮不执行 G 盘同步或 Release。
+
+## 2026-09-10 - v1.1.2 审查暂不放行
+- Status: superseded（缺陷已修复，发行包与人工验收仍待完成）
+- Decision: 本轮审查不执行 G 盘同步或 GitHub Release；先修复 `docs/v1.1.2-pre-release-review.md` 的 5 项已复现问题，再重新构建和验收四类发行包。
+- Reason: 存在本机 Key 跨地址绑定、保存字段遗漏和多档案状态串写；217 Node / 280 Python 测试通过不能覆盖这些缺口，且目前缺少 1.1.2 发行包。
+- Consequences: 保留运行中的开发实例和 G 盘 1.1.1 分发。审查复现器只证明错误存在，不能当作修复后的绿色回归。
+
+## 2026-09-10 - v1.1.2 单配置内切换生图模型 + 中文覆盖安装
+- Status: active
+- Decision: 在同一个 `gpt-image-2` 配置档案内支持切换生图模型：新增 `POST /api/models`（按档案的 base_url/API Key 读取上游 `/v1/models`），档案表单新增 `model_options` 字段（换行分隔、去重、上限 120 项），配置抽屉用下拉 + 自定义输入 + 「读取模型列表」，输入框工具条增加快速切换器；所有写入仍走原有 `/api/config/local-file`。
+- Decision: 安装包改为简体中文 + English 双语，并始终覆盖安装：`studio-web/src-tauri/nsis/installer.nsi` 从 `@tauri-apps/cli` 2.9.2 内嵌模板复制后仅打两处补丁（跳过重装选择页；passive 模式跳过多语言选择框），三份 installer 配置统一 `languages`/`displayLanguageSelector`/`customLanguageFiles`/`template`。
+- Reason: 用户要求"单个配置中可切换生图模型"，而一个中转地址常同时提供多个图片模型（如 `「YS」gpt-image-2.5-flare` 与 `sunburst`），逐模型建配置冗余且容易漏改 Key；安装器先卸载再安装会让桌面数据目录的清理路径变复杂，且上游 Tauri 模板默认把"先卸载"设为默认项。
+- Consequences: `model_options` 只是缓存的上游模型清单，缺失时仍可手填模型名，不影响生图；`/api/models` 与既有 `/api/diagnostics` 一样会按客户端给的 base_url 出站请求，保持由 origin 校验保护。自定义 NSIS 模板在升级 Tauri CLI 后必须重新抽取值并重打补丁；`nsis/SimpChinese.nsh` 必须定义模板引用的全部 27 个 LangString 键，否则 makensis 直接失败；该 `.nsh` 不能自带 BOM（Tauri 打包时会自己写一个，双 BOM 会让 makensis 在第 1 行报 `Invalid command: ";"`）。
+- Decision（用户验收反馈后调整）: 模型列表在弹层里竖排一行一个（模型 id 很长，两列会截断成 `...sunbur`）；「读取模型列表」在配置弹窗里贴到输入框右侧同一行、在主界面弹层里放到标题行右侧，不再作为列表下方的独立动作行；「已读取 N 个模型，保存配置后一并写入」只在配置弹窗显示（它讲的是保存要求），主界面弹层只在失败时提示、成功走顶部 toast；内置预设 `gpt-image-2` 只在该配置从未读取过列表时作为起点出现，一旦有真实清单就不再出现；工具条「生图模型」图标先试 `Cpu`，用户验收反馈"不够简约也不够贴合生图"后改为 `WandSparkles`（魔杖+星火，一眼是"生成"且比芯片图形简单；`Image` 会和相邻「参考图」的 `ImagePlus` 撞脸，`Sparkles` 已被空状态/助手头像/从上下文生成复用）。
+- Reason: 用户验收时反馈"读取到两个模型为什么还有这个原本的 img2"（内置预设混进真实清单）、"这里应该是竖状显示比较好，读取放右边"、"这个位置就不需要已读取 xxx 了"、"图标不符合主题"。
+- Decision: 桌面端新增整界面缩放（`Ctrl` + `+`/`-`/`0` 与 `Ctrl` + 滚轮），实现走 WebView2 原生 zoom（`getCurrentWebview().setZoom`），为此在 `capabilities/default.json` 里加 `core:webview:allow-set-webview-zoom`；范围钳制在 80%–160%（`src/uiZoom.ts` 的阶梯 0.8/0.9/1/1.1/1.25/1.4/1.6），级别存 localStorage 并在启动时重新应用，成功后用现有 toast 反馈；网页端不接管这些按键，浏览器原生缩放即可。
+- Reason: 用户要求"整个界面像网页那样 Ctrl +/- 缩放"；只有原生 zoom 才能让 `vh`、固定定位元素和滚动条一起缩放（CSS `zoom` 作用在根元素上会让 `100vh` 溢出），而固定范围能避免这个固定宽度侧栏/工具条的界面在极端缩放下散架。
+- Consequences: 缩放命令需要 ACL 权限，缺失时 `applyUiZoom()` 会回退到根元素 CSS `zoom`；缩放级别写在 webview 的 localStorage 里，因此开发实例（5175 端口）与正式安装版（`tauri.localhost`）各自记住自己的值。
+- Decision（用户验收反馈后调整）: 桌面端隐藏「打开」（`target="_blank"` 新标签打开）动作，两处都改为只在网页端渲染——大图预览工具条上的图标按钮和图片「更多」菜单里的菜单项；桌面端该工具条保留编辑遮罩 / 用作参考图 / 下载 / 存为…（原生保存对话框）/ 关闭。同时把预览窗从「1100×900 的卡片」放大为「几乎铺满窗口」（`width: min(1760px, calc(100vw - 24px))`、`height: min(1100px, calc(100vh - 24px))`），不再新增任何按钮：工具条仍在右上、缩放按钮与百分比仍浮在舞台右下，点聊天里的图片即可打开、双击切换缩放。
+- Reason: 用户验收时指着大图预览工具条说"这个打开按钮在桌面端没有了用处"，随后补充"我希望有用……也可以不是按那个按钮去放大，因为右上按钮太多了，反正我希望的是有一个大窗预览的效果"；桌面 shell 里对本地地址开新标签既打不开系统看图程序，也没有可用浏览器上下文，真正的诉求是预览要够大。
+- Decision: 遮罩编辑器窗口与大图预览统一尺寸（同样 `min(1760px, 100vw-24px) × min(1100px, 100vh-24px)`），不再保留自成一档的 `1240×920`；窄屏下仍走既有的全窗规则。
+- Reason: 用户指出"编辑遮罩窗口没有相应放大"——前一次只改了预览卡片，遮罩编辑器有自己的尺寸上限。
+- Decision: 聊天模型可停用并按档案记忆：`gpt-image-2-form` 新增 `chat_enabled`（"1"/"0"，缺省视为启用）与 `chat_model_options`（与 `model_options` 复用同一个规范化器）。停用后工具栏整块模式切换替换为静态的「生成」标签并强制回到生成模式；聊天模型字段保留可编辑（便于先配好再启用）。`chat_enabled` 与 `chat_model_options` 都进 `PROFILE_SCOPED_FORM_KEYS`，切换配置不串味。
+- Reason: 用户的渠道对 `chat_model` 返回 403（`This token has no access to model`），聊天入口成了点了必然失败的入口；用户要求"聊天模型可以设置不启用以及获取模型，并且不启用时不会在对话框中显示聊天入口"。
+- Consequences: 开关字段的规范化器对"未设置"必须返回空字符串而不是默认值——`normalize_config_form` 丢弃空值，而 `build_config_profiles` 把"顶层表单非空"当作覆盖当前档案的依据；一个永远返回 "1" 的开关会让空表单看起来有数据，从而在保存时清空档案字段（已由既有测试逮到，并补了回归测试）。后端未硬拦截聊天请求：入口隐藏后只有老页面/手工调用可能触发，服务端拦截会改变 `/classic` 的行为，留待 1.1.3 决定。
+- Decision: 配置可直接导出/导入（`src/configTransfer.ts` + 抽屉底部两个按钮）：导出的 JSON 带 `kind: nm-image-studio-config`、版本、导出时间、两个引擎的全部档案与表单字段，**但不含任何 API Key**（`api_key` 一律剥离）；导入为**非破坏性合并**——同 id 或同地址（忽略大小写与末尾斜杠）的档案就地更新、其余追加、本机已有的 Key 始终保留，导入文件里的 Key 被忽略，导入后自动经 `/api/config/local-file` 落盘并回报"新增/更新/待补 Key"数量。
+- Reason: 用户要求"这个配置可以直接导入和导出，除了 key 以外的全包含"；分享中转站配置时不应连带泄露密钥。
+- Decision: 配置抽屉里新增引擎分页（`.drawer-engine-tabs`，复用工作区的 `mode-tabs` 样式，标签为 `GPT Image` / `Banana Gemini`），抽屉内切引擎只切换视图（`selectEngineInDrawer`），不再弹"请先补全配置"的提示——人已经在抽屉里了。
+- Reason: 用户拿着抽屉截图说"配置页上直接也有 gpt 和 gemini 的分页吧，方便管理"；此前引擎切换只存在于工作区顶栏，管理另一套配置要退出抽屉。
+- Decision: 共用凭据时**配置名称也一并同步**：共用状态下的两个活动档案共用一个名字，改名会同时改另一边（`updateActiveProfileName` 在 `isSharedCredential` 为真时一并更新另一引擎的活动档案），勾选共用的瞬间也会统一名称，规则是"手写名优先于自动生成名（默认配置 / Default / 新配置 N / New profile N），两边都是自动名时以当前所在的一侧为准"（`sharedProfileName` / `isGeneratedProfileName`）。
+- Reason: 用户指出"共用后，配置名称也应该同步一下呀"——同一套连接在 GPT 页叫 SillyDream、在 Gemini 页叫默认配置，管理时会分不清是不是同一个渠道。
+- Decision: 模型清单按引擎家族过滤，并且把"当前模型不在已读取列表里"这件事显式标出：读取与显示两处都过滤（`filterImageModelsForEngine`，`gemini / nano-banana / imagen` 归 Gemini，其余归 GPT Image，全部不匹配时原样返回以免出现空清单）；作曲家切换器仍然显示当前配置的模型，但不在已读取集合中的条目用虚线边框标记并给出说明（`activeModelUnlisted`）。
+- Reason: 用户先指出"gpt 这里还是能读取到 gemini 模型""gemini 页没有选择生图模型的地方"，随后指着一个未被读取到的 `gemini-3-pro-image-preview` 问"这个在获取模型列表里没有，为什么会显示"——它是应用自带的默认模型名，出现在列表里会让人误以为该渠道真的提供它。
+- Decision: 配置抽屉的引擎分页与工作区引擎**解耦**：抽屉用本地 `drawerEngineState`（仅在打开抽屉时从 `activeEngine` 同步一次），改名/新增档案/测试连接都显式带引擎参数；工作区的引擎切换、作曲家、`active_engine` 仍用 `activeEngine`。
+- Reason: 用户明确要求「配置切换分页时不要切换外面整体的分页」——在抽屉里翻看另一套配置不应该改变当前要用来生图的引擎。
+- Decision: 抽屉顶部只留一行——「多配置管理」标题与引擎分页同一行（`.connection-drawer-head`），删除 `config.drawerHint` 提示行；导入拖拽提示缩短为一行小字放在标题下方。
+- Reason: 用户指出"这个分页太丑了，上方的文字太多了"，并点名要去掉"配置 Profile + API 请求地址 + Key + 模型"那一行。
+- Decision: 导出文件名带上当前档案名：`nm-image-studio-config-<档案名>-<版本>-<日期>.json`（档案名里的 `\/:*?"<>|` 与空白转 `-`，去首尾符号，截断 40 字符；档案名为空则省略该段）。
+- Reason: 用户要求"导出配置的文件名应该带有配置名"，这样一堆导出文件不用逐个打开就能分辨是哪套配置。
+- Decision: 「启用聊天」**默认关闭**，判定统一成 `chatSwitchOn = gptForm.chat_enabled === "1"`（`""` = 关，`"1"` = 开）：`defaultGptForm.chat_enabled` 由 `"1"` 改为 `"0"`，`coerceSwitchFlag(value, "0")`，作曲家是否显示「聊天」入口、抽屉里开关是否勾选、以及依赖聊天字段是否展开，全部用同一个 `chatSwitchOn`。
+- Reason: 用户要求"默认不启用聊天"。原实现写的是 `gptForm.chat_enabled !== "0"`，而后端 `encode_switch_flag` 产生的"关"是空字符串，导致从没配置过的档案被判成"开"，新装的默认值也是 `"1"`。
+- Decision: 配置抽屉里的开关改成贴合内容的胶囊（`.connection-fields .toggle { width: fit-content; justify-self: start; height: auto; min-height: 42px; }`），`.chat-config-section` 只作为分隔线（`border-top`，去掉 12px 内边距），并且只在聊天开启、真正出现聊天字段时才渲染。
+- Reason: 用户反馈这两个开关"感觉不居中且高度有点异常"。实测各行都是 42px，与输入框一致，问题在通栏盒子里的内容左对齐留下大片空白，以及开关上方额外的分隔线 + 内边距。
+- Decision: 打开共用时**不覆盖**对方引擎的既有配置：先在对方引擎里找"明显属于这一对"的档案（`findSharedPartner`：该引擎当前选中的档案本身已是共用，或名字与这边相同），找到就并入（补上 Key/地址，不会动它的模型），找不到就**新建一个档案**（同名、携带共享的 Key 与地址、模型沿用该引擎当前值，并设为该引擎的活动档案），原有档案一律保留；关闭共用只解除这一对（`unlinkOtherActive`），另一对共用关系不受影响。
+- Reason: 用户反馈"我新建一个配置再同步到 gemini，它会覆盖原本的，我觉得应该是同步创建一个新配置啊"——共用是"同一套连接"，不是"改写对方正在用的那份配置"。
+- Decision: 跨引擎共用凭据（配置层共用）：两个表单各新增 `credential_ref`（值为 `"shared"` 表示与另一引擎共用连接配置，空表示各自独立；旧文件里写成来源引擎名的值一并折成 `"shared"`），抽屉里 API Key 下方新增「与 <另一引擎> 共用同一套连接配置」开关。**共用的是凭据层——API Key 与请求地址**，两边始终一致：在任意一边修改都会立刻镜像到另一边，切换配置档案时地址也跟着走（`mirroredCredentialPatch()` / `sharedCredentialPatch()`，勾选时会从有真实值的一侧拉取，占位地址（`example.com`）永远不会覆盖真实地址，也不会把值清空）。**模型不共用**：GPT 侧只认生图模型与聊天模型，Gemini 侧只认 Gemini 模型名。
+- Reason: 用户问"有的 key 可以同时用 gpt 和 gemini，有办法互相公用配置吗"，随后明确了设计意图——"应该为配置层的共用，但模型是 gpt 只识别 gpt，gemini 只识别 gemini"。第一版实现把开关做成"单向跟随另一个引擎的 Key"且把 Key 输入框设为只读，用户随即反馈"为什么 key 那里无法编辑了""勾了共用，为什么切到 gemini 页还是没有配置"：方向反了（在 GPT 侧勾选却以空 Key 的 Gemini 侧为来源），而且只读输入框不符合"共用"的心智模型。
+- Consequences: 共用的值会以实体形式写进两侧表单，因此配置文件对老页面/网页版等其它客户端仍然是完整的；导入导出时 `credential_ref` 随表单走，换机器后填一次 Key 两边都通。共用地址意味着 Gemini 侧不再单独维护路径——若某渠道的 Gemini 路径与 OpenAI 路径不同，需要关掉共用；这一点已记入 1.1.3 候选（把凭据抽成可命名条目，并允许为两套接口分别记录路径）。
+
 ## 2026-08-29 - v1.1.1 发布边界
 - Status: active
 - Decision: 发布 v1.1.1 的网页包、普通安装器、离线 WebView2 安装器和便携包，并同步两处 G: 分发目录；不上传旧版 updater 或伪造新的 updater 签名 feed。

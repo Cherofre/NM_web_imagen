@@ -36,6 +36,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  WandSparkles,
   ZoomIn,
   ZoomOut,
   X,
@@ -78,6 +79,15 @@ import {
 } from "./sessionDrafts";
 import { buildSubmissionFields } from "./submissionPayload";
 import {
+  applyUiZoom,
+  formatUiZoom,
+  readStoredUiZoom,
+  stepUiZoom,
+  storeUiZoom,
+  zoomActionForEvent,
+  type UiZoomAction,
+} from "./uiZoom";
+import {
   apiFetch,
   chooseDesktopFolder,
   downloadDesktopOutput,
@@ -95,6 +105,7 @@ import {
   resetDesktopWindow,
   resolveRuntimeUrl,
   saveDesktopOutputAs,
+  saveDesktopTextAs,
   scanDesktopMigration,
   setDesktopOutputsDirectory,
   switchDesktopStorageRoot,
@@ -126,11 +137,43 @@ import {
   buildConfigPayload,
   deriveConfigDisplayName,
   normalizeConfigProfiles,
+  profileFormSnapshot,
   syncActiveProfileForm,
   type ActiveProfileIds,
+  type ConfigForm,
   type ConfigProfile,
 } from "./configProfiles";
+import {
+  IMAGE_MODEL_PRESETS,
+  buildImageModelOptions,
+  composerImageModelOptions,
+  encodeModelOptions,
+  filterImageModelsForEngine,
+  imageModelSelectValue,
+  mergeImageModelOptions,
+  parseModelListResponse,
+  storedImageModelIds,
+} from "./imageModelOptions";
 import { normalizeStoredQueueJobs, REFRESH_INTERRUPTED_QUEUE_ERROR, serializeQueueJobs } from "./queuePersistence";
+import {
+  buildConfigExport,
+  configExportFileName,
+  mergeImportedConfig,
+  parseConfigImport,
+  CONFIG_IMPORT_MAX_BYTES,
+  type ConfigTransferProfile,
+} from "./configTransfer";
+import {
+  findSharedPartner,
+  isSharedCredential,
+  mirroredCredentialPatch,
+  normalizeCredentialRef,
+  otherEngine,
+  sharedCredentialPatch,
+  sharedPartnerCredentialValues,
+  sharedProfileName,
+  type EngineId,
+} from "./sharedCredentials";
 import { appendGenerationQueueJob, nextQueuedGenerationJob } from "./generationQueue";
 import {
   hasActiveQueueJobForSession,
@@ -342,9 +385,14 @@ type DiagnosticsResult = {
 
 type GptForm = {
   api_key: string;
+  credential_ref: string;
+  credential_pair_id: string;
   base_url: string;
   model: string;
+  model_options: string;
   chat_model: string;
+  chat_model_options: string;
+  chat_enabled: string;
   reasoning_effort: string;
   size: string;
   custom_size: string;
@@ -364,8 +412,11 @@ type GptForm = {
 
 type BananaForm = {
   api_key: string;
+  credential_ref: string;
+  credential_pair_id: string;
   api_base_url: string;
   model_type: string;
+  model_type_options: string;
   batch_size: number;
   aspect_ratio: string;
   image_size: string;
@@ -402,6 +453,13 @@ const maxTurns = 80;
 const gptSizeOptions = ["auto", "1024x1024", "1536x1024", "1024x1536", "1536x864", "2048x2048", "2048x1152", "3840x2160", "2160x3840", "custom"];
 const gptQualityOptions = ["auto", "low", "medium", "high"];
 const gptChatModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.2", "custom"];
+
+/** Same seeds as the select, without the trailing "custom" sentinel. */
+const gptChatModelPresets = gptChatModelOptions.filter((item) => item !== "custom");
+/** Fallback shown for the running version when the desktop shell cannot report one. */
+const APP_VERSION_FALLBACK = "1.1.2";
+/** The Gemini model the app ships with; the relay's catalogue is the real source. */
+const bananaModelPresets = ["gemini-3-pro-image-preview"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", "16:9", "21:9", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4"];
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
@@ -598,9 +656,14 @@ function createEmptySession(title = "新对话"): WorkbenchSession {
 
 const defaultGptForm: GptForm = {
   api_key: "",
+  credential_ref: "",
+  credential_pair_id: "",
   base_url: "https://gpt-image-api.example.com",
   model: "gpt-image-2",
+  model_options: "",
   chat_model: "gpt-5.6-sol",
+  chat_model_options: "",
+  chat_enabled: "0",
   reasoning_effort: "auto",
   size: "auto",
   custom_size: "1536x864",
@@ -620,8 +683,11 @@ const defaultGptForm: GptForm = {
 
 const defaultBananaForm: BananaForm = {
   api_key: "",
+  credential_ref: "",
+  credential_pair_id: "",
   api_base_url: "https://banana-api.example.com",
   model_type: "gemini-3-pro-image-preview",
+  model_type_options: "",
   batch_size: 1,
   aspect_ratio: "Auto",
   image_size: "2K",
@@ -636,7 +702,7 @@ const defaultBananaForm: BananaForm = {
 const inspirationPromptKeys = ["characterPoster", "museumGuide", "gameScreenshot"];
 
 function engineLabel(engine: Engine | string) {
-  return engine === "banana" ? "Banana Gemini" : "GPT Image 2";
+  return engine === "banana" ? "Banana Gemini" : "GPT Image";
 }
 
 function makeId(prefix: string) {
@@ -972,6 +1038,17 @@ function coerceBoolean(value: unknown, fallback: boolean) {
   return fallback;
 }
 
+/** Config switch fields are stored as "1"/"0" (see app.py encode_switch_flag). */
+function coerceSwitchFlag(value: unknown, fallback: "0" | "1"): "0" | "1" {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (value === true) return "1";
+  if (value === false) return "0";
+  const text = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on", "enabled"].includes(text)) return "1";
+  if (["0", "false", "no", "off", "disabled"].includes(text)) return "0";
+  return fallback;
+}
+
 function loadJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -1227,6 +1304,12 @@ function normalizeGptForm(value: Partial<GptForm> = {}): GptForm {
     ...defaultGptForm,
     ...value,
     custom_size: normalizedSize,
+    model_options: encodeModelOptions(value.model_options),
+    // Legacy flags cannot identify a partner safely; keep credentials independent until relinked.
+    credential_ref: value.credential_pair_id ? normalizeCredentialRef(value.credential_ref) : "",
+    credential_pair_id: String(value.credential_pair_id || ""),
+    chat_model_options: encodeModelOptions(value.chat_model_options),
+    chat_enabled: coerceSwitchFlag(value.chat_enabled, "0"),
     chat_model: value.chat_model === "gpt-5.6" ? "gpt-5.6-sol" : value.chat_model || defaultGptForm.chat_model,
     reasoning_effort: reasoningEffort,
     n: coerceNumber(value.n, defaultGptForm.n),
@@ -1243,6 +1326,10 @@ function normalizeBananaForm(value: Partial<BananaForm> = {}): BananaForm {
   return {
     ...defaultBananaForm,
     ...value,
+    // Legacy flags cannot identify a partner safely; keep credentials independent until relinked.
+    credential_ref: value.credential_pair_id ? normalizeCredentialRef(value.credential_ref) : "",
+    credential_pair_id: String(value.credential_pair_id || ""),
+    model_type_options: encodeModelOptions(value.model_type_options),
     batch_size: coerceNumber(value.batch_size, defaultBananaForm.batch_size),
     seed: coerceNumber(value.seed, defaultBananaForm.seed),
     top_p: coerceNumber(value.top_p, defaultBananaForm.top_p),
@@ -1426,6 +1513,7 @@ function App() {
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
+  const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => normalizeBananaForm(loadSanitizedBrowserForm(bananaStorageKey, defaultBananaForm)));
   const [references, setReferences] = useState<File[]>([]);
@@ -1478,11 +1566,26 @@ function App() {
     "gpt-image-2": "gpt-image-2-default",
     banana: "banana-default",
   });
+  const modelRequestContexts = useRef<Record<string, { identity: string }>>({});
+  for (const engine of ["gpt-image-2", "banana"] as Engine[]) {
+    const form = engine === "banana" ? bananaForm : gptForm;
+    const identity = JSON.stringify([activeProfileIds[engine], engine === "banana" ? bananaForm.api_base_url : gptForm.base_url, form.api_key]);
+    if (modelRequestContexts.current[engine]?.identity !== identity) {
+      modelRequestContexts.current[engine] = { identity };
+    }
+  }
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>(() => initialQueueJobs.current);
   const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
   const [diagnosticsResult, setDiagnosticsResult] = useState<DiagnosticsResult | null>(null);
+  const [imageModelFetching, setImageModelFetching] = useState(false);
+  const [bananaModelFetching, setBananaModelFetching] = useState(false);
+  const [bananaModelNotice, setBananaModelNotice] = useState("");
+  const [imageModelNotice, setImageModelNotice] = useState("");
+  const [chatModelFetching, setChatModelFetching] = useState(false);
+  const [chatModelNotice, setChatModelNotice] = useState("");
+  const [uiZoom, setUiZoom] = useState(() => readStoredUiZoom(typeof window === "undefined" ? null : window.localStorage));
   const [renameOpen, setRenameOpen] = useState(false);
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorDraft, setPromptEditorDraft] = useState("");
@@ -1492,7 +1595,7 @@ function App() {
   const [composerViewportHeight, setComposerViewportHeight] = useState(() => typeof window === "undefined" ? 0 : window.innerHeight);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
-  const [composerPopover, setComposerPopover] = useState<"size" | "settings" | null>(null);
+  const [composerPopover, setComposerPopover] = useState<"size" | "settings" | "model" | null>(null);
   const [historyActionMenu, setHistoryActionMenu] = useState<HistoryActionMenuState | null>(null);
   const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
   const [previewMaskLoading, setPreviewMaskLoading] = useState(false);
@@ -1518,9 +1621,36 @@ function App() {
   const [status, setStatus] = useState("");
   const [notice, setNoticeState] = useState("");
   const [noticeAction, setNoticeAction] = useState<"open-downloads" | null>(null);
+  const [configDragActive, setConfigDragActive] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const t = useMemo(() => createTranslator(language), [language]);
   const onboardingT = useMemo(() => createTranslator(desktopOnboardingLanguage), [desktopOnboardingLanguage]);
+  const composerModelOptions = useMemo(
+    () =>
+      activeEngine === "banana"
+        ? composerImageModelOptions(bananaForm.model_type, bananaForm.model_type_options, "banana")
+        : composerImageModelOptions(gptForm.model, gptForm.model_options, "gpt-image-2"),
+    [activeEngine, gptForm.model, gptForm.model_options, bananaForm.model_type, bananaForm.model_type_options],
+  );
+  /** The model name the composer switcher shows and the fetch applies to. */
+  const activeModelName = activeEngine === "banana" ? bananaForm.model_type : gptForm.model;
+  const composerModelFetching = activeEngine === "banana" ? bananaModelFetching : imageModelFetching;
+  /**
+   * Ids this profile really read from the endpoint. The switcher also shows the
+   * configured model so the current choice stays visible, but an id that is not
+   * in this set is hand written (or left over from an older setup) and is marked
+   * as such instead of looking like something the relay serves.
+   */
+  const composerModelIds = useMemo(
+    () =>
+      new Set(
+        activeEngine === "banana"
+          ? storedImageModelIds(bananaForm.model_type_options, "banana")
+          : storedImageModelIds(gptForm.model_options, "gpt-image-2"),
+      ),
+    [activeEngine, gptForm.model_options, bananaForm.model_type_options],
+  );
+  const activeModelUnlisted = Boolean(activeModelName) && !composerModelIds.has(activeModelName);
   function setNotice(message: string) {
     setNoticeAction(null);
     setNoticeState(message);
@@ -1532,6 +1662,7 @@ function App() {
   const listText = (items: string[]) => items.join(language === "en" ? ", " : "、");
   const isDefaultSessionTitle = (title: string) => title === "新对话" || title === "New chat" || title === t("session.new");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const configImportRef = useRef<HTMLInputElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const promptWrapRef = useRef<HTMLDivElement | null>(null);
   const composerResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
@@ -1593,6 +1724,32 @@ function App() {
     activeModel || t("config.label"),
   );
   const activeEngineProfiles = profiles.filter((item) => item.engine === activeEngine);
+  /**
+   * The engine the configuration drawer is looking at.
+   *
+   * Managing the other engine's profile must not change what the workspace is
+   * generating with, so the drawer carries its own tab and only follows the
+   * workspace engine when it opens.
+   */
+  const drawerEngine = drawerEngineState;
+  const drawerProfiles = profiles.filter((item) => item.engine === drawerEngine);
+  const drawerProfile = activeProfileForEngine(profiles, activeProfileIds, drawerEngine);
+  const drawerProfileName = deriveConfigDisplayName(
+    drawerProfile?.name,
+    drawerEngine === "banana" ? bananaForm.api_base_url : gptForm.base_url,
+    drawerEngine === "banana" ? bananaForm.model_type : gptForm.model || t("config.label"),
+  );
+  const drawerConfigIssues = configIssues(drawerEngine, gptForm, bananaForm, t);
+  const drawerHasCompleteConfig = drawerConfigIssues.length === 0;
+  // Chat is a per-profile switch and off by default: relays that only resell
+  // image models cannot answer chat completions, so the composer must not offer
+  // a dead entry until the user turns it on for this connection.
+  const chatSwitchOn = gptForm.chat_enabled === "1";
+  const chatEnabled = activeEngine !== "gpt-image-2" || chatSwitchOn;
+  const sharedCredential = isSharedCredential(drawerEngine === "banana" ? bananaForm : gptForm);
+  useEffect(() => {
+    if (!chatEnabled && submitMode === "chat") setSubmitMode("generate");
+  }, [chatEnabled, submitMode]);
   const referenceState = referenceUiState(submitMode, references.length);
   const referenceActionsDisabled = !referenceState.canAdd;
   const maskCapability = maskEditorCapability(activeEngine, submitMode, references.length);
@@ -2200,6 +2357,47 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  // Whole-interface zoom: applied on mount (so a stored level survives restarts)
+  // and whenever it changes. Only the desktop shell drives it here - in a real
+  // browser the native Ctrl +/- already does the right thing.
+  useEffect(() => {
+    storeUiZoom(uiZoom, window.localStorage);
+    void applyUiZoom(uiZoom, { desktop: desktopMode });
+  }, [uiZoom, desktopMode]);
+
+  useEffect(() => {
+    if (!desktopMode) return undefined;
+    function onZoomKeyDown(event: globalThis.KeyboardEvent) {
+      const action = zoomActionForEvent(event);
+      if (!action) return;
+      event.preventDefault();
+      const next = stepUiZoom(uiZoom, action);
+      setUiZoom(next);
+      setNotice(action === "reset" ? t("status.uiZoomReset", { percent: formatUiZoom(next) }) : t("status.uiZoom", { percent: formatUiZoom(next) }));
+    }
+    function onZoomWheel(event: globalThis.WheelEvent) {
+      if (!event.ctrlKey && !event.metaKey) return;
+      // The mask editor and the lightbox zoom their own canvas on the wheel; if
+      // Ctrl+wheel also rescaled the whole window the two would fight, so the
+      // gesture stays with whichever stage the pointer is over.
+      const target = event.target as Element | null;
+      if (target && typeof target.closest === "function" && target.closest(".mask-editor-stage, .lightbox-stage")) {
+        return;
+      }
+      event.preventDefault();
+      const action: UiZoomAction = event.deltaY < 0 ? "in" : "out";
+      const next = stepUiZoom(uiZoom, action);
+      setUiZoom(next);
+      setNotice(t("status.uiZoom", { percent: formatUiZoom(next) }));
+    }
+    window.addEventListener("keydown", onZoomKeyDown, true);
+    window.addEventListener("wheel", onZoomWheel, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener("keydown", onZoomKeyDown, true);
+      window.removeEventListener("wheel", onZoomWheel, true);
+    };
+  }, [desktopMode, uiZoom, language]);
+
   useEffect(() => {
     if (!previewImage) return undefined;
     const focusFrame = window.requestAnimationFrame(() => previewDialogRef.current?.focus());
@@ -2449,6 +2647,16 @@ function App() {
     hideTooltip();
   }, [activeEngine]);
 
+  /**
+   * The drawer opens on the engine the workspace is using, but switching tabs
+   * inside it stays local: managing the other engine's profile must not change
+   * what the composer is about to generate with.
+   */
+  useEffect(() => {
+    if (connectionOpen) setDrawerEngineState(activeEngine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionOpen]);
+
   useEffect(() => {
     if (!composerPopover) return undefined;
     function onPointerDown(event: PointerEvent) {
@@ -2507,9 +2715,9 @@ function App() {
 
   function applyProfileForm(profile: ConfigProfile) {
     if (profile.engine === "banana") {
-      setBananaForm((current) => normalizeBananaForm({ ...current, ...(profile.form as Partial<BananaForm>) }));
+      setBananaForm((current) => normalizeBananaForm(profileFormSnapshot(current, profile.form) as Partial<BananaForm>));
     } else {
-      setGptForm((current) => normalizeGptForm({ ...current, ...(profile.form as Partial<GptForm>) }));
+      setGptForm((current) => normalizeGptForm(profileFormSnapshot(current, profile.form) as Partial<GptForm>));
     }
   }
 
@@ -2523,14 +2731,22 @@ function App() {
     setConnectionOpen(false);
   }
 
+  /**
+   * While the credential layer is shared, editing the key or the address on one
+   * engine writes the same value to the other so the two never drift apart.
+   */
   function updateGptConnectionForm(patch: Partial<GptForm>) {
     clearDiagnosticsResult();
+    const mirrored = mirroredCredentialPatch("gpt-image-2", patch, isSharedCredential(gptForm));
     setGptForm((current) => ({ ...current, ...patch }));
+    updateSharedPartner("gpt-image-2", gptForm, mirrored);
   }
 
   function updateBananaConnectionForm(patch: Partial<BananaForm>) {
     clearDiagnosticsResult();
+    const mirrored = mirroredCredentialPatch("banana", patch, isSharedCredential(bananaForm));
     setBananaForm((current) => ({ ...current, ...patch }));
+    updateSharedPartner("banana", bananaForm, mirrored);
   }
 
   function selectConfigProfile(profile: ConfigProfile) {
@@ -2541,18 +2757,27 @@ function App() {
     applyProfileForm(profile);
   }
 
-  function updateActiveProfileName(name: string) {
+  /**
+   * Rename the active profile. With a shared credential layer the two engines are
+   * the same connection, so the name follows as well — a relay endpoint shows up
+   * under one name on both tabs instead of two.
+   */
+  function updateActiveProfileName(engine: Engine, name: string) {
     clearDiagnosticsResult();
-    const profileId = activeProfileIds[activeEngine];
+    const form = engine === "banana" ? bananaForm : gptForm;
+    const partner = isSharedCredential(form)
+      ? findSharedPartner(profiles, engine, form.credential_pair_id) : null;
     setProfiles((items) => items.map((item) => (
-      item.engine === activeEngine && item.id === profileId ? { ...item, name } : item
+      (item.engine === engine && item.id === activeProfileIds[engine])
+      || (partner && item.engine === partner.engine && item.id === partner.id)
+        ? { ...item, name } : item
     )));
   }
 
-  function addConfigProfile() {
+  function addConfigProfile(engine: Engine) {
     clearDiagnosticsResult();
-    const id = makeId(`${activeEngine}-profile`);
-    const form = activeEngine === "banana"
+    const id = makeId(`${engine}-profile`);
+    const form = engine === "banana"
       ? {
           api_key: bananaForm.api_key.trim(),
           api_base_url: bananaForm.api_base_url.trim(),
@@ -2562,21 +2787,23 @@ function App() {
           api_key: gptForm.api_key.trim(),
           base_url: gptForm.base_url.trim(),
           model: gptForm.model.trim(),
+          model_options: encodeModelOptions(gptForm.model_options),
           chat_model: gptForm.chat_model.trim(),
           reasoning_effort: gptForm.reasoning_effort.trim(),
         };
     setProfiles((items) => [
-      ...items,
+      ...syncActiveProfileForm(items, activeProfileIds, engine, engine === "banana" ? bananaForm : gptForm),
       {
         id,
-        engine: activeEngine,
+        engine,
         name: language === "en"
-          ? `New profile ${items.filter((item) => item.engine === activeEngine).length + 1}`
-          : `新配置 ${items.filter((item) => item.engine === activeEngine).length + 1}`,
+          ? `New profile ${items.filter((item) => item.engine === engine).length + 1}`
+          : `新配置 ${items.filter((item) => item.engine === engine).length + 1}`,
         form,
       },
     ]);
-    setActiveProfileIds((current) => ({ ...current, [activeEngine]: id }));
+    setActiveProfileIds((current) => ({ ...current, [engine]: id }));
+    applyProfileForm({ id, engine, name: "", form });
   }
 
   function deleteConfigProfile(profile: ConfigProfile) {
@@ -2600,14 +2827,14 @@ function App() {
     }
   }
 
-  async function runDiagnostics() {
+  async function runDiagnostics(engine: Engine = activeEngine) {
     setDiagnosticsRunning(true);
     setDiagnosticsResult(null);
     try {
       const response = await apiFetch("/api/diagnostics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createDiagnosticPayload(activeEngine, gptForm, bananaForm)),
+        body: JSON.stringify(createDiagnosticPayload(engine, gptForm, bananaForm)),
       });
       if (!response.ok) throw new Error(await readError(response));
       const payload = (await response.json()) as DiagnosticsResult;
@@ -2622,13 +2849,235 @@ function App() {
     } catch (error) {
       setDiagnosticsResult({
         ok: false,
-        engine: activeEngine,
+        engine,
         warning: error instanceof Error ? error.message : t("config.diagnosticsFailed"),
         results: [],
       });
       setNotice(error instanceof Error ? error.message : t("config.diagnosticsFailed"));
     } finally {
       setDiagnosticsRunning(false);
+    }
+  }
+
+  /**
+   * Read this endpoint's model catalogue for either picker.
+   *
+   * Both the image model and the chat model live on the same relay, so one
+   * `/api/models` call serves both; only the form field and the notice differ.
+   */
+  async function fetchModelListForTarget(target: "image" | "chat" | "banana") {
+    const isChat = target === "chat";
+    const isBanana = target === "banana";
+    const requestEngine = isBanana ? "banana" : "gpt-image-2";
+    const requestContext = modelRequestContexts.current[requestEngine];
+    const isCurrentRequest = () => modelRequestContexts.current[requestEngine] === requestContext;
+    // Both engines read the same catalogue from the same relay.
+    const baseUrl = (isBanana ? bananaForm.api_base_url : gptForm.base_url).trim();
+    const apiKey = (isBanana ? bananaForm.api_key : gptForm.api_key).trim();
+    const setTargetNotice = isBanana ? setBananaModelNotice : isChat ? setChatModelNotice : setImageModelNotice;
+    const setTargetFetching = isBanana ? setBananaModelFetching : isChat ? setChatModelFetching : setImageModelFetching;
+    if (!baseUrl || !apiKey) {
+      setTargetNotice(t("config.imageModelFetchMissing"));
+      setNotice(t("config.imageModelFetchMissing"));
+      return;
+    }
+    setTargetFetching(true);
+    setTargetNotice("");
+    try {
+      const response = await apiFetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isBanana
+            ? { engine: "banana", api_base_url: baseUrl, api_key: apiKey }
+            : { engine: "gpt-image-2", base_url: baseUrl, api_key: apiKey },
+        ),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const payload = (await response.json()) as { ok?: boolean; models?: unknown; count?: number; error?: string };
+      if (!isCurrentRequest()) return;
+      const fetched = parseModelListResponse(payload);
+      // The relay answers one catalogue for both engines; keep only this engine's.
+      const models = isChat ? fetched : filterImageModelsForEngine(fetched, isBanana ? "banana" : "gpt-image-2");
+      if (!payload.ok || models.length === 0) {
+        const message = payload.error || t("config.imageModelFetchEmpty");
+        setTargetNotice(message);
+        setNotice(message);
+        return;
+      }
+      const hidden = fetched.length - models.length;
+      const currentModel = isBanana ? bananaForm.model_type : isChat ? gptForm.chat_model : gptForm.model;
+      const merged = mergeImageModelOptions(
+        isBanana ? bananaForm.model_type_options : isChat ? gptForm.chat_model_options : gptForm.model_options,
+        models,
+        currentModel,
+        isChat ? undefined : isBanana ? "banana" : "gpt-image-2",
+      );
+      if (isBanana) {
+        setBananaForm((current) => isCurrentRequest() ? ({ ...current, model_type_options: encodeModelOptions(merged) }) : current);
+      } else {
+        setGptForm((current) => isCurrentRequest() ? ({
+          ...current,
+          ...(isChat
+            ? { chat_model_options: encodeModelOptions(merged) }
+            : { model_options: encodeModelOptions(merged) }),
+        }) : current);
+      }
+      // The profile editor shows this inline (it is about saving the profile);
+      // the composer popover only gets the toast, so the list stays clean.
+      const done = hidden > 0
+        ? t("config.imageModelFetchDoneFiltered", { count: merged.length, hidden })
+        : t("config.imageModelFetchDone", { count: merged.length });
+      setTargetNotice(done);
+      setNotice(done);
+    } catch (error) {
+      if (!isCurrentRequest()) return;
+      const message = error instanceof Error ? error.message : t("config.imageModelFetchFailed");
+      setTargetNotice(message);
+      setNotice(message);
+    } finally {
+      setTargetFetching(false);
+    }
+  }
+
+  async function fetchImageModelList() {
+    await fetchModelListForTarget("image");
+  }
+
+  async function fetchChatModelList() {
+    await fetchModelListForTarget("chat");
+  }
+
+  async function fetchBananaModelList() {
+    await fetchModelListForTarget("banana");
+  }
+
+  /** Composer entry points: whichever engine is active owns the switcher. */
+  async function fetchActiveModelList() {
+    await fetchModelListForTarget(activeEngine === "banana" ? "banana" : "image");
+  }
+
+  function applyActiveModel(model: string) {
+    if (activeEngine === "banana") {
+      applyBananaModel(model);
+      return;
+    }
+    applyImageModel(model);
+  }
+
+  function applyBananaModel(model: string) {
+    const nextModel = model.trim();
+    if (!nextModel) return;
+    const nextForm = {
+      ...bananaForm,
+      model_type: nextModel,
+      model_type_options: encodeModelOptions(mergeImageModelOptions(bananaForm.model_type_options, [], nextModel, "banana")),
+    };
+    setBananaForm(nextForm);
+    syncActiveProfile("banana", nextForm);
+    setBananaModelNotice("");
+  }
+
+  function applyImageModel(model: string) {
+    const nextModel = model.trim();
+    if (!nextModel) return;
+    const nextForm = { ...gptForm, model: nextModel, model_options: encodeModelOptions(mergeImageModelOptions(gptForm.model_options, [], nextModel, "gpt-image-2")) };
+    setGptForm(nextForm);
+    setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, "gpt-image-2", nextForm));
+    setImageModelNotice("");
+  }
+
+  /**
+   * Turn the shared credential layer on or off.
+   *
+   * Enabling pulls the key and the request address across from whichever side has
+   * a usable value, so the other engine is usable immediately. It never overwrites
+   * what the other engine was using: the credential either joins the profile that
+   * clearly belongs to this pair, or the other engine gets a **new** profile for
+   * it — the user's existing profile there stays untouched. Disabling keeps the
+   * current values and just stops the two from following each other.
+   */
+  function updateSharedPartner(engine: EngineId, form: ConfigForm, patch: ConfigForm) {
+    if (!isSharedCredential(form) || !Object.keys(patch).length) return;
+    const partner = findSharedPartner(profiles, engine, form.credential_pair_id);
+    if (!partner) return;
+    setProfiles((items) => items.map((item) => item.engine === partner.engine && item.id === partner.id
+      ? { ...item, form: { ...item.form, ...patch } } : item));
+    if (activeProfileIds[partner.engine] === partner.id) {
+      if (partner.engine === "banana") setBananaForm((current) => ({ ...current, ...patch }));
+      else setGptForm((current) => ({ ...current, ...patch }));
+    }
+  }
+
+  function setSharedCredential(engine: EngineId, linked: boolean) {
+    const other = otherEngine(engine);
+    const selfForm = engine === "banana" ? bananaForm : gptForm;
+    const otherForm = other === "banana" ? bananaForm : gptForm;
+    const partner = findSharedPartner(profiles, engine, selfForm.credential_pair_id);
+    const snapshot = buildConfigPayload(activeEngine, profiles, activeProfileIds, gptForm, bananaForm).profiles;
+    const self = snapshot.find((item) => item.engine === engine && item.id === activeProfileIds[engine]);
+    if (!self) return;
+    if (!linked) {
+      const unlinked = { credential_ref: "", credential_pair_id: "" };
+      updateSharedPartner(engine, selfForm, unlinked);
+      applyProfileForm({ ...self, form: { ...selfForm, ...unlinked } });
+      setProfiles((items) => items.map((item) => (
+        (item.engine === engine && item.id === self.id)
+        || (partner && item.engine === other && item.id === partner.id)
+          ? { ...item, form: { ...item.form, ...unlinked } } : item
+      )));
+      return;
+    }
+    const pairId = partner ? selfForm.credential_pair_id : makeId("connection");
+    const patch = sharedCredentialPatch(engine, { "gpt-image-2": gptForm, banana: bananaForm });
+    const name = self.name || sharedProfileName(engine, {
+      "gpt-image-2": snapshot.find((item) => item.engine === "gpt-image-2" && item.id === activeProfileIds["gpt-image-2"])?.name || "",
+      banana: snapshot.find((item) => item.engine === "banana" && item.id === activeProfileIds.banana)?.name || "",
+    });
+    const link = { credential_ref: "shared", credential_pair_id: pairId };
+    const nextSelf = { ...self, form: { ...selfForm, ...sharedPartnerCredentialValues(other, patch), ...link } };
+    const partnerId = partner?.id || makeId(`${other}-shared`);
+    const partnerBase = partner
+      ? snapshot.find((item) => item.engine === other && item.id === partner.id)!.form
+      : { ...otherForm, model_options: "", model_type_options: "", chat_model_options: "" };
+    const nextPartner: ConfigProfile = {
+      id: partnerId, engine: other, name,
+      form: { ...partnerBase, ...sharedPartnerCredentialValues(engine, patch), ...link },
+    };
+    setProfiles([
+      ...snapshot.filter((item) => !(item.engine === engine && item.id === self.id)
+        && !(item.engine === other && item.id === partnerId)),
+      nextSelf, nextPartner,
+    ]);
+    setActiveProfileIds((current) => ({ ...current, [other]: partnerId }));
+    applyProfileForm(nextSelf);
+    applyProfileForm(nextPartner);
+    setNotice(t(partner ? "config.shareLinkedProfile" : "config.shareCreatedProfile", { engine: engineLabel(other), name }));
+  }
+
+  function syncActiveProfile(engine: EngineId, form: ConfigForm) {
+    setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, engine, form));
+  }
+
+  function applyChatModel(model: string) {    const nextModel = model.trim();
+    if (!nextModel) return;
+    const nextForm = {
+      ...gptForm,
+      chat_model: nextModel,
+      chat_model_options: encodeModelOptions(mergeImageModelOptions(gptForm.chat_model_options, [], nextModel)),
+    };
+    setGptForm(nextForm);
+    setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, "gpt-image-2", nextForm));
+    setChatModelNotice("");
+  }
+
+  function setChatEnabled(enabled: boolean) {
+    const nextForm = { ...gptForm, chat_enabled: enabled ? "1" : "0" };
+    setGptForm(nextForm);
+    setProfiles((items) => syncActiveProfileForm(items, activeProfileIds, "gpt-image-2", nextForm));
+    if (!enabled) {
+      setSubmitMode("generate");
+      setChatModelNotice("");
     }
   }
 
@@ -2800,18 +3249,8 @@ function App() {
           activeEngine,
           profiles,
           activeProfileIds,
-          {
-            api_key: gptForm.api_key.trim(),
-            base_url: gptForm.base_url.trim(),
-            model: gptForm.model.trim(),
-            chat_model: gptForm.chat_model.trim(),
-            reasoning_effort: gptForm.reasoning_effort.trim(),
-          },
-          {
-            api_key: bananaForm.api_key.trim(),
-            api_base_url: bananaForm.api_base_url.trim(),
-            model_type: bananaForm.model_type.trim(),
-          },
+          gptForm,
+          bananaForm,
         )),
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -2822,8 +3261,150 @@ function App() {
     }
   }
 
-  async function loadHistory() {
-    setHistoryLoading(true);
+  /**
+   * Share the relay setup without sharing the key.
+   *
+   * The exported file carries every profile and form field of both engines, but
+   * never an API key, so it is safe to hand to a teammate. In the desktop app the
+   * user picks the destination in the native save dialog and we report that exact
+   * path; in a browser we fall back to a download and say where it landed.
+   */
+  async function exportConfigFile() {
+    const payload = buildConfigPayload(activeEngine, profiles, activeProfileIds, gptForm, bananaForm);
+    const transfer = buildConfigExport(
+      payload.profiles as ConfigTransferProfile[],
+      payload.active_profile_ids,
+      payload.active_engine,
+      desktopRuntime.version || APP_VERSION_FALLBACK,
+    );
+    const text = `${JSON.stringify(transfer, null, 2)}\n`;
+    // Name the file after the profile the user is working with, so a folder of
+    // exports is readable without opening each one.
+    const fileName = configExportFileName(transfer.app_version, drawerProfileName);
+    const summary = t("config.exportDone", { count: transfer.profiles.length });
+
+    if (isDesktopRuntime()) {
+      try {
+        const savedPath = await saveDesktopTextAs(fileName, text);
+        if (!savedPath) return;
+        setNotice(`${summary} ${t("config.exportSavedTo", { path: savedPath })}`);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : t("config.exportFailed"));
+      }
+      return;
+    }
+
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setNoticeWithAction(`${summary} ${t("config.exportBrowserHint", { name: fileName })}`, "open-downloads");
+  }
+
+  /**
+   * Read a config file that the user picked in the file dialog or dropped onto
+   * the drawer. Both entry points funnel through here.
+   */
+  async function importConfigFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    await applyConfigFile(file);
+  }
+
+  async function applyConfigFile(file: File) {
+    if (file.size > CONFIG_IMPORT_MAX_BYTES) {
+      setNotice(t("config.importTooLarge"));
+      return;
+    }
+    let imported;
+    try {
+      imported = parseConfigImport(await file.text());
+    } catch (error) {
+      const key = error instanceof Error && error.message.startsWith("config.") ? error.message : "config.importInvalid";
+      setNotice(t(key));
+      return;
+    }
+    const result = mergeImportedConfig(
+      buildConfigPayload(activeEngine, profiles, activeProfileIds, gptForm, bananaForm).profiles as ConfigTransferProfile[],
+      activeProfileIds,
+      imported,
+    );
+    const nextProfiles: ConfigProfile[] = result.profiles.map((profile) => ({
+      id: profile.id,
+      engine: profile.engine === "banana" ? "banana" : "gpt-image-2",
+      name: profile.name,
+      form: profile.form as ConfigForm,
+    }));
+    const nextActiveProfileIds = result.activeProfileIds as ActiveProfileIds;
+    const nextEngine: Engine =
+      imported.active_engine === "banana" || imported.active_engine === "gpt-image-2"
+        ? imported.active_engine
+        : activeEngine;
+    const activeGpt = nextProfiles.find((item) => item.engine === "gpt-image-2" && item.id === nextActiveProfileIds["gpt-image-2"]);
+    const activeBanana = nextProfiles.find((item) => item.engine === "banana" && item.id === nextActiveProfileIds.banana);
+    const nextGpt = activeGpt ? normalizeGptForm(activeGpt.form as Partial<GptForm>) : gptForm;
+    const nextBanana = activeBanana ? normalizeBananaForm(activeBanana.form as Partial<BananaForm>) : bananaForm;
+
+    setActiveEngine(nextEngine);
+    setProfiles(nextProfiles);
+    setActiveProfileIds(nextActiveProfileIds);
+    setGptForm(nextGpt);
+    setBananaForm(nextBanana);
+    clearDiagnosticsResult();
+
+    try {
+      const response = await apiFetch("/api/config/local-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildConfigPayload(nextEngine, nextProfiles, nextActiveProfileIds, nextGpt, nextBanana)),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setNotice(t("config.importDone", {
+        added: result.addedCount,
+        updated: result.updatedCount,
+        missing: result.keysMissing,
+      }));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("config.importSaveFailed"));
+    }
+  }
+
+  /** Dropping an exported JSON anywhere on the open drawer imports it. */
+  function onConfigDrawerDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    if (!configDragActive) setConfigDragActive(true);
+  }
+
+  function onConfigDrawerDragLeave(event: React.DragEvent<HTMLElement>) {
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    setConfigDragActive(false);
+  }
+
+  function onConfigDrawerDrop(event: React.DragEvent<HTMLElement>) {
+    const files = Array.from(event.dataTransfer?.files || []);
+    setConfigDragActive(false);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const file = files.find((item) => /\.json$/i.test(item.name) || item.type === "application/json") || files[0];
+    if (files.length > 1 || !/\.json$/i.test(file.name)) {
+      setNotice(t("config.importNeedsJson"));
+      return;
+    }
+    void applyConfigFile(file);
+  }
+
+  async function loadHistory() {    setHistoryLoading(true);
     try {
       const response = await apiFetch("/api/history?limit=160");
       if (!response.ok) throw new Error(await readError(response));
@@ -3682,6 +4263,18 @@ function App() {
         setPreviewMaskLoading(false);
       }
     }
+  }
+
+  /**
+   * Engine tabs inside the config drawer, so both engines can be managed without
+   * closing it. Unlike the workspace switcher this only switches the view — the
+   * user is already here to fix whatever is missing.
+   */
+  function selectEngineInDrawer(engine: Engine) {
+    if (engine === drawerEngineState) return;
+    clearDiagnosticsResult();
+    setDiagnosticsResult(null);
+    setDrawerEngineState(engine);
   }
 
   function selectEngine(engine: Engine) {
@@ -5307,7 +5900,7 @@ function App() {
           <div className="workspace-controls">
             <div className="mode-tabs" role="tablist" aria-label={t("app.selectEngine")}>
               <button type="button" className={activeEngine === "gpt-image-2" ? "active" : ""} onClick={() => selectEngine("gpt-image-2")}>
-                GPT Image 2
+                GPT Image
               </button>
               <button type="button" className={activeEngine === "banana" ? "active" : ""} onClick={() => selectEngine("banana")}>
                 Banana Gemini
@@ -5694,7 +6287,9 @@ function App() {
                                     <button type="button" onClick={() => applyPrompt(turn.prompt)}><RotateCcw size={14} /> <span>{t("image.applyPrompt")}</span></button>
                                     <button type="button" onClick={() => void addOutputAsReference(src, name)} disabled={referenceActionsDisabled}><ImagePlus size={14} /> <span>{t("reference.addAsReference")}</span></button>
                                     <button type="button" onClick={() => void saveImageAs(src, name)}><Download size={14} /> <span>{t("image.saveAs")}</span></button>
-                                    <a href={src} target="_blank" rel="noreferrer"><ExternalLink size={14} /> <span>{t("image.open")}</span></a>
+                                    {!desktopMode && (
+                                      <a href={src} target="_blank" rel="noreferrer"><ExternalLink size={14} /> <span>{t("image.open")}</span></a>
+                                    )}
                                   </div>
                                 </details>
                               </div>
@@ -5812,6 +6407,7 @@ function App() {
               </div>
             )}
             <div className="composer-toolbar" ref={composerToolsRef}>
+            {chatEnabled ? (
             <div className="submit-mode-switch" role="tablist" aria-label={t("submit.mode")}>
               <button
                 type="button"
@@ -5832,6 +6428,11 @@ function App() {
                 {t("submit.chat")}
               </button>
             </div>
+            ) : (
+              /* The active profile has no chat endpoint: keep the toolbar honest
+                 and leave a single generate label instead of a dead tab. */
+              <span className="submit-mode-static">{t("submit.generate")}</span>
+            )}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -5954,6 +6555,55 @@ function App() {
                           })}
                         </div>
                       </>
+                    )}
+                  </section>
+                </div>
+              )}
+            </div>
+            <div className="composer-popover-wrap image-model-wrap">
+              <button
+                type="button"
+                className="generation-settings-trigger image-model-trigger"
+                onClick={() => openComposerPopover("model")}
+                aria-expanded={composerPopover === "model"}
+                {...tooltipProps(t("composer.imageModelTooltip"))}
+              >
+                <WandSparkles size={15} />
+                <span className="generation-settings-label">{t("composer.imageModel")}</span>
+                <span className="generation-settings-summary">{activeModelName || t("config.noModel")}</span>
+              </button>
+              {composerPopover === "model" && (
+                <div className="composer-popover generation-settings-popover image-model-popover" role="dialog" aria-label={t("composer.imageModelDialog")}>
+                  <section className="generation-settings-section image-model-section">
+                    <div className="generation-settings-heading image-model-heading-row">
+                      <strong>{t("composer.imageModel")}</strong>
+                      <div className="image-model-heading-actions">
+                        <button type="button" className="image-model-fetch-button" onClick={() => void fetchActiveModelList()} disabled={composerModelFetching}>
+                          {composerModelFetching ? t("config.imageModelFetching") : t("config.imageModelFetch")}
+                        </button>
+                        <span>{composerModelOptions.length}</span>
+                      </div>
+                    </div>
+                    <div className="choice-grid image-models">
+                      {composerModelOptions.map((item) => (
+                        <button
+                          type="button"
+                          key={item}
+                          className={`${activeModelName === item ? "selected" : ""}${composerModelIds.has(item) ? "" : " unlisted"}`.trim()}
+                          title={composerModelIds.has(item) ? item : t("composer.imageModelUnlistedTitle", { model: item })}
+                          onClick={() => applyActiveModel(item)}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                    {activeModelUnlisted && (
+                      <div className="generation-count-note" role="status">
+                        {t("composer.imageModelUnlisted", { model: activeModelName })}
+                      </div>
+                    )}
+                    {composerModelOptions.length < 2 && (
+                      <div className="generation-count-note" role="status">{t("composer.imageModelEmpty")}</div>
                     )}
                   </section>
                 </div>
@@ -6413,7 +7063,7 @@ function App() {
                     <p>{t("desktop.aboutHint")}</p>
                   </div>
                   <dl className="desktop-about-list">
-                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.1"}</dd></div>
+                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.2"}</dd></div>
                     <div><dt>{t("desktop.runtime")}</dt><dd>Tauri 2 + FastAPI</dd></div>
                     <div><dt>{t("desktop.dataDirectory")}</dt><dd><code>{desktopRuntime.dataRoot}</code></dd></div>
                   </dl>
@@ -6678,19 +7328,33 @@ function App() {
       {connectionOpen && (
         <div className="drawer-shell connection-shell">
           <button className="drawer-backdrop" type="button" aria-label={t("config.drawerAria")} onClick={closeConnectionDrawer} />
-          <section className="drawer connection-drawer" role="dialog" aria-modal="true" aria-label={t("config.drawerAria")} tabIndex={-1} onKeyDown={closeOnEscape}>
-            <div className="drawer-head">
-              <div>
-                <p>{t("config.drawerHint")}</p>
-                <h2>{t("config.drawerTitle")}</h2>
+          <section className={configDragActive ? "drawer connection-drawer drag-active" : "drawer connection-drawer"} role="dialog" aria-modal="true" aria-label={t("config.drawerAria")} tabIndex={-1} onKeyDown={closeOnEscape} onDragOver={onConfigDrawerDragOver} onDragLeave={onConfigDrawerDragLeave} onDrop={onConfigDrawerDrop}>
+            <div className="drawer-head connection-drawer-head">
+              <h2>{t("config.drawerTitle")}</h2>
+              <div className="drawer-engine-tabs mode-tabs" role="tablist" aria-label={t("app.selectEngine")}>
+                {(["gpt-image-2", "banana"] as Engine[]).map((engine) => (
+                  <button
+                    key={engine}
+                    type="button"
+                    role="tab"
+                    aria-selected={drawerEngine === engine}
+                    className={drawerEngine === engine ? "active" : ""}
+                    onClick={() => selectEngineInDrawer(engine)}
+                  >
+                    {engineLabel(engine)}
+                  </button>
+                ))}
               </div>
               <button type="button" onClick={closeConnectionDrawer} aria-label={t("config.drawerAria")} title={t("common.close")}><X size={18} /></button>
             </div>
+            <p className="drawer-drop-hint" role="note">
+              {configDragActive ? t("config.importDropActive") : t("config.importDropHint")}
+            </p>
             <div className="connection-layout">
               <aside className="profile-list" aria-label={t("config.profileList")}>
-                {activeEngineProfiles.map((profile) => {
-                  const selected = profile.id === activeProfileIds[activeEngine];
-                  const canDeleteProfile = activeEngineProfiles.length > 1;
+                {drawerProfiles.map((profile) => {
+                  const selected = profile.id === activeProfileIds[drawerEngine];
+                  const canDeleteProfile = drawerProfiles.length > 1;
                   return (
                     <div
                       key={profile.id}
@@ -6702,7 +7366,7 @@ function App() {
                         onClick={() => selectConfigProfile(profile)}
                       >
                         <span>{profile.name}</span>
-                        <small>{profile.engine === "banana" ? "Banana Gemini" : "GPT Image 2"}</small>
+                        <small>{profile.engine === "banana" ? "Banana Gemini" : "GPT Image"}</small>
                       </button>
                       <button
                         type="button"
@@ -6717,16 +7381,16 @@ function App() {
                     </div>
                   );
                 })}
-                <button type="button" className="profile-add-button" onClick={addConfigProfile}>
+                <button type="button" className="profile-add-button" onClick={() => addConfigProfile(drawerEngine)}>
                   <Plus size={15} />
                   <span>{t("config.add")}</span>
                 </button>
               </aside>
               <div className="connection-fields">
-                {!hasCompleteConfig && (
+                {!drawerHasCompleteConfig && (
                   <div className="config-warning" role="alert">
                     <AlertCircle size={16} />
-                    <span>{t("config.missing", { items: listText(activeConfigIssues) })}</span>
+                    <span>{t("config.missing", { items: listText(drawerConfigIssues) })}</span>
                   </div>
                 )}
                 {diagnosticsResult && (
@@ -6752,8 +7416,8 @@ function App() {
                     )}
                   </div>
                 )}
-                <Field label={t("config.name")}><input placeholder={activeProfileName} value={activeProfile?.name || ""} onChange={(event) => updateActiveProfileName(event.target.value)} /></Field>
-                {activeEngine === "gpt-image-2" ? (
+                <Field label={t("config.name")}><input placeholder={drawerProfileName} value={drawerProfile?.name || ""} onChange={(event) => updateActiveProfileName(drawerEngine, event.target.value)} /></Field>
+                {drawerEngine === "gpt-image-2" ? (
                   <>
                     <Field label="API Key" help={t("config.apiKeyHelp")}>
                       <div className="secret-input">
@@ -6762,30 +7426,91 @@ function App() {
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
+                      <Toggle
+                        label={t("config.shareKeyWith", { engine: engineLabel(otherEngine("gpt-image-2")) })}
+                        help={t("config.shareKeyHelp")}
+                        checked={sharedCredential}
+                        onChange={(value) => setSharedCredential("gpt-image-2", value)}
+                      />
                     </Field>
                     <Field label={t("config.baseUrl")}><input placeholder="https://.../v1" value={gptForm.base_url} onChange={(event) => updateGptConnectionForm({ base_url: event.target.value })} /></Field>
-                    <Field label={t("config.imageModel")}><input placeholder="gpt-image-2" value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} /></Field>
-                    <Field label={t("config.chatModel")} help={t("config.chatModelHelp")}>
+                    <Field label={t("config.imageModel")} help={t("config.imageModelHelp")}>
                       <div className="stacked-field">
                         <select
-                          value={gptChatModelOptions.includes(gptForm.chat_model) ? gptForm.chat_model : "custom"}
+                          value={imageModelSelectValue(gptForm.model, gptForm.model_options, IMAGE_MODEL_PRESETS, "gpt-image-2")}
                           onChange={(event) => {
                             const value = event.target.value;
-                            updateGptConnectionForm({ chat_model: value === "custom" ? gptForm.chat_model : value });
+                            if (value === "custom") {
+                              setImageModelNotice("");
+                              return;
+                            }
+                            applyImageModel(value);
                           }}
                         >
-                          {gptChatModelOptions.map((item) => (
-                            <option key={item} value={item}>{chatModelOptionLabel(item)}</option>
+                          {buildImageModelOptions(gptForm.model, gptForm.model_options, IMAGE_MODEL_PRESETS, "gpt-image-2").map((item) => (
+                            <option key={item.value} value={item.value}>
+                              {item.custom ? t("config.custom") : item.label}
+                            </option>
                           ))}
                         </select>
-                        <input placeholder={t("config.customChatModel")} value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
+                        <div className="image-model-row">
+                          <input placeholder={t("config.customImageModel")} value={gptForm.model} onChange={(event) => updateGptConnectionForm({ model: event.target.value })} />
+                          <button type="button" className="image-model-fetch-button" onClick={() => void fetchImageModelList()} disabled={imageModelFetching}>
+                            {imageModelFetching ? t("config.imageModelFetching") : t("config.imageModelFetch")}
+                          </button>
+                        </div>
+                        {imageModelNotice && (
+                          <p className="image-model-notice" role="status">{imageModelNotice}</p>
+                        )}
                       </div>
                     </Field>
-                    <Field label={t("config.reasoning")} help={t("config.reasoningHelp")}>
-                      <select value={gptForm.reasoning_effort} onChange={(event) => updateGptConnectionForm({ reasoning_effort: event.target.value })}>
-                        {gptReasoningOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
-                      </select>
-                    </Field>
+                    <Toggle
+                      label={t("config.chatEnabled")}
+                      help={t("config.chatEnabledHelp")}
+                      checked={chatSwitchOn}
+                      onChange={setChatEnabled}
+                    />
+                    {chatSwitchOn && (
+                      <>
+                        {/* Only the fields that belong to chat get the section rule. */}
+                        <div className="chat-config-section" aria-hidden="true" />
+                        <Field label={t("config.chatModel")} help={t("config.chatModelHelp")}>
+                          <div className="stacked-field">
+                            <select
+                              value={imageModelSelectValue(gptForm.chat_model, gptForm.chat_model_options, gptChatModelPresets)}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (value === "custom") {
+                                  setChatModelNotice("");
+                                  return;
+                                }
+                                applyChatModel(value);
+                              }}
+                            >
+                              {buildImageModelOptions(gptForm.chat_model, gptForm.chat_model_options, gptChatModelPresets).map((item) => (
+                                <option key={item.value} value={item.value}>
+                                  {item.custom ? t("config.custom") : chatModelOptionLabel(item.value)}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="image-model-row">
+                              <input placeholder={t("config.customChatModel")} value={gptForm.chat_model} onChange={(event) => updateGptConnectionForm({ chat_model: event.target.value })} />
+                              <button type="button" className="image-model-fetch-button" onClick={() => void fetchChatModelList()} disabled={chatModelFetching}>
+                                {chatModelFetching ? t("config.imageModelFetching") : t("config.imageModelFetch")}
+                              </button>
+                            </div>
+                            {chatModelNotice && (
+                              <p className="image-model-notice" role="status">{chatModelNotice}</p>
+                            )}
+                          </div>
+                        </Field>
+                        <Field label={t("config.reasoning")} help={t("config.reasoningHelp")}>
+                          <select value={gptForm.reasoning_effort} onChange={(event) => updateGptConnectionForm({ reasoning_effort: event.target.value })}>
+                            {gptReasoningOptions.map((item) => <option key={item} value={item}>{optionLabel(item)}</option>)}
+                          </select>
+                        </Field>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
@@ -6796,17 +7521,55 @@ function App() {
                           {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
+                      <Toggle
+                        label={t("config.shareKeyWith", { engine: engineLabel(otherEngine("banana")) })}
+                        help={t("config.shareKeyHelp")}
+                        checked={sharedCredential}
+                        onChange={(value) => setSharedCredential("banana", value)}
+                      />
                     </Field>
                     <Field label={t("config.baseUrl")}><input placeholder="https://.../v1" value={bananaForm.api_base_url} onChange={(event) => updateBananaConnectionForm({ api_base_url: event.target.value })} /></Field>
-                    <Field label={t("config.modelName")}><input placeholder="gemini-3-pro-image-preview" value={bananaForm.model_type} onChange={(event) => updateBananaConnectionForm({ model_type: event.target.value })} /></Field>
+                    <Field label={t("config.imageModel")} help={t("config.modelNameHelp")}>
+                      <div className="stacked-field">
+                        <select
+                          value={imageModelSelectValue(bananaForm.model_type, bananaForm.model_type_options, bananaModelPresets, "banana")}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (value === "custom") {
+                              setBananaModelNotice("");
+                              return;
+                            }
+                            applyBananaModel(value);
+                          }}
+                        >
+                          {buildImageModelOptions(bananaForm.model_type, bananaForm.model_type_options, bananaModelPresets, "banana").map((item) => (
+                            <option key={item.value} value={item.value}>
+                              {item.custom ? t("config.custom") : item.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="image-model-row">
+                          <input placeholder={t("config.customModelName")} value={bananaForm.model_type} onChange={(event) => updateBananaConnectionForm({ model_type: event.target.value })} />
+                          <button type="button" className="image-model-fetch-button" onClick={() => void fetchBananaModelList()} disabled={bananaModelFetching}>
+                            {bananaModelFetching ? t("config.imageModelFetching") : t("config.imageModelFetch")}
+                          </button>
+                        </div>
+                        {bananaModelNotice && (
+                          <p className="image-model-notice" role="status">{bananaModelNotice}</p>
+                        )}
+                      </div>
+                    </Field>
                   </>
                 )}
               </div>
             </div>
             <div className="drawer-actions">
               <button type="button" onClick={() => void loadDefaults()}>{t("config.loadDefaults")}</button>
+              <button type="button" onClick={() => void exportConfigFile()} title={t("config.exportConfigHelp")}>{t("config.exportConfig")}</button>
+              <button type="button" onClick={() => configImportRef.current?.click()} title={t("config.importConfigHelp")}>{t("config.importConfig")}</button>
+              <input ref={configImportRef} hidden type="file" accept="application/json,.json" onChange={(event) => void importConfigFile(event)} />
               <span className="diagnostic-billing-note" role="note">{t("config.generationDiagnosticBilling")}</span>
-              <button type="button" onClick={() => void runDiagnostics()} disabled={diagnosticsRunning || !hasCompleteConfig}>
+              <button type="button" onClick={() => void runDiagnostics(drawerEngine)} disabled={diagnosticsRunning || !drawerHasCompleteConfig}>
                 {diagnosticsRunning ? t("config.testing") : t("config.testConnection")}
               </button>
               <button type="button" className="primary-action" onClick={() => void saveConfig()}>{t("config.save")}</button>
@@ -7076,7 +7839,7 @@ function App() {
                   </select>
                   <select value={historyEngineFilter} onChange={(event) => setHistoryEngineFilter(event.target.value as HistoryEngineFilter)} aria-label={t("history.engineFilter")}>
                     <option value="all">{t("history.allEngines")}</option>
-                    <option value="gpt-image-2">GPT Image 2</option>
+                    <option value="gpt-image-2">GPT Image</option>
                     <option value="banana">Banana Gemini</option>
                   </select>
                   <button type="button" onClick={() => void openOutputs()} title={t("app.openOutputFolder")}><FolderOpen size={15} /> {t("app.outputFolder")}</button>
@@ -7231,7 +7994,9 @@ function App() {
                 )}
                 <button type="button" onClick={() => void downloadImage(previewImage.src, previewImage.name)} title={t("preview.download")} aria-label={t("preview.download")}><Download size={18} /></button>
                 <button type="button" onClick={() => void saveImageAs(previewImage.src, previewImage.name)} title={t("image.saveAs")} aria-label={t("image.saveAs")}><FolderOpen size={18} /></button>
-                <a href={resolveRuntimeUrl(previewImage.src)} target="_blank" rel="noreferrer" title={t("image.open")} aria-label={t("image.open")}><ExternalLink size={18} /></a>
+                {!desktopMode && (
+                  <a href={resolveRuntimeUrl(previewImage.src)} target="_blank" rel="noreferrer" title={t("image.open")} aria-label={t("image.open")}><ExternalLink size={18} /></a>
+                )}
                 <button type="button" onClick={closePreviewImage} aria-label={t("preview.close")} title={t("preview.close")}><X size={18} /></button>
               </span>
             </div>

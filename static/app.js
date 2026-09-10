@@ -172,11 +172,11 @@ const fieldHints = {
   negative_prompt: "告诉模型尽量避免什么，比如低质量、模糊、畸形手指。",
   poster_text: "逐字填写必须出现在图里的文字。只写“需要一些文字”时，模型常会选择不写字。",
   batch_size: "Banana 一次连续请求的批次数，数值越大等待越久。",
-  n: "GPT Image 2 一次返回的图片数量，越多越容易超时。",
+  n: "GPT Image 一次返回的图片数量，越多越容易超时。",
   seed: "-1 表示随机；固定数字可以尽量复现相似结果。",
   aspect_ratio: "Banana 的画面比例；Auto 会跟随参考图或交给模型判断。",
   image_size: "Banana 的输出分辨率档位，越高越慢。",
-  size: "GPT Image 2 的输出尺寸；选择 custom 时才会使用右侧自定义尺寸。",
+  size: "GPT Image 的输出尺寸；选择 custom 时才会使用右侧自定义尺寸。",
   custom_size: "仅尺寸选择 custom 时生效；分别输入宽和高，工具会自动合成接口需要的尺寸。",
   quality: "生成质量档位；auto 表示不向上游发送该参数，兼容性更好。",
   style_preset: "预设风格，会给模型一个额外的整体视觉方向。",
@@ -264,7 +264,7 @@ function getEngineLabel(engine) {
     return "Banana Gemini";
   }
   if (engine === "gpt-image-2") {
-    return "GPT Image 2";
+    return "GPT Image";
   }
   return "未知引擎";
 }
@@ -1463,7 +1463,7 @@ function startGenerationProgress(engine) {
   window.clearInterval(progressTimer);
   updateProgress({
     percent: 8,
-    label: engine === "banana" ? "Banana Gemini 准备中" : "GPT Image 2 准备中",
+    label: engine === "banana" ? "Banana Gemini 准备中" : "GPT Image 准备中",
     note: "正在整理表单参数。",
   });
 
@@ -3285,7 +3285,7 @@ function getCurrentConfigSummary() {
   return {
     activeEngineLabel: getEngineLabel(activeConfigEngine),
     gpt: {
-      label: "GPT Image 2",
+      label: "GPT Image",
       model: gptModel,
       endpoint: gptEndpoint,
       keyState: gptKeyReady ? "API Key 已填写" : "API Key 未填写",

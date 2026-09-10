@@ -152,6 +152,20 @@ test("Windows desktop runtime enforces one shell and crash-cleans the backend", 
   assert.match(tauriLibSource, /backend_job\.assign\(&child\)/);
 });
 
+test("desktop mode drops the browser-only open-in-a-new-tab action", () => {
+  // The desktop shell cannot do anything useful with a local http URL in a new
+  // tab, so both "打开 / Open" entries are web-only; the desktop toolbar keeps
+  // download, save-as and the mask editor instead.
+  const externalLinks = appSource.match(/\{!desktopMode && \(\s*<a href=[\s\S]*?<\/a>\s*\)\}/g) || [];
+  assert.equal(
+    externalLinks.length,
+    2,
+    "both the lightbox toolbar and the image more-menu must gate their external open link",
+  );
+  assert.match(appSource, /!desktopMode && \([\s\S]{0,200}title=\{t\("image\.open"\)\}/);
+  assert.match(appSource, /!desktopMode && \([\s\S]{0,200}<span>\{t\("image\.open"\)\}<\/span>/);
+});
+
 test("desktop styling removes the outer web cards without changing web mode", () => {
   assert.match(styles, /html\[data-runtime="desktop"\] \.studio-shell[\s\S]*gap:\s*0;[\s\S]*padding:\s*0;/);
   assert.match(styles, /html\[data-runtime="desktop"\] \.history-sidebar[\s\S]*border-radius:\s*0;[\s\S]*box-shadow:\s*none;/);

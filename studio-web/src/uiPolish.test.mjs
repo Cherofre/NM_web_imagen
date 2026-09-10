@@ -432,7 +432,7 @@ test("multi-image count is prominent and asks for confirmation", () => {
 });
 
 test("config drawer exposes an obvious add-profile action", () => {
-  assert.match(appSource, /function addConfigProfile\(\)/);
+  assert.match(appSource, /function addConfigProfile\(engine: Engine\)/);
   assert.match(appSource, /className="profile-add-button"/);
   assert.match(appSource, /\{t\("config\.add"\)\}/);
   assert.match(cssBlock(".profile-add-button"), /border-style:\s*dashed;/);
@@ -453,7 +453,7 @@ test("config drawer exposes a guarded delete-profile action", () => {
 
 test("config drawer exposes separate generation and chat diagnostics", () => {
   assert.match(appSource, /type DiagnosticCapability = "generation" \| "chat";/);
-  assert.match(appSource, /async function runDiagnostics\(\)/);
+  assert.match(appSource, /async function runDiagnostics\(engine: Engine = activeEngine\)/);
   assert.match(appSource, /function closeConnectionDrawer\(\)/);
   assert.match(appSource, /setDiagnosticsResult\(null\);[\s\S]*setConnectionOpen\(false\);/);
   assert.match(appSource, /function clearDiagnosticsResult\(\)/);
@@ -488,6 +488,8 @@ test("image previews expose download and canvas zoom controls", () => {
   assert.notEqual(headerEnd, -1, "Missing preview header action close");
   assert.doesNotMatch(appSource.slice(headerStart, headerEnd), /aria-label="缩小图片"|aria-label="放大图片"|title="适配窗口"|title="原始大小"/);
   assert.match(cssBlock(".lightbox-zoom-tools"), /position:\s*absolute;[\s\S]*right:\s*14px;[\s\S]*bottom:\s*14px;/);
+  assert.match(cssBlock(".lightbox-card"), /width:\s*min\(1760px,\s*calc\(100vw - 24px\)\);/);
+  assert.match(cssBlock(".lightbox-card"), /height:\s*min\(1100px,\s*calc\(100vh - 24px\)\);/);
   assert.match(cssBlock(".lightbox-stage"), /overflow:\s*hidden;[\s\S]*cursor:\s*zoom-in;/);
   assert.match(cssBlock(".lightbox-stage img"), /scale\(var\(--preview-zoom, 1\)\);/);
 });
@@ -667,7 +669,7 @@ test("sidebar, conversation, composer and header use the simplified hierarchy", 
 });
 
 test("composer keeps size directly accessible and groups only quality with count", () => {
-  assert.match(appSource, /useState<"size" \| "settings" \| null>/);
+  assert.match(appSource, /useState<"size" \| "settings" \| "model" \| null>/);
   assert.match(appSource, /openComposerPopover\("size"\)/);
   assert.match(appSource, /openComposerPopover\("settings"\)/);
   assert.match(appSource, /className="size-settings-trigger"/);
@@ -725,7 +727,7 @@ test("shape hierarchy keeps pills for switches and regular controls compact", ()
 test("header distinguishes image and chat models with current reasoning controls", () => {
   assert.match(appSource, /const gptChatModelOptions = \["gpt-5\.6-sol", "gpt-5\.6-terra", "gpt-5\.6-luna", "gpt-5\.5", "gpt-5\.4", "gpt-5\.2", "custom"\];/);
   assert.match(appSource, /const gptReasoningOptions = \["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"\];/);
-  assert.match(appSource, /chat_model: "gpt-5\.6-sol",\s*reasoning_effort: "auto",/);
+  assert.match(appSource, /chat_model: "gpt-5\.6-sol",\s*chat_model_options: "",\s*chat_enabled: "0",\s*reasoning_effort: "auto",/);
   assert.match(appSource, /chat_model: value\.chat_model === "gpt-5\.6" \? "gpt-5\.6-sol"/);
   assert.match(appSource, /function chatModelOptionLabel\(value: string\)[\s\S]*config\.chatModelSol[\s\S]*config\.chatModelTerra[\s\S]*config\.chatModelLuna/);
   assert.doesNotMatch(appSource, /gptChatModelOptions = \[[^\]]*"gpt-5\.6"/);
@@ -973,7 +975,7 @@ test("composer hides unsupported controls and keeps chat reference behavior trut
   assert.match(chatBranch, /reference_count:\s*0/);
   assert.match(chatBranch, /setNotice\(t\("status\.chatReplied"\)\)/);
 
-  assert.match(appSource, /useState<"size" \| "settings" \| null>/);
+  assert.match(appSource, /useState<"size" \| "settings" \| "model" \| null>/);
   assert.doesNotMatch(appSource, /openComposerPopover\("edit"\)/);
   assert.doesNotMatch(appSource, /openComposerPopover\("strength"\)/);
   assert.doesNotMatch(appSource, /t\("composer\.editMode"\)/);

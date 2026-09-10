@@ -108,6 +108,14 @@ DEFAULT_BANANA_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_GPT_BASE_URL = "https://gpt-image-api.example.com"
 DEFAULT_GPT_MODEL = "gpt-image-2"
 DEFAULT_GPT_CHAT_MODEL = "gpt-5.6-sol"
+GPT_MODEL_LIST_ENDPOINT = "/v1/models"
+MODEL_LIST_TIMEOUT_DEFAULT = 30
+MODEL_LIST_TIMEOUT_MAX = 120
+# Model ids come from an untrusted relay: keep the list bounded in both count
+# and characters so a hostile endpoint cannot bloat config.local.json.
+MODEL_LIST_MAX_ITEMS = 120
+MODEL_LIST_MAX_ID_CHARS = 160
+MODEL_OPTIONS_MAX_CHARS = 6000
 MAX_CHAT_TIMEOUT = 600
 MAX_GENERATION_TIMEOUT = 1800
 # The reference payload budget is 150 MiB. Multipart headers, form fields, and
@@ -144,9 +152,56 @@ def normalize_gpt_chat_model(value: Any) -> str:
     return "gpt-5.6-sol" if model == "gpt-5.6" else model
 
 
+CHAT_ENABLED_DEFAULT = "1"
+
+
+def encode_switch_flag(value: Any, *, default: str = "") -> str:
+    """Normalize an on/off switch to "1"/"0"; an unset switch stays unset.
+
+    Returning "" for a missing value is deliberate: `normalize_config_form` drops
+    empty values, and `build_config_profiles` treats a non-empty top-level form as
+    authoritative for the active profile. A switch that always answered "1" would
+    make an otherwise empty form look like real data and wipe the profile fields.
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled", "启用"}:
+        return "1"
+    if text in {"0", "false", "no", "off", "disabled", "不启用", "关闭"}:
+        return "0"
+    return default
+
+
+def encode_credential_ref(value: Any) -> str:
+    """Whether this form shares its key and address with the other engine.
+
+    "shared" keeps the credential layer in step across engines; "" keeps them
+    independent. Older files stored the source engine name, which meant the same
+    thing, so those values are folded into "shared".
+    """
+    text = str(value or "").strip()
+    if text == "shared":
+        return "shared"
+    return "shared" if text in {"gpt-image-2", "banana"} else ""
+
+
 CONFIG_CONNECTION_FIELDS = {
-    "banana-form": {"api_key", "api_base_url", "model_type"},
-    "gpt-image-2-form": {"api_key", "base_url", "model", "chat_model", "reasoning_effort"},
+    "banana-form": {"api_key", "api_base_url", "model_type", "model_type_options", "credential_ref", "credential_pair_id"},
+    "gpt-image-2-form": {
+        "api_key",
+        "base_url",
+        "model",
+        "model_options",
+        "chat_model",
+        "chat_model_options",
+        "chat_enabled",
+        "reasoning_effort",
+        "credential_ref",
+        "credential_pair_id",
+    },
 }
 ENGINE_FORM_IDS = {
     "banana": "banana-form",
@@ -1049,15 +1104,85 @@ def sanitize_profile_id(value: str, fallback: str) -> str:
     return slug[:80] or fallback
 
 
+def normalize_model_id(value: Any) -> str:
+    raw = str(value or "").replace("\r", " ").replace("\n", " ")
+    return compact_text(raw, MODEL_LIST_MAX_ID_CHARS)
+
+
+def model_ids_from_values(values: Any, *, limit: int = MODEL_LIST_MAX_ITEMS) -> List[str]:
+    """Normalize model ids from a list, a separated string, or dict entries."""
+    if isinstance(values, str):
+        items: List[Any] = [item for item in re.split(r"[\r\n,;]+", values)]
+    elif isinstance(values, (list, tuple, set)):
+        items = list(values)
+    elif values is None:
+        items = []
+    else:
+        items = [values]
+
+    result: List[str] = []
+    seen: set[str] = set()
+    item_limit = max(1, int(limit))
+    for item in items:
+        if isinstance(item, dict):
+            item = item.get("id") or item.get("name") or item.get("model") or ""
+        model_id = normalize_model_id(item)
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        result.append(model_id)
+        if len(result) >= item_limit:
+            break
+    return result
+
+
+def encode_model_options(values: Any) -> str:
+    """Store the per-profile model list as a newline separated string."""
+    text = "\n".join(model_ids_from_values(values))
+    if len(text) <= MODEL_OPTIONS_MAX_CHARS:
+        return text
+    return text[:MODEL_OPTIONS_MAX_CHARS].rsplit("\n", 1)[0]
+
+
+def decode_model_options(value: Any) -> List[str]:
+    return model_ids_from_values(value)
+
+
+def parse_upstream_model_list(payload: Any) -> List[str]:
+    if isinstance(payload, dict):
+        for key in ("data", "models", "model_list"):
+            if key in payload:
+                return model_ids_from_values(payload.get(key))
+        return []
+    if isinstance(payload, (list, tuple)):
+        return model_ids_from_values(payload)
+    return []
+
+
+CONFIG_FORM_FIELD_NORMALIZERS = {
+    ("gpt-image-2-form", "model_options"): encode_model_options,
+    ("gpt-image-2-form", "chat_model_options"): encode_model_options,
+    ("gpt-image-2-form", "chat_enabled"): encode_switch_flag,
+    ("gpt-image-2-form", "credential_ref"): encode_credential_ref,
+    ("banana-form", "model_type_options"): encode_model_options,
+    ("banana-form", "credential_ref"): encode_credential_ref,
+}
+
+
 def normalize_config_form(form_id: str, value: Any) -> Dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     allowed_fields = CONFIG_CONNECTION_FIELDS[form_id]
-    return {
-        key: str(value.get(key) or "").strip()
-        for key in allowed_fields
-        if str(value.get(key) or "").strip()
-    }
+    normalized: Dict[str, Any] = {}
+    for key in allowed_fields:
+        normalizer = CONFIG_FORM_FIELD_NORMALIZERS.get((form_id, key))
+        if normalizer is not None:
+            text = normalizer(value.get(key))
+        else:
+            text = str(value.get(key) or "").strip()
+        if text:
+            normalized[key] = text
+    return normalized
 
 
 def build_config_profiles(
@@ -1330,6 +1455,7 @@ def build_runtime_defaults() -> Dict[str, Any]:
             "base_url": pick_env_value("GPT_IMAGE_2_BASE_URL", "OPENAI_BASE_URL"),
             "model": pick_env_value("GPT_IMAGE_2_MODEL", "OPENAI_IMAGE_MODEL"),
             "chat_model": pick_env_value("GPT_IMAGE_2_CHAT_MODEL", "OPENAI_CHAT_MODEL", "OPENAI_MODEL"),
+            "chat_enabled": pick_env_value("GPT_IMAGE_2_CHAT_ENABLED", "OPENAI_CHAT_ENABLED"),
             "reasoning_effort": pick_env_value("GPT_REASONING_EFFORT", "OPENAI_REASONING_EFFORT"),
         },
     }
@@ -3209,7 +3335,7 @@ def normalize_gpt_endpoint(api_endpoint: str, has_reference_images: bool) -> str
 
     if endpoint not in GPT_ENDPOINT_OPTIONS:
         raise ValueError(
-            "GPT Image 2 的 api_endpoint 只能是 auto、/v1/images/generations、/v1/images/edits 或 /v1/responses"
+            "GPT Image 的 api_endpoint 只能是 auto、/v1/images/generations、/v1/images/edits 或 /v1/responses"
         )
     if endpoint == "auto":
         return "/v1/images/edits" if has_reference_images else "/v1/images/generations"
@@ -3219,7 +3345,7 @@ def normalize_gpt_endpoint(api_endpoint: str, has_reference_images: bool) -> str
 def build_gpt_api_url(base_url: str, endpoint: str = "/v1/images/generations") -> str:
     url = str(base_url or "").strip().rstrip("/")
     if not url:
-        raise ValueError("请填写 GPT Image 2 的 Base URL")
+        raise ValueError("请填写 GPT Image 的 Base URL")
 
     endpoint = str(endpoint or "/v1/images/generations").strip()
     if not endpoint.startswith("/"):
@@ -3894,6 +4020,83 @@ async def run_banana_chat_diagnostic(payload: Dict[str, Any], secrets: List[str]
         )
 
 
+async def fetch_gpt_model_list(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the upstream model catalogue for one connection profile.
+
+    Both engines talk to the same catalogue on an aggregator relay, so the Gemini
+    side passes its address as `api_base_url` and gets the same OpenAI style
+    `/v1/models` listing.
+    """
+    api_key = str(payload.get("api_key") or "").strip()
+    base_url = str(payload.get("base_url") or payload.get("api_base_url") or "").strip()
+    secrets = [api_key]
+
+    def result(
+        ok: bool,
+        models: List[str],
+        endpoint: str,
+        status_code: Optional[int],
+        error_code: str = "",
+    ) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "ok": bool(ok),
+            "models": models,
+            "count": len(models),
+            "endpoint": redact_diagnostic_endpoint(endpoint, secrets),
+        }
+        if status_code is not None:
+            data["status_code"] = int(status_code)
+        if not ok:
+            resolved_code = error_code or upstream_error_classification(status_code or 0)[1]
+            data["error_code"] = resolved_code
+            data["error"] = CLIENT_ERROR_DETAILS[resolved_code]
+        return data
+
+    try:
+        endpoint = build_gpt_api_url(base_url, GPT_MODEL_LIST_ENDPOINT)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not api_key:
+        return result(False, [], endpoint, 401, "E_UPSTREAM_AUTH")
+
+    timeout = bounded_timeout(
+        payload.get("timeout"),
+        default=MODEL_LIST_TIMEOUT_DEFAULT,
+        maximum=MODEL_LIST_TIMEOUT_MAX,
+    )
+    try:
+        response = await UPSTREAM_EXECUTOR.run(
+            "chat",
+            requests.get,
+            endpoint,
+            headers=gpt_headers(api_key),
+            timeout=timeout,
+        )
+    except requests.Timeout:
+        return result(False, [], endpoint, 504, "E_UPSTREAM_TIMEOUT")
+    except requests.RequestException:
+        return result(False, [], endpoint, 502, "E_UPSTREAM_NETWORK")
+    except Exception:
+        return result(False, [], endpoint, 502, "E_UPSTREAM_RESPONSE")
+
+    if not response.ok:
+        public_status, error_code = upstream_error_classification(response.status_code)
+        return result(False, [], endpoint, public_status, error_code)
+
+    try:
+        parsed = response_json_utf8_first(response)
+    except Exception:
+        return result(False, [], endpoint, 502, "E_UPSTREAM_RESPONSE")
+    if not isinstance(parsed, (dict, list)):
+        return result(False, [], endpoint, 502, "E_UPSTREAM_RESPONSE")
+
+    models = parse_upstream_model_list(parsed)
+    if not models:
+        return result(False, [], endpoint, 502, "E_UPSTREAM_RESPONSE")
+    return result(True, models, endpoint, response.status_code)
+
+
 async def run_diagnostics(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine = str(payload.get("engine") or "gpt-image-2").strip()
     if engine not in {"gpt-image-2", "banana"}:
@@ -4300,6 +4503,10 @@ def create_app() -> FastAPI:
     async def diagnostics(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         return await run_diagnostics(payload)
 
+    @app.post("/api/models")
+    async def upstream_models(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        return await fetch_gpt_model_list(payload)
+
     @app.get("/api/history")
     async def generation_history(limit: int = 120) -> Dict[str, Any]:
         return {
@@ -4419,7 +4626,7 @@ def create_app() -> FastAPI:
             maximum=MAX_CHAT_TIMEOUT,
         )
         if not api_key:
-            raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
+            raise HTTPException(status_code=400, detail="请填写 GPT Image API Key")
         if not prompt:
             raise HTTPException(status_code=400, detail="请先输入聊天内容")
         if not model:
@@ -4809,11 +5016,11 @@ def create_app() -> FastAPI:
     ) -> Dict[str, Any]:
         JOB_REGISTRY.raise_if_canceled(job_id)
         if not api_key.strip():
-            raise HTTPException(status_code=400, detail="请填写 GPT Image 2 API Key")
+            raise HTTPException(status_code=400, detail="请填写 GPT Image API Key")
         if not prompt.strip():
             raise HTTPException(status_code=400, detail="请填写提示词")
         if n < 1 or n > 10:
-            raise HTTPException(status_code=400, detail="GPT Image 2 的数量只能是 1 到 10")
+            raise HTTPException(status_code=400, detail="GPT Image 的数量只能是 1 到 10")
 
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)

@@ -1,6 +1,20 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-09-10
+- Phase: v1.1.2 四类发行包已构建，包核验、本地预检与启动烟测全部通过，等待 G 盘同步与 GitHub Release
+- Branch: `main` at `370e439`; 1.1.2 产品改动、发行文档和打包脚本白名单修正尚未提交；无关 `.impeccable/`、`PRODUCT.md` 未触碰。
+- Implemented: 同 ID 异地址导入另建无 Key 档案；完整保存活动表单与配对字段；共用连接按 `credential_pair_id` 定位配对档案；独立档案切换清除旧 Key/共用字段/模型清单；过期模型列表响应丢弃。配置弹窗新增引擎分页、导出文件名带配置名、两个引擎的模型清单互相过滤并对未读取到的当前模型加标记，聊天默认关闭。
+- Compatibility: 旧候选配置缺少配对 ID 时按独立连接加载，保留地址和 Key，可重新启用共用。新导入档案不会继承外部配对；同地址匹配已有本机档案时保留本机 Key 和配对。
+- Latest Verification: 223/223 Node 测试、281/281 Python 测试通过；TypeScript/Vite build、Studio size rules、Python 编译通过。`scripts/verify_v1_1_0_packages.ps1` 通过；`release_preflight.ps1 -ExpectedVersion 1.1.2 -LocalOnly` 通过，Studio 资源为 `index-DVPK1PjD.js` / `index-CgObDDm-.css`。
+- Packages: 普通安装器 `NM-Image-Studio-v1.1.2-Setup-x64.exe` 34,071,903 字节 `517fe6d098d4aa03f7a10f8b3d951b35691fbf8cc9a6710c4771b6f74c20720f`；离线 WebView2 安装器 295,457,418 字节 `139980944ab01a78eada1aa72ab7c145d1620ac036e42a93c6278efcedbbe36c`；便携包 `NM-Image-Studio-v1.1.2-Portable-x64.zip` 51,641,318 字节 857 项 `8ed221e290b8bdb6f3e54f3c8822dc639f3de5e7ed271f3dc149069cd84878a5`；网页包 `NM_web_imagen-v1.1.2-Web-x64.zip` 29,340,620 字节 55 项 `37761c1997d1d34bf8213492a443bc22afb315a83ac2e1f250fcaaf17622ffae`。四类包各自带 manifest 与 sha256 sidecar。
+- Smoke Evidence: 便携包烟测通过（解压并启动 `NM Image Studio`）；网页/桌面共存烟测通过（网页版本 1.1.2，两端数据根互不干扰）；打包后端烟测通过（版本 1.1.2，隔离数据根）。本机已安装 1.1.1，`scripts/smoke_desktop_installer.ps1` 按设计拒绝运行，因此真实覆盖升级仍属未验证项，留给用户按 `docs/v1.1.2-acceptance-checklist.md` 验收。
+- Packaging Fix: 1.1.2 的 Studio 构建多出代码分块 `static/studio/assets/webview-BciZp75t.js`（桌面缩放能力），网页发布清单白名单此前只接受 `index-*.js`/`index-*.css`，导致网页包构建失败。已在 `package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1` 中允许 `static/studio/assets/<name>-<8位hash>.(js|css)`，并补 Node 侧回归断言。
+- Regression Evidence: `studio-web/src/releaseConfigRegression.test.mjs` 执行真实事件处理函数与请求身份更新逻辑；8 项测试覆盖 F1–F5 及请求期间切换/改地址/改 Key/切回原配置。Python 新增临时配置文件保存重载回归。
+- Release Boundary: 本轮未提交、推送、同步 G 盘或发布 Release；自动更新签名链路不参与 1.1.2 发布，仍沿用安装器/便携包手动升级。
+- Next: 提交并推送 `main`、打 `v1.1.2` 标签、同步两处 G 盘并核验，然后发布 GitHub Release。
+
+## Previous v1.1.1 Snapshot
 - Last Updated: 2026-08-29
 - Phase: v1.1.1 published to GitHub and synchronized to both approved G: distribution roots
 - Branch: `main` at `dca0422` with tag `v1.1.1`; local feature branch remains available; unrelated `.impeccable/` and `PRODUCT.md` stay untracked

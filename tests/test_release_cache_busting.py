@@ -26,17 +26,23 @@ WINDOWS_RELEASE_SCRIPTS = (
 )
 NEW_NODE_GATE_MODULES = (
     "chatCapabilities.test.mjs",
+    "chatModelSettings.test.mjs",
     "clientSafety.test.mjs",
+    "configTransfer.test.mjs",
     "desktopExperience.test.mjs",
     "historySurface.test.mjs",
     "imageDragIntent.test.mjs",
+    "imageModelOptions.test.mjs",
     "jobProtocol.test.mjs",
     "maskEditor.test.mjs",
     "maskEditorUi.test.mjs",
     "sessionRevision.test.mjs",
+    "sharedCredentials.test.mjs",
+    "uiZoom.test.mjs",
 )
 NEW_PYTHON_GATE_MODULES = (
     "test_classic_frontend_security.py",
+    "test_model_list.py",
     "test_security_boundaries.py",
     "test_storage_concurrency.py",
     "test_upstream_jobs.py",
@@ -428,7 +434,15 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.1.1", version)
+        self.assertEqual("1.1.2", version)
+
+    def test_studio_about_pane_fallback_matches_the_release_version(self) -> None:
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        app = (ROOT / "studio-web" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+        match = re.search(r'desktopRuntime\.version \|\| "([^"]+)"', app)
+        self.assertIsNotNone(match, "desktop settings About pane lost its version fallback")
+        self.assertEqual(version, match.group(1))
 
     def test_start_script_opens_versioned_url(self) -> None:
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
@@ -539,14 +553,14 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('"--test"', script)
         self.assertIn('Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs"', script)
         self.assertIn("Sort-Object Name", script)
-        self.assertEqual(20, len(node_modules), node_modules)
+        self.assertEqual(26, len(node_modules), node_modules)
         for module in NEW_NODE_GATE_MODULES:
             self.assertIn(module, node_modules)
         self.assertIn('-Command "npm" -Arguments @("run", "test:size")', script)
         self.assertIn('-Command "npm" -Arguments @("run", "build")', script)
         self.assertIn('-Command "python" -Arguments @("-m", "py_compile", ".\\app.py")', script)
         self.assertIn('"-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"', script)
-        self.assertEqual(6, len(python_modules), python_modules)
+        self.assertEqual(7, len(python_modules), python_modules)
         for module in NEW_PYTHON_GATE_MODULES:
             self.assertIn(module, python_modules)
         self.assertIn("failed with exit code", script)
@@ -825,6 +839,22 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             script = (ROOT / name).read_text(encoding="utf-8")
             self.assertIn(forbidden_pattern, script, name)
 
+    def test_release_validators_allow_code_split_studio_chunks(self) -> None:
+        chunk_rule = r"^static/studio/assets/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8}\.(js|css)$"
+        index_rule = r"^static/studio/assets/index-[A-Za-z0-9_-]+\.js$"
+        for name in (
+            "package_web_tool.ps1",
+            "release_preflight.ps1",
+            "sync_release_to_g.ps1",
+        ):
+            script = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(chunk_rule, script, name)
+            self.assertLess(
+                script.index(index_rule),
+                script.index(chunk_rule),
+                f"{name} must count index-*.js assets before the generic chunk rule",
+            )
+
     def test_package_manifest_is_allowlisted_and_ignores_nested_chinese_privacy_file(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -1033,6 +1063,132 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             self.assertIn('Join-Path "G:\\doc\\Tools"', script)
             self.assertIn("Resolve-CompanyShareRoot", script)
             self.assertIn("Assert-AllowedCompanyShareRoot", script)
+
+
+class InstallerLocalizationTests(unittest.TestCase):
+    """The desktop installer is Chinese + English and always installs over the old version."""
+
+    INSTALLER_CONFS = (
+        "tauri.installer.offline.conf.json",
+        "tauri.installer.online.conf.json",
+        "tauri.installer.updater.conf.json",
+    )
+
+    def _nsis_dir(self) -> Path:
+        return ROOT / "studio-web" / "src-tauri" / "nsis"
+
+    def _template(self) -> str:
+        return (self._nsis_dir() / "installer.nsi").read_text(encoding="utf-8")
+
+    def test_every_installer_flavor_ships_both_languages(self) -> None:
+        import json
+
+        for name in self.INSTALLER_CONFS:
+            with self.subTest(conf=name):
+                config = json.loads((ROOT / "studio-web" / "src-tauri" / name).read_text(encoding="utf-8"))
+                nsis = config["bundle"]["windows"]["nsis"]
+                self.assertEqual(["SimpChinese", "English"], nsis["languages"])
+                self.assertTrue(nsis["displayLanguageSelector"])
+                self.assertEqual({"SimpChinese": "nsis/SimpChinese.nsh"}, nsis["customLanguageFiles"])
+                self.assertEqual("nsis/installer.nsi", nsis["template"])
+
+    def test_custom_template_installs_over_the_previous_version(self) -> None:
+        template = self._template()
+
+        # Upstream's maintenance page is the only place that uninstalls first.
+        page_start = template.index("Function PageReinstall\n")
+        page_end = template.index("Function PageReinstallUpdateSelection", page_start)
+        page_source = template[page_start:page_end]
+        self.assertIn("Abort", page_source)
+        self.assertLess(page_source.index("Abort"), page_source.index("ReadRegStr"))
+
+        # The language dialog must not block a passive (/P) update.
+        self.assertRegex(
+            template,
+            re.compile(r"\$\{If\} \$PassiveMode != 1\s*\n\s*!insertmacro MUI_LANGDLL_DISPLAY"),
+        )
+
+    def test_custom_template_keeps_tauri_placeholders(self) -> None:
+        template = self._template()
+
+        for placeholder in ("{{product_name}}", "{{version}}", "{{#each languages}}", "{{install_mode}}"):
+            self.assertIn(placeholder, template)
+
+        # Only comments may mention the product; the script itself must stay generic.
+        code = "\n".join(line for line in template.splitlines() if not line.lstrip().startswith(";"))
+        self.assertNotIn("NM Image Studio", code)
+
+    def test_chinese_language_file_covers_every_referenced_string(self) -> None:
+        template = self._template()
+        referenced = set(re.findall(r"\$\(([A-Za-z0-9_]+)\)", template))
+        self.assertTrue(referenced)
+
+        raw = (self._nsis_dir() / "SimpChinese.nsh").read_bytes()
+        # The Tauri bundler writes custom language files as UTF-8 with its own
+        # BOM; a BOM here would be doubled and makensis aborts on line 1.
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "SimpChinese.nsh must not carry a BOM")
+        text = raw.decode("utf-8")
+        defined = set(re.findall(r"LangString (\w+) \$\{LANG_SIMPCHINESE\}", text))
+        self.assertEqual(set(), referenced - defined)
+        self.assertEqual(27, len(defined))
+
+
+class DesktopPackagingOrderTests(unittest.TestCase):
+    """The packaged backend must embed the Studio bundle built by the same run.
+
+    `desktop:prepare` copies `static/` into the PyInstaller sidecar and
+    `npm run build` writes `static/studio`, so the frontend build has to happen
+    first: the reverse order ships the previous Studio bundle in the installer.
+    """
+
+    def test_frontend_build_runs_before_the_backend_sidecar_is_packaged(self) -> None:
+        import json
+
+        config = json.loads((ROOT / "studio-web" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        command = config["build"]["beforeBuildCommand"]
+
+        self.assertIn("npm run build", command)
+        self.assertIn("npm run desktop:prepare", command)
+        self.assertLess(
+            command.index("npm run build"),
+            command.index("npm run desktop:prepare"),
+            "beforeBuildCommand must rebuild static/studio before the sidecar copies static/",
+        )
+
+
+class PowerShellReleaseScriptTests(unittest.TestCase):
+    """Release scripts run through powershell.exe (5.1), which decodes BOM-less files as ANSI."""
+
+    def _script_paths(self) -> list:
+        return sorted(ROOT.glob("scripts/*.ps1")) + sorted(ROOT.glob("*.ps1"))
+
+    def test_scripts_with_chinese_text_carry_a_utf8_bom(self) -> None:
+        offenders = []
+        for path in self._script_paths():
+            raw = path.read_bytes()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                offenders.append(f"{path.name} (not valid UTF-8)")
+                continue
+            if re.search(r"[\u4e00-\u9fff]", text) and not raw.startswith(b"\xef\xbb\xbf"):
+                offenders.append(path.name)
+
+        self.assertEqual(
+            [],
+            offenders,
+            "these scripts contain Chinese text but no UTF-8 BOM, so powershell.exe 5.1 "
+            "reads them as ANSI and fails to parse them",
+        )
+
+    def test_sidecar_build_refuses_to_replace_a_locked_backend_directory(self) -> None:
+        script = (ROOT / "scripts" / "build_desktop_backend.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("Win32_Process", script)
+        self.assertIn("仍有进程正在使用", script)
+        # A single match would otherwise unroll into a bare CimInstance whose
+        # .Count is $null and quietly disable the guard.
+        self.assertIn("@(Get-ProcessesUsingDirectory", script)
 
 
 if __name__ == "__main__":

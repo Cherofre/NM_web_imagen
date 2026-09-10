@@ -9,7 +9,12 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false,
+        "displayLanguageSelector": true,
+        "languages": ["SimpChinese", "English"],
+        "customLanguageFiles": {
+          "SimpChinese": "nsis/SimpChinese.nsh"
+        },
+        "template": "nsis/installer.nsi",
         "startMenuFolder": "NM Image Studio"
       }
     }

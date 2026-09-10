@@ -1,11 +1,37 @@
 # Next Actions
 
 ## Now
+- [x] 完成发布前审查，并修复 `docs/v1.1.2-pre-release-review.md` 的 F1–F5。
+- [x] 将复现转成正式行为回归；223 Node / 281 Python 测试、前端构建、尺寸规则和 Python 编译通过。
+- [x] 补全中文 release notes 的配置管理、修复与旧候选配置兼容性说明。
+- [x] 关闭开发实例后按 普通安装器 → 离线 WebView2 安装器 → 便携包 → 网页包 的顺序构建四类发行包（网页包最后生成）。
+- [x] 修正发行清单白名单，允许 Studio 代码分块 `static/studio/assets/<name>-<8位hash>.(js|css)`（1.1.2 新增 `webview-*.js`），并补 Node 回归断言。
+- [x] 包核验、本地预检、便携包烟测、网页/桌面共存烟测、打包后端烟测通过。
+- [ ] 提交并推送 `main`、打 `v1.1.2` 标签，同步两处 G 盘并核验版本/清单/SHA256，然后发布 GitHub Release。
+- [ ] 用户在真实安装/便携实例上按 `docs/v1.1.2-acceptance-checklist.md` 验收，含 1.1.1 → 1.1.2 覆盖安装（本机已装 1.1.1，安装器烟测按设计拒绝运行）。
+
+## Handoff Notes
+- Start here: 本文件待办的提交流程、G 盘同步与 Release；当前分支 `main` / `370e439`，1.1.2 全部改动与四类发行包尚未提交。
+- Do not redo: F1–F5 源码修复、自动化验证、四类包构建与包核验/预检/烟测都已完成，四类包哈希见 `PROJECT_STATUS.md`。
+- Verify next: 提交推送后同步两处 G 盘，跑全量 `release_preflight.ps1 -ExpectedVersion 1.1.2`（不带 `-LocalOnly`）核验目标版本、清单与 SHA256，再发布 Release。
+- Notes: 编辑带中文的根目录 `.ps1`（`package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1`）后必须确认 UTF-8 BOM 仍在，`tests/test_release_cache_busting.py` 会直接失败。
+- Do not claim: 真实覆盖升级已验收、自动更新链路已验收、Authenticode 已签名。
+
+## Previous v1.1.1 Checklist
 - [x] Bump to v1.1.1, publish GitHub Release `v1.1.1`, and synchronize both approved G: roots without reusing the v1.1.0 tag (2026-08-29).
 - [x] Desktop notifications/taskbar/tray behavior, unified storage buttons, hot-switched output roots, migration discovery (`output`/`outputs` plus bounded nested search), and folder-picker path sanitization are implemented.
 - [x] Add a separate localized “打开文件夹 / Open folder” action to the post-download toast and remove the pre-download folder action from the image “更多” menu.
 - [ ] Manually verify the published v1.1.1 desktop UI flows (wizard, folder picker, migration, storage switch, save/download/open-folder, tray/notifications/shortcuts) on a clean or currently approved test install.
 - [ ] Use a later test Release to prove 1.1.0 → 1.1.1 installed and portable update flows; add Authenticode signing if distributing to ordinary Windows users.
+
+## Earlier v1.1.2 Candidate Checklist (superseded)
+- [x] Model switching inside one profile: drawer dropdown + `/api/models` fetch from the profile's own API address + free-text model id; composer quick switcher in the generation-settings area; cached list travels as `model_options` and is filtered out of generation requests.
+- [x] Installer: Simplified Chinese + English language selector and unconditional overwrite install (no "uninstall first" choice page), validated by real `tauri bundle` runs for both the online and offline WebView2 flavors.
+- [x] Whole-interface zoom on desktop (`Ctrl` + `+` / `-` / `0`, `Ctrl` + wheel, 80%–160%, persisted) plus the `core:webview:allow-set-webview-zoom` capability.
+- [x] Automated gates green: 190 Node tests, 272 Python tests, TypeScript/Vite build, Studio size rules, release cache-busting assertions.
+- [ ] User acceptance on the desktop dev instance: model fetch/switch (including switching profiles, where the cached list must not leak) and UI zoom. Checklist: `docs/v1.1.2-acceptance-checklist.md`.
+- [ ] Package 1.1.2 after that confirmation. **Close the running dev instance first** — its sidecar locks `studio-web/src-tauri/backend` and `desktop:prepare` now refuses to run while that is the case. Then, from `studio-web`, run `npm run desktop:installer`, `npm run desktop:installer:offline`, `npm run desktop:package`, `npm run web:package` (each `tauri build` re-runs `npm run build && npm run desktop:prepare`), then `npm run desktop:verify-packages` and `powershell -File .\release_preflight.ps1 -ExpectedVersion 1.1.2 -LocalOnly` in the repo root. Do **not** use `release_one_click.ps1` for this: it is the web-only pipeline and it ends by syncing to G:.
+- [ ] Refresh `PROJECT_STATUS.md`, this file, and `docs/release-notes-v1.1.2.md` with the final hashes, then publish/sync only if the user asks; the updater feed stays at v1.1.0 (no signing key in this build environment).
 
 ## Previous v1.0.9 Checklist
 - [x] Make `复制参考图` restore the same reusable Alpha mask as `再次生成` when the turn has a valid persisted or page-local mask.
@@ -15,7 +41,7 @@
 - [x] Fast-forward the verified branch into `main`, publish GitHub Release `v1.0.9`, and synchronize both approved G: roots.
 - [ ] Monitor user feedback from v1.0.9 and create a new `codex/` branch before further product changes.
 
-## Handoff Notes
+## Historical v1.1.1 Handoff Notes
 - Start here: continue on `codex/desktop-distribution-cn`; the latest download-toast change is in `studio-web/src/App.tsx`, `studio-web/src/i18n.ts`, `studio-web/src/styles.css`, and `studio-web/src/uiPolish.test.mjs`.
 - Do not redo: the completed 171 Node + 251 Python tests, Tauri/PyInstaller build, normal/offline installer smoke, portable/web package smoke, coexistence smoke, signature/feed smoke, or local pre-release audit.
 - Verify next: use a local signed test feed or test Release to prove update-available, invalid-signature, install-from-old-version, and portable download states.
@@ -88,7 +114,7 @@
 - [ ] Next version: change history "套用参数" so missing `context_prompt / negative_prompt / poster_text` fields do not clear the current session prompt drafts; only explicit history fields should overwrite.
 - [ ] Next version: reconsider chat-mode helper text. Current behavior calls the chat API but does not generate images; wording should not imply it is purely local/offline.
 - [ ] Next version: broaden `.svnignore` to match the package-clean exclusions for `.playwright-mcp`, `studio-web/node_modules`, `studio-web/tsconfig.tsbuildinfo`, root screenshots/images, and related local artifacts.
-- [ ] Decide whether `/classic` should remain long term or be retired in a separate cleanup phase.
+- [ ] Decide whether `/classic` should remain long term or be retired in a separate cleanup phase. If it is kept, give `static/app.js` the same model fetching/switching affordance the Studio got in 1.1.2 (today the classic page still has a plain text model input, and the web package opens the classic entry).
 - [ ] Consider adding a compact filter/search inside the persistent left history sidebar if history grows large.
 - [ ] Consider adding a current-session export/import if Studio conversations need to move between machines.
 

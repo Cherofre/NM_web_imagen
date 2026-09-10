@@ -81,6 +81,15 @@ export async function chooseDesktopFolder(title: string) {
   return await invoke<string | null>("desktop_choose_folder", { title });
 }
 
+/**
+ * Save a text file (such as an exported configuration) through the native
+ * Windows save dialog, so the user picks the folder and we can report the path.
+ */
+export async function saveDesktopTextAs(name: string, contents: string) {
+  if (!isDesktopRuntime()) return null;
+  return await invoke<string | null>("desktop_save_text_as", { suggestedName: name, contents });
+}
+
 export async function getDesktopDocumentsOutputsDirectory() {
   if (!isDesktopRuntime()) return "";
   return await invoke<string>("desktop_documents_outputs_directory");

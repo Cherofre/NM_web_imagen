@@ -29,6 +29,27 @@ test("buildSubmissionFields includes prompt and gpt text drafts", () => {
   assert.ok(fields.some(([key, value]) => key === "poster_text" && value === "雷光"));
 });
 
+test("buildSubmissionFields keeps the cached model list out of generation requests", () => {
+  const fields = payloadModule.buildSubmissionFields(
+    "gpt-image-2",
+    "蓝色闪电斩击",
+    {
+      api_key: "sk",
+      model: "「YS」gpt-image-2.5-flare",
+      model_options: "「YS」gpt-image-2.5-flare\n「YS」gpt-image-2.5-sunburst",
+      size: "auto",
+    },
+    { model_options: "ignored-as-well" },
+  );
+
+  assert.ok(fields.some(([key, value]) => key === "model" && value === "「YS」gpt-image-2.5-flare"));
+  assert.equal(
+    fields.filter(([key]) => key === "model_options").length,
+    0,
+    JSON.stringify(fields),
+  );
+});
+
 test("buildSubmissionFields includes banana prompt and shared context as explicit fields", () => {
   const fields = payloadModule.buildSubmissionFields(
     "banana",

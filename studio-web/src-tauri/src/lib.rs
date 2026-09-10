@@ -1024,6 +1024,34 @@ fn desktop_save_output_as(
     Ok(Some(target.to_string_lossy().into_owned()))
 }
 
+#[tauri::command]
+fn desktop_save_text_as(
+    suggested_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    let suggested_name = suggested_name
+        .trim()
+        .replace(['\r', '\n'], "")
+        .trim_end_matches(['/', '\\'])
+        .to_string();
+    let suggested_name = if suggested_name.is_empty() {
+        "nm-image-studio-config.json".to_string()
+    } else {
+        suggested_name
+    };
+    let Some(target) = choose_save_file_dialog("配置文件另存为", &suggested_name)? else {
+        return Ok(None);
+    };
+    if target.is_dir() {
+        return Err("请选择文件名，而不是文件夹".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建目标目录: {error}"))?;
+    }
+    fs::write(&target, contents.as_bytes()).map_err(|error| format!("保存配置失败: {error}"))?;
+    Ok(Some(target.to_string_lossy().into_owned()))
+}
+
 #[cfg(windows)]
 fn open_backend_debug_console(log_path: &Path) -> Result<Child, String> {
     const SCRIPT: &str = r#"
@@ -1244,6 +1272,7 @@ pub fn run() {
             desktop_open_downloads_directory,
             desktop_download_output,
             desktop_save_output_as,
+            desktop_save_text_as,
             desktop_open_backend_console,
             desktop_exit,
             desktop_minimize_to_tray,
@@ -1297,6 +1326,20 @@ pub fn run() {
             let backend_job = BackendJob::new().map_err(std::io::Error::other)?;
             let port_text = port.to_string();
             let mut command = Command::new(&backend_path);
+            // The Vite dev server normally runs on 1420. Windows can reserve that
+            // port for itself (netsh excluded port ranges), and a dev session may
+            // deliberately move it, so allow extra origins through
+            // NM_IMAGE_STUDIO_DEV_CORS_ORIGINS (comma separated, dev only).
+            let extra_dev_origins = std::env::var("NM_IMAGE_STUDIO_DEV_CORS_ORIGINS")
+                .unwrap_or_default()
+                .trim()
+                .trim_matches(',')
+                .to_string();
+            let dev_cors_origins = if extra_dev_origins.is_empty() {
+                "http://localhost:1420,http://tauri.localhost".to_string()
+            } else {
+                format!("http://localhost:1420,http://tauri.localhost,{extra_dev_origins}")
+            };
             command
                 .args(["--host", "127.0.0.1", "--port", &port_text])
                 .current_dir(&data_root)
@@ -1305,10 +1348,7 @@ pub fn run() {
                 .env("IMAGE_TOOL_DESKTOP_MODE", "1")
                 .env("IMAGE_TOOL_DESKTOP_TOKEN", &token)
                 .env("PYTHONUNBUFFERED", "1")
-                .env(
-                    "IMAGE_TOOL_DEV_CORS_ORIGINS",
-                    "http://localhost:1420,http://tauri.localhost",
-                );
+                .env("IMAGE_TOOL_DEV_CORS_ORIGINS", dev_cors_origins);
             let show_backend_console = std::env::var("NM_IMAGE_STUDIO_BACKEND_CONSOLE")
                 .map(|value| {
                     matches!(

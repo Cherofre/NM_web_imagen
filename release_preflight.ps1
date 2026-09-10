@@ -169,6 +169,9 @@ function Assert-ReleaseRelativeManifest {
       $AssetCssCount += 1
       continue
     }
+    if ($Path -cmatch "^static/studio/assets/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8}\.(js|css)$") {
+      continue
+    }
     if ($Path -cmatch "^vendor/wheels/[^/]+\.whl$") {
       $WheelCount += 1
       continue

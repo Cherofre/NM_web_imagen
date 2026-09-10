@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 $ErrorActionPreference = "Stop"
 
@@ -20,6 +20,28 @@ $BuildDir = Join-Path $WorkRoot "build"
 $DistDir = Join-Path $WorkRoot "dist"
 $BuiltBackendDir = Join-Path $DistDir "nm-image-studio-backend"
 New-Item -ItemType Directory -Force -Path $SpecDir, $BuildDir, $DistDir | Out-Null
+
+# A running dev or test instance executes the sidecar straight out of
+# src-tauri\backend, which locks its DLLs: the copy step below would fail
+# halfway and leave a half-deleted backend directory behind.
+function Get-ProcessesUsingDirectory {
+  param([string]$Directory)
+  $Resolved = [System.IO.Path]::GetFullPath($Directory).TrimEnd("\")
+  $Prefix = "$Resolved\"
+  return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)
+  })
+}
+
+if (Test-Path -LiteralPath $BackendDir) {
+  # @() at the call site matters: a single hit would otherwise unroll into a
+  # bare CimInstance whose .Count is $null, silently disabling this check.
+  $Users = @(Get-ProcessesUsingDirectory -Directory $BackendDir)
+  if ($Users.Count -gt 0) {
+    $List = ($Users | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ", "
+    throw "无法更新 $BackendDir：仍有进程正在使用这个目录 -> $List。请先关闭桌面开发实例或测试实例，再重新打包。"
+  }
+}
 
 Push-Location $RepoRoot
 try {

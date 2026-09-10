@@ -12,7 +12,7 @@
         <section class="control-panel reveal reveal-delay-1">
           <div class="panel-header">
             <div class="engine-switch" role="tablist" aria-label="选择引擎">
-              <button class="engine-pill active" type="button" data-engine-tab="gpt-image-2">GPT Image 2</button>
+              <button class="engine-pill active" type="button" data-engine-tab="gpt-image-2">GPT Image</button>
               <button class="engine-pill" type="button" data-engine-tab="banana">Banana Gemini</button>
             </div>
             <div class="panel-header-meta">
@@ -198,12 +198,12 @@
                   <label class="field field-span-2">
                     <span>API Key</span>
                     <div class="secret-input-wrap">
-                      <input name="api_key" type="password" placeholder="输入 GPT Image 2 API Key" autocomplete="off" data-secret-input />
+                      <input name="api_key" type="password" placeholder="输入 GPT Image API Key" autocomplete="off" data-secret-input />
                       <button
                         class="secret-toggle-button"
                         type="button"
                         data-toggle-secret
-                        aria-label="显示 GPT Image 2 API Key"
+                        aria-label="显示 GPT Image API Key"
                         title="显示或隐藏当前 API Key"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -521,7 +521,7 @@
                 <select id="history-engine-filter">
                   <option value="favorite">收藏</option>
                   <option value="all" selected>全部</option>
-                  <option value="gpt-image-2">GPT Image 2</option>
+                  <option value="gpt-image-2">GPT Image</option>
                   <option value="banana">Banana Gemini</option>
                   <option value="unknown">其他</option>
                 </select>
@@ -730,7 +730,7 @@
             <h3>配置方案</h3>
             <div class="config-engine-switch" role="tablist" aria-label="选择要保存的接口配置">
               <button class="config-engine-card active" type="button" data-config-engine="gpt-image-2">
-                <span>GPT Image 2</span>
+                <span>GPT Image</span>
                 <strong id="config-gpt-model">gpt-image-2</strong>
                 <em id="config-gpt-base">未填写地址</em>
               </button>
