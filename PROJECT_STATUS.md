@@ -3,7 +3,7 @@
 ## Current Snapshot
 - Last Updated: 2026-09-10
 - Phase: v1.1.2 修复白屏后**重新打包并同版本重发**（GitHub Release 与两处 G 盘已替换为修复版）
-- Branch: `main` with tag `v1.1.2`; 无关 `.impeccable/`、`PRODUCT.md` 保持未跟踪。
+- Branch: `main` at `3e3f73a` (fix release) with tag `v1.1.2`; 无关 `.impeccable/`、`PRODUCT.md` 保持未跟踪。
 - Release: GitHub Release `v1.1.2`（`https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.2`，2026-09-10T09:13:01Z 发布，非草稿、非预发布）保持原发布记录，12 个附件已用修复版**覆盖替换**，正文同步更新。按用户决定不新开 1.1.3。
 - Critical Fix (white screen): 已发布的 7 月 1.1.2 桌面端（安装版 + 便携版）打开只有白窗，用户验收发现。根因是 Studio 产物：新引入的 `@tauri-apps/api/webview` 动态 import 让 Vite 拆出代码分块并注入使用 `import.meta.url` 的预加载助手，而 `static/studio/index.html` 为了让页面能直接双击打开使用经典 `defer` 脚本，浏览器整段报 `Cannot use 'import.meta' outside a module`，前端一行都不执行（后端 `/api/health` 依然 200，日志里没有任何前端请求）。修法：`vite.config.ts` 加 `inlineDynamicImports` + `nm-classic-script-compat` 插件（`import.meta.url` → `document.baseURI`，残留 `import.meta`/动态 `import(` 直接构建失败），`keep-asset-fallbacks.mjs` 加同样的断言。证据见 `.codex/memories/ERRORS.md`。
 - Compatibility Hardening: `build.target` 固定 `chrome105`；新增 `static/studio/boot-guard.js`（解析失败或 6 秒内 `#root` 仍为空时显示可截图反馈的提示，正常启动静默），并写入三份发行脚本的必需清单；`tauri.conf.json` 的 `csp` 补 `http://ipc.localhost`（IPC 不再退化成 postMessage）。
