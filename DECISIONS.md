@@ -2,6 +2,17 @@
 
 ## Active Decisions
 
+## 2026-09-10 - v1.1.2 白屏缺陷修复与同版本重发
+- Status: active
+- Decision: 已发布的 `v1.1.2` 桌面端（安装版 + 便携版）打开是纯白窗口，用户验收时发现。经确认根因是构建产物问题后，用户明确选择**不改版本号**：仍以 `1.1.2` 覆盖替换 GitHub Release 资产与两处 G 盘分发，不新开 1.1.3。
+- Reason: 版本号保持不变可以让 G 盘目录名、文件名、发布说明与同事的工作目录都不用改；代价是已经下载过旧 1.1.2 的人无法从版本号上察觉自己手里是坏包，因此发布说明里明确写了「已装过 1.1.2 的机器请用本次重新打包的包覆盖升级」。
+- Decision: 修复方式是把 Studio 产物变回「单个经典脚本」：`vite.config.ts` 打开 `build.rollupOptions.output.inlineDynamicImports`（不再拆 chunk），新增 `nm-classic-script-compat` 插件把 `import.meta.url` 改写为 `document.baseURI`、并对残留的 `import.meta` / 动态 `import(` 直接构建失败；`keep-asset-fallbacks.mjs` 增加同样的 `import.meta` 断言。`static/studio/index.html` 继续使用非 module 的 `defer` 脚本（保持「直接双击打开」的既有约定）。
+- Reason: 保留 `type="module"` 改写的既有决策，避免破坏 `test_studio_index_does_not_require_module_script_for_file_open` 所保护的行为；单文件产物既满足该约定，也不会再引入 module-only 语法。
+- Decision: 兼容性加固三件：`build.target` 固定为 `chrome105`（其他机器上的 WebView2 版本可能更旧）；新增 `static/studio/boot-guard.js`（在 bundle 之前加载，脚本解析失败或若干秒后 `#root` 仍为空时显示可截图反馈的提示，正常启动时完全静默），并把该文件加入三份发行脚本的必需清单；`scripts/smoke_desktop_portable.ps1` 改为**验证窗口真的渲染**（CDP 断言 `#root` 有内容 + 用 `vm.Script` 校验脚本可按经典脚本解析），已有实例占用时直接报错而不是给出误导性失败。
+- Reason: 旧烟测只等待 `data` 目录出现，白窗照样 PASS；「进程活着 + 后端 200 + 前端零请求」正是白屏的特征，必须直接检查渲染结果。用户要求「不要在别人电脑上安装后出现类似问题」。
+- Decision: 安装器语言改为按系统 `InstallLanguage` 预选，并注释掉 `MUI_LANGDLL_REGISTRY_*` 三个 `!define`（MUI 一旦读到已存语言值就会跳过语言选择页并一直沿用）。
+- Consequences: 语言选择页现在每次交互安装都会出现（默认简体中文）；安装器不再写入 `Installer Language` 注册表值。首次使用设置的「存图位置」选项改为显示真实路径与真实选中态。`tauri.conf.json` 的 `csp` 补上 `http://ipc.localhost`，Tauri IPC 不再退化成 postMessage。
+
 ## 2026-09-10 - v1.1.2 打包放行与发行清单白名单
 - Status: active
 - Decision: 用户明确授权在本轮最终检查通过后直接同步两处 G 盘目录并发布 GitHub Release `v1.1.2`。发行方式沿用安装器/便携包手动升级，自动更新签名链路不参与本次发布。

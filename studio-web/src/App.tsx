@@ -1548,6 +1548,7 @@ function App() {
   const [desktopOnboardingLanguage, setDesktopOnboardingLanguage] = useState<AppLanguage>(language);
   const [desktopOnboardingOutputsRoot, setDesktopOnboardingOutputsRoot] = useState(desktopRuntime.outputsRoot);
   const [desktopOnboardingDefaultOutputsRoot, setDesktopOnboardingDefaultOutputsRoot] = useState(`${desktopRuntime.dataRoot}\\outputs`);
+  const [desktopOnboardingDocumentsOutputsRoot, setDesktopOnboardingDocumentsOutputsRoot] = useState("");
   const [desktopOnboardingNotifications, setDesktopOnboardingNotifications] = useState(desktopNotifications);
   const [desktopOnboardingCloseBehavior, setDesktopOnboardingCloseBehavior] = useState<DesktopCloseBehavior>(desktopCloseBehavior);
   const [desktopOnboardingBusy, setDesktopOnboardingBusy] = useState(false);
@@ -2057,6 +2058,11 @@ function App() {
         setDesktopOnboardingOutputsRoot(desktopOutputsRoot);
         void getDesktopDefaultOutputsDirectory().then((path) => {
           if (path) setDesktopOnboardingDefaultOutputsRoot(path);
+        }).catch(() => undefined);
+        // Show the real Documents path on the option card. Rendering the hint text there
+        // made a perfectly usable choice look greyed out and unavailable.
+        void getDesktopDocumentsOutputsDirectory().then((path) => {
+          if (path) setDesktopOnboardingDocumentsOutputsRoot(path);
         }).catch(() => undefined);
         setDesktopOnboardingNotifications(desktopNotifications);
         setDesktopOnboardingCloseBehavior(desktopCloseBehavior);
@@ -5700,6 +5706,11 @@ function App() {
     : "";
   const desktopUpdateSnoozed = Boolean(desktopUpdateInfo?.version && desktopUpdateSnoozedVersion === desktopUpdateInfo.version);
   const showDesktopUpdateNotice = desktopMode && desktopUpdateStatus === "available" && Boolean(desktopUpdateInfo?.version) && !desktopUpdateSnoozed;
+  const onboardingDocumentsRootSelected = Boolean(
+    desktopOnboardingDocumentsOutputsRoot && sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDocumentsOutputsRoot)
+  );
+  const onboardingCustomRootSelected =
+    !sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDefaultOutputsRoot) && !onboardingDocumentsRootSelected;
 
   return (
     <main
@@ -6795,11 +6806,11 @@ function App() {
                       <button type="button" className={sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDefaultOutputsRoot) ? "selected" : ""} onClick={() => setDesktopOnboardingOutputsRoot(desktopOnboardingDefaultOutputsRoot)}>
                         <span>{onboardingT("desktop.onboardingUseDefault")}</span><code>{desktopOnboardingDefaultOutputsRoot}</code>
                       </button>
-                      <button type="button" className={desktopOnboardingOutputsRoot.toLowerCase().includes("nm image studio") ? "selected" : ""} onClick={() => void useDesktopOnboardingDocumentsDirectory()} disabled={desktopOnboardingBusy}>
-                        <span>{onboardingT("desktop.onboardingUseDocuments")}</span><code>{onboardingT("desktop.onboardingDocumentsPath")}</code>
+                      <button type="button" className={onboardingDocumentsRootSelected ? "selected" : ""} onClick={() => void useDesktopOnboardingDocumentsDirectory()} disabled={desktopOnboardingBusy}>
+                        <span>{onboardingT("desktop.onboardingUseDocuments")}</span><code>{desktopOnboardingDocumentsOutputsRoot || onboardingT("desktop.onboardingDocumentsPath")}</code>
                       </button>
-                      <button type="button" className={!sameDesktopPath(desktopOnboardingOutputsRoot, desktopOnboardingDefaultOutputsRoot) && !desktopOnboardingOutputsRoot.toLowerCase().includes("nm image studio") ? "selected" : ""} onClick={() => void chooseDesktopOnboardingOutputsDirectory()} disabled={desktopOnboardingBusy}>
-                        <span>{onboardingT("desktop.onboardingChooseFolder")}</span><code>{desktopOnboardingOutputsRoot}</code>
+                      <button type="button" className={onboardingCustomRootSelected ? "selected" : ""} onClick={() => void chooseDesktopOnboardingOutputsDirectory()} disabled={desktopOnboardingBusy}>
+                        <span>{onboardingT("desktop.onboardingChooseFolder")}</span><code>{onboardingCustomRootSelected ? desktopOnboardingOutputsRoot : onboardingT("desktop.onboardingNoFolderChosen")}</code>
                       </button>
                     </div>
                     <p className="desktop-onboarding-help">{onboardingT("desktop.onboardingStorageHint")}</p>

@@ -21,6 +21,21 @@ if ([string]::IsNullOrWhiteSpace($ZipPath) -or -not (Test-Path -LiteralPath $Zip
   throw "Portable ZIP was not found. Pass -ZipPath explicitly."
 }
 
+# The desktop app only allows one running instance, and a second launch exits silently
+# before it ever creates a window. Refuse loudly instead of reporting a bogus failure.
+$Running = @(Get-Process -Name "nm-image-studio-desktop" -ErrorAction SilentlyContinue)
+if ($Running.Count -gt 0) {
+  throw "NM Image Studio is already running (pid $($Running[0].Id)); close it before running the portable smoke."
+}
+
+function Get-FreeTcpPort {
+  $Listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  $Listener.Start()
+  $Port = ([System.Net.IPEndPoint]$Listener.LocalEndpoint).Port
+  $Listener.Stop()
+  return $Port
+}
+
 $SmokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_image_studio_portable_smoke_" + [guid]::NewGuid().ToString("N"))
 $Process = $null
 New-Item -ItemType Directory -Force -Path $SmokeRoot | Out-Null
@@ -35,7 +50,11 @@ try {
   if (-not (Test-Path -LiteralPath $Backend -PathType Leaf)) { throw "Portable backend is missing." }
   if (-not (Test-Path -LiteralPath $Marker -PathType Leaf)) { throw "Portable marker is missing." }
 
-  $Process = Start-Process -FilePath $Exe -WorkingDirectory $AppDir -PassThru -WindowStyle Hidden
+  # A hidden window can suppress painting, so let the window show: the whole point is to
+  # prove the interface really renders.
+  $DebugPort = Get-FreeTcpPort
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$DebugPort"
+  $Process = Start-Process -FilePath $Exe -WorkingDirectory $AppDir -PassThru
   $DataRoot = Join-Path $AppDir "data"
   $Ready = $false
   for ($Attempt = 0; $Attempt -lt 80; $Attempt += 1) {
@@ -51,14 +70,29 @@ try {
   if (-not $Ready) {
     throw "Portable data directory was not created during startup."
   }
-  Write-Host "Portable desktop smoke passed."
+
+  $Checker = Join-Path $ScriptDir "lib\assert_desktop_ui.mjs"
+  if (-not (Test-Path -LiteralPath $Checker -PathType Leaf)) {
+    throw "UI assertion helper is missing: $Checker"
+  }
+  Write-Host "Checking that the desktop window actually renders ..."
+  & node $Checker $DebugPort
+  if ($LASTEXITCODE -ne 0) {
+    throw "Portable desktop UI did not render. The packaged window would show up blank."
+  }
+
+  Write-Host "Portable desktop smoke passed (backend started, window rendered)."
   Write-Host "Extracted root: $AppDir"
 } finally {
   if ($Process -and -not $Process.HasExited) {
     Stop-Process -Id $Process.Id -Force
     $Process.WaitForExit(5000)
   }
+  Get-Process -Name "nm-image-studio-backend" -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+  }
+  Remove-Item Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $SmokeRoot) {
-    Remove-Item -LiteralPath $SmokeRoot -Recurse -Force
+    Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }

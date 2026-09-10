@@ -49,6 +49,7 @@ function Get-RequiredReleaseManifestFiles {
     "static/styles.css",
     "static/app.js",
     "static/studio/index.html",
+    "static/studio/boot-guard.js",
     "vendor/python/python-3.12.10-embed-amd64.zip"
   )
   return @($Paths)

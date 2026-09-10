@@ -2,19 +2,18 @@
 
 ## Current Snapshot
 - Last Updated: 2026-09-10
-- Phase: v1.1.2 已发布到 GitHub 并同步到两处已授权的 G 盘分发根目录
-- Branch: `main` at `de4281c` with tag `v1.1.2`; 无关 `.impeccable/`、`PRODUCT.md` 保持未跟踪。
-- Release: GitHub Release `v1.1.2`（`https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.2`，2026-09-10T09:13:01Z 发布，非草稿、非预发布），附件与 v1.1.1 一致：四类发行包各带 manifest 与 sha256，共 12 个文件。自动更新签名链路不参与本次发布。
-- G Sync: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具` 与 `G:\doc\Tools\网页生图站` 均更新为 `NM_web_imagen/VERSION = 1.1.2`（54 个文件）与 `NM_web_imagen-v1.1.2.zip`；两处 `NM Image Studio Desktop` 增加 `NM Image Studio 1.1.2 安装版.exe`、`离线安装版.exe`、`便携版.zip` 并解出 `便携版\NM Image Studio`（含后端，无 `data` 目录）。v1.1.1 与 v1.0.9 包保留。两处全量 `release_preflight.ps1 -ExpectedVersion 1.1.2 -DestinationRoot <root>` 均通过，网页包 SHA256 一致为 `37761c1997d1d34bf8213492a443bc22afb315a83ac2e1f250fcaaf17622ffae`。
-- Implemented: 同 ID 异地址导入另建无 Key 档案；完整保存活动表单与配对字段；共用连接按 `credential_pair_id` 定位配对档案；独立档案切换清除旧 Key/共用字段/模型清单；过期模型列表响应丢弃。配置弹窗新增引擎分页、导出文件名带配置名、两个引擎的模型清单互相过滤并对未读取到的当前模型加标记，聊天默认关闭。
-- Compatibility: 旧候选配置缺少配对 ID 时按独立连接加载，保留地址和 Key，可重新启用共用。新导入档案不会继承外部配对；同地址匹配已有本机档案时保留本机 Key 和配对。
-- Latest Verification: 223/223 Node 测试、282/282 Python 测试通过；TypeScript/Vite build、Studio size rules、Python 编译通过。`scripts/verify_v1_1_0_packages.ps1` 通过；本地与两处 G 盘全量预检通过，Studio 资源为 `index-DVPK1PjD.js` / `index-CgObDDm-.css`。
-- Packages: 普通安装器 `NM-Image-Studio-v1.1.2-Setup-x64.exe` 34,071,903 字节 `517fe6d098d4aa03f7a10f8b3d951b35691fbf8cc9a6710c4771b6f74c20720f`；离线 WebView2 安装器 295,457,418 字节 `139980944ab01a78eada1aa72ab7c145d1620ac036e42a93c6278efcedbbe36c`；便携包 `NM-Image-Studio-v1.1.2-Portable-x64.zip` 51,641,318 字节 857 项 `8ed221e290b8bdb6f3e54f3c8822dc639f3de5e7ed271f3dc149069cd84878a5`；网页包 `NM_web_imagen-v1.1.2-Web-x64.zip` 29,340,620 字节 55 项 `37761c1997d1d34bf8213492a443bc22afb315a83ac2e1f250fcaaf17622ffae`。
-- Smoke Evidence: 便携包烟测通过（解压并启动 `NM Image Studio`）；网页/桌面共存烟测通过（网页版本 1.1.2，两端数据根互不干扰）；打包后端烟测通过（版本 1.1.2，隔离数据根）。本机已安装 1.1.1，`scripts/smoke_desktop_installer.ps1` 按设计拒绝运行，因此真实覆盖升级仍属未验证项，留给用户按 `docs/v1.1.2-acceptance-checklist.md` 验收。
-- Packaging Fix: 1.1.2 的 Studio 构建多出代码分块 `static/studio/assets/webview-BciZp75t.js`（桌面缩放能力），网页发布清单白名单此前只接受 `index-*.js`/`index-*.css`，导致网页包构建失败。已在 `package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1` 中允许 `static/studio/assets/<name>-<8位hash>.(js|css)`，并补 Node 侧回归断言。
-- Regression Evidence: `studio-web/src/releaseConfigRegression.test.mjs` 执行真实事件处理函数与请求身份更新逻辑；8 项测试覆盖 F1–F5 及请求期间切换/改地址/改 Key/切回原配置。Python 新增临时配置文件保存重载回归。
-- Sync Note: `sync_release_to_g.ps1` 不带 `-SkipPackage` 时会重新打 web 包，ZIP 条目时间戳不同导致与 `_release\web\*-Web-x64.zip` 哈希不一致，全量预检会以「G: versioned package hash differs」失败。发行流程必须先把发行 ZIP 原样复制为 `..\NM_web_imagen-v1.1.2.zip`，再以 `-SkipPackage` 同步。
-- Next: 用户按 `docs/v1.1.2-acceptance-checklist.md` 在安装版/便携版上验收（含 1.1.1 → 1.1.2 覆盖安装）；自动更新签名链路与 Authenticode 签名仍未验收，需要后续测试 Release 证明。
+- Phase: v1.1.2 修复白屏后**重新打包并同版本重发**（GitHub Release 与两处 G 盘已替换为修复版）
+- Branch: `main` with tag `v1.1.2`; 无关 `.impeccable/`、`PRODUCT.md` 保持未跟踪。
+- Release: GitHub Release `v1.1.2`（`https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.2`，2026-09-10T09:13:01Z 发布，非草稿、非预发布）保持原发布记录，12 个附件已用修复版**覆盖替换**，正文同步更新。按用户决定不新开 1.1.3。
+- Critical Fix (white screen): 已发布的 7 月 1.1.2 桌面端（安装版 + 便携版）打开只有白窗，用户验收发现。根因是 Studio 产物：新引入的 `@tauri-apps/api/webview` 动态 import 让 Vite 拆出代码分块并注入使用 `import.meta.url` 的预加载助手，而 `static/studio/index.html` 为了让页面能直接双击打开使用经典 `defer` 脚本，浏览器整段报 `Cannot use 'import.meta' outside a module`，前端一行都不执行（后端 `/api/health` 依然 200，日志里没有任何前端请求）。修法：`vite.config.ts` 加 `inlineDynamicImports` + `nm-classic-script-compat` 插件（`import.meta.url` → `document.baseURI`，残留 `import.meta`/动态 `import(` 直接构建失败），`keep-asset-fallbacks.mjs` 加同样的断言。证据见 `.codex/memories/ERRORS.md`。
+- Compatibility Hardening: `build.target` 固定 `chrome105`；新增 `static/studio/boot-guard.js`（解析失败或 6 秒内 `#root` 仍为空时显示可截图反馈的提示，正常启动静默），并写入三份发行脚本的必需清单；`tauri.conf.json` 的 `csp` 补 `http://ipc.localhost`（IPC 不再退化成 postMessage）。
+- Installer Language Fix: `studio-web/src-tauri/nsis/installer.nsi` 注释掉 `MUI_LANGDLL_REGISTRY_*`（MUI 一旦读到已存语言值就跳过语言选择页并一直沿用，本机残留 `Installer Language=1033` 就是"中文系统装出英文界面"的原因），改为在 `.onInit` / `un.onInit` 按 `HKLM\SYSTEM\CurrentControlSet\Control\Nls\Language\InstallLanguage` 预选 `2052`(zh-CN) 或 `1033`。已清理本机残留注册表值。
+- Onboarding Fix: 首次使用设置「语言与存图位置」一步原先把提示文案「推荐给安装版用户」渲染进路径槽，看起来像被禁用；现显示真实 `文档\NM Image Studio` 路径，选中态改为按真实路径比较，第三个选项未选择时显示「尚未选择其他文件夹」。向导底部与语言切换按钮此前完全没套用主题按钮样式（原生外观、主按钮无圆角），已并入 `.icon-button, …` 共享按钮规则。
+- G Sync: `G:\doc\Tools\AI产出工具插件\美术\特效组\网页生图工具` 与 `G:\doc\Tools\网页生图站` 的 `NM_web_imagen` 干净目录、`NM_web_imagen-v1.1.2.zip` 与 `NM Image Studio Desktop`（安装版/离线安装版/便携版 + 解压目录）全部替换为修复版；两处全量 `release_preflight.ps1 -ExpectedVersion 1.1.2 -DestinationRoot <root>` 通过，网页包 SHA256 一致为 `41513410e9ca5fa5f496130a265e5774c7888259b325494050c020096d9f7995`。v1.1.1 文件按设计保留。
+- Latest Verification: 223/223 Node 测试、287/287 Python 测试通过；`scripts/verify_v1_1_0_packages.ps1` 通过；`smoke_desktop_portable.ps1` 现在**断言窗口真的渲染**（CDP 读 `#root` 子节点 + `vm.Script` 校验经典脚本可解析），对旧坏包会打印 `Cannot use 'import.meta' outside a module` 并失败、对新包 PASS；本地与两处 G 盘全量预检通过，Studio 资源为 `index-C9qHVnct.js` / `index-CSOpIyAR.css` + `boot-guard.js`。
+- Packages: 普通安装器 33,455,622 字节 `d1d77d1c129b4e0b07ef46668a733aa39be384269142102669652bab109988d7`；离线 WebView2 安装器 295,463,553 字节 `06f3d0cc21a12f66082767a38faf7e7ed66f14f79881139bc6ffe4230341dbc4`；便携包 52,323,844 字节 848 项 `a4c604ae57c8175d2b88970d27cdfa3796a307126f58deb8c2db3408145e3825`；网页包 29,345,525 字节 `41513410e9ca5fa5f496130a265e5774c7888259b325494050c020096d9f7995`。四个包与 GitHub 附件 digest 逐一核对一致。
+- Regression Guards: `tests/test_release_cache_busting.py` 新增「Studio bundle 必须能按经典脚本解析」「三个发行清单必须要求 `boot-guard.js`」「便携烟测必须含渲染断言」「安装器语言必须按系统区域预选」四类断言；`studio-web/src/uiPolish.test.mjs` 的共享按钮规则正则放宽以容纳新增选择器。
+- Next: 用户按 `docs/v1.1.2-acceptance-checklist.md` 重新验收（**已装过旧 1.1.2 的机器需用修复版覆盖升级**）；自动更新签名链路与 Authenticode 签名仍未验证；`scripts/smoke_desktop_installer.ps1` 因本机已安装而按设计拒绝运行，真实覆盖升级仍由用户人工验收。
 
 ## Previous v1.1.1 Snapshot
 - Last Updated: 2026-08-29

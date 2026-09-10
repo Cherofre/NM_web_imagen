@@ -714,7 +714,7 @@ test("advanced parameters omit controls already exposed in the composer", () => 
 
 test("shape hierarchy keeps pills for switches and regular controls compact", () => {
   assert.match(cssBlock(":root"), /--radius-xl:\s*22px;[\s\S]*--radius-lg:\s*18px;[\s\S]*--radius-md:\s*14px;[\s\S]*--radius-sm:\s*10px;/);
-  assert.match(css, /\.icon-button,\s*\.new-session-button,[\s\S]*\.panel-title button\s*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
+  assert.match(css, /\.icon-button,\s*\.new-session-button,[\s\S]*\.panel-title button[^{]*\{[^}]*border-radius:\s*var\(--radius-sm\);/);
   assert.match(cssBlock(".sidebar-tabs"), /border-radius:\s*999px;/);
   assert.match(cssBlock(".mode-tabs"), /border-radius:\s*999px;/);
   assert.match(cssBlock(".submit-mode-switch"), /border-radius:\s*999px;/);

@@ -167,7 +167,9 @@ html[data-runtime="desktop"] .workspace {
 .header-actions button,
 .composer-toolbar button,
 .drawer-actions button,
-.panel-title button {
+.panel-title button,
+.desktop-language-switcher button,
+.desktop-onboarding-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -192,7 +194,9 @@ html[data-runtime="desktop"] .workspace {
 .header-actions button:hover,
 .composer-toolbar button:hover,
 .drawer-actions button:hover,
-.panel-title button:hover {
+.panel-title button:hover,
+.desktop-language-switcher button:hover,
+.desktop-onboarding-actions button:not(.primary-action):hover {
   border-color: var(--line-strong);
   background: var(--panel);
   color: var(--ink);
@@ -204,7 +208,8 @@ html[data-runtime="desktop"] .workspace {
 .connection-button:active:not(:disabled),
 .header-actions button:active:not(:disabled),
 .composer-toolbar button:active:not(:disabled),
-.drawer-actions button:active:not(:disabled) {
+.drawer-actions button:active:not(:disabled),
+.desktop-onboarding-actions button:not(.primary-action):active:not(:disabled) {
   transform: translateY(1px);
 }
 

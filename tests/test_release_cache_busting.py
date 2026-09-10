@@ -67,6 +67,7 @@ RELEASE_STATIC_FILES = (
     "static/styles.css",
     "static/app.js",
     "static/studio/index.html",
+    "static/studio/boot-guard.js",
     "static/studio/assets/index-test.js",
     "static/studio/assets/index-test.css",
 )
@@ -178,8 +179,12 @@ def create_release_source(root: Path) -> Path:
     (source / "static" / "app.js").write_text("void 0;", encoding="utf-8")
     (source / "static" / "studio" / "index.html").write_text(
         '<link href="./assets/index-test.css" rel="stylesheet">\n'
+        '<script src="./boot-guard.js"></script>\n'
         '<script defer src="./assets/index-test.js"></script>\n',
         encoding="utf-8",
+    )
+    (source / "static" / "studio" / "boot-guard.js").write_text(
+        "window.nmBootGuard = true;\n", encoding="utf-8"
     )
     (studio_assets / "index-test.css").write_text("body{}", encoding="utf-8")
     (studio_assets / "index-test.js").write_text("void 0;", encoding="utf-8")
@@ -534,6 +539,68 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
 
         self.assertNotIn('type="module"', html)
         self.assertRegex(html, r'<script defer src="\./assets/[^"]+\.js"></script>')
+
+    def test_studio_bundle_stays_parseable_as_a_classic_script(self) -> None:
+        index_path = ROOT / "static" / "studio" / "index.html"
+        html = index_path.read_text(encoding="utf-8")
+        asset_refs = re.findall(r'<script[^>]*src="(\./assets/[^"]+\.js)"', html)
+        self.assertEqual(1, len(asset_refs), "the Studio page must load exactly one JS bundle")
+        bundle = (index_path.parent / asset_refs[0].removeprefix("./")).read_text(encoding="utf-8")
+        # A classic script cannot contain module-only syntax. The browser rejects the
+        # whole file ("Cannot use 'import.meta' outside a module") and the desktop
+        # window renders blank, which is exactly the v1.1.2 release defect.
+        self.assertNotIn("import.meta", bundle)
+        self.assertNotRegex(bundle, r"(^|[;}\s])import\s*\(")
+
+        vite_config = (ROOT / "studio-web" / "vite.config.ts").read_text(encoding="utf-8")
+        self.assertIn("inlineDynamicImports: true", vite_config)
+        self.assertIn("nm-classic-script-compat", vite_config)
+
+        guard = (ROOT / "studio-web" / "scripts" / "keep-asset-fallbacks.mjs").read_text(encoding="utf-8")
+        self.assertIn("import.meta", guard)
+
+    def test_installer_language_defaults_to_the_windows_locale(self) -> None:
+        template = (ROOT / "studio-web" / "src-tauri" / "nsis" / "installer.nsi").read_text(encoding="utf-8")
+        # MUI reuses a stored "Installer Language" value and then skips the language
+        # dialog, so one English run kept every later install English even on zh-CN.
+        for line in template.splitlines():
+            self.assertFalse(
+                line.lstrip().startswith("!define MUI_LANGDLL_REGISTRY_"),
+                f"stored installer language must stay disabled: {line.strip()}",
+            )
+        locale_probe = 'ReadRegStr $0 HKLM "SYSTEM\\CurrentControlSet\\Control\\Nls\\Language" "InstallLanguage"'
+        self.assertEqual(2, template.count(locale_probe), "installer and uninstaller must both probe the locale")
+        self.assertIn("StrCpy $LANGUAGE 2052", template)
+        self.assertIn("StrCpy $LANGUAGE 1033", template)
+
+    def test_studio_ships_the_blank_window_boot_guard(self) -> None:
+        guard_path = ROOT / "static" / "studio" / "boot-guard.js"
+        self.assertTrue(guard_path.exists(), "the boot guard must ship with the Studio build")
+        guard = guard_path.read_text(encoding="utf-8")
+        self.assertIn("nm-boot-guard", guard)
+
+        html = (ROOT / "static" / "studio" / "index.html").read_text(encoding="utf-8")
+        self.assertLess(
+            html.index("boot-guard.js"),
+            html.index("assets/index-"),
+            "the guard has to load before the app bundle to catch a parse failure",
+        )
+
+    def test_release_manifests_require_the_studio_boot_guard(self) -> None:
+        for name in ["package_web_tool.ps1", "release_preflight.ps1", "sync_release_to_g.ps1"]:
+            text = (ROOT / name).read_text(encoding="utf-8-sig")
+            self.assertIn('"static/studio/boot-guard.js"', text, name)
+
+    def test_portable_smoke_asserts_the_window_renders(self) -> None:
+        # The v1.1.2 smoke passed on a build whose window was blank: it only waited for
+        # the data folder. The window itself must be checked.
+        text = (ROOT / "scripts" / "smoke_desktop_portable.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("assert_desktop_ui.mjs", text)
+        self.assertIn("remote-debugging-port", text)
+
+        helper = (ROOT / "scripts" / "lib" / "assert_desktop_ui.mjs").read_text(encoding="utf-8")
+        self.assertIn("rootChildren", helper)
+        self.assertIn("SyntaxError", helper)
 
     def test_release_keeps_v104_hashed_assets_as_cache_fallbacks(self) -> None:
         assets_dir = ROOT / "static" / "studio" / "assets"

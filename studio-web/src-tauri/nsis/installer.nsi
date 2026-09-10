@@ -149,9 +149,16 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !endif
 
 ; Define registry key to store installer language
-!define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
-!define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
-!define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
+; ---------------------------------------------------------------- NM Image Studio patch
+; Deliberately NOT defined. MUI treats an existing "Installer Language" value as
+; final: it reuses it and skips the language dialog entirely, so a machine that once
+; stored 1033 (English) kept installing in English forever, even on a Chinese
+; Windows. Without these defines the dialog always appears, and the initial language
+; is derived from the system locale in .onInit below.
+; !define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
+; !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
+; !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
+; ---------------------------------------------------------------- NM Image Studio patch
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
@@ -492,6 +499,19 @@ Function .onInit
     StrCpy $UpdateMode 1
   ${EndIf}
 
+  ; ---------------------------------------------------------------- NM Image Studio patch
+  ; Derive the initial language from the Windows install language instead of MUI's
+  ; stored preference (the MUI_LANGDLL_REGISTRY defines are disabled above, which also
+  ; makes the language dialog appear on every interactive run). zh-CN opens in
+  ; 简体中文, anything else falls back to English; passive updates inherit this too.
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Nls\Language" "InstallLanguage"
+  ${If} $0 == "0804"
+    StrCpy $LANGUAGE 2052
+  ${Else}
+    StrCpy $LANGUAGE 1033
+  ${EndIf}
+  ; ---------------------------------------------------------------- NM Image Studio patch
+
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     ; ---------------------------------------------------------------- NM Image Studio patch
     ; The in-app updater runs this installer in passive mode (/P). MUI only
@@ -770,6 +790,18 @@ Function un.onInit
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_UNINIT
   !endif
+
+  ; ---------------------------------------------------------------- NM Image Studio patch
+  ; MUI_UNGETLANGUAGE below would fall back to the first compiled language for every
+  ; machine once the installer no longer stores a preference, so pick the uninstaller
+  ; language from the Windows install language first.
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Nls\Language" "InstallLanguage"
+  ${If} $0 == "0804"
+    StrCpy $LANGUAGE 2052
+  ${Else}
+    StrCpy $LANGUAGE 1033
+  ${EndIf}
+  ; ---------------------------------------------------------------- NM Image Studio patch
 
   !insertmacro MUI_UNGETLANGUAGE
 
