@@ -2,20 +2,29 @@
 
 ## Now
 - [x] 完成发布前审查，并修复 `docs/v1.1.2-pre-release-review.md` 的 F1–F5。
-- [x] 将复现转成正式行为回归；223 Node / 281 Python 测试、前端构建、尺寸规则和 Python 编译通过。
+- [x] 将复现转成正式行为回归；223 Node / 282 Python 测试、前端构建、尺寸规则和 Python 编译通过。
 - [x] 补全中文 release notes 的配置管理、修复与旧候选配置兼容性说明。
 - [x] 关闭开发实例后按 普通安装器 → 离线 WebView2 安装器 → 便携包 → 网页包 的顺序构建四类发行包（网页包最后生成）。
 - [x] 修正发行清单白名单，允许 Studio 代码分块 `static/studio/assets/<name>-<8位hash>.(js|css)`（1.1.2 新增 `webview-*.js`），并补 Node 回归断言。
 - [x] 包核验、本地预检、便携包烟测、网页/桌面共存烟测、打包后端烟测通过。
-- [ ] 提交并推送 `main`、打 `v1.1.2` 标签，同步两处 G 盘并核验版本/清单/SHA256，然后发布 GitHub Release。
+- [x] 提交并推送 `main`（`de4281c`）、打 `v1.1.2` 标签，同步两处 G 盘并跑通全量预检，发布 GitHub Release `v1.1.2`（2026-09-10）。
 - [ ] 用户在真实安装/便携实例上按 `docs/v1.1.2-acceptance-checklist.md` 验收，含 1.1.1 → 1.1.2 覆盖安装（本机已装 1.1.1，安装器烟测按设计拒绝运行）。
 
 ## Handoff Notes
-- Start here: 本文件待办的提交流程、G 盘同步与 Release；当前分支 `main` / `370e439`，1.1.2 全部改动与四类发行包尚未提交。
-- Do not redo: F1–F5 源码修复、自动化验证、四类包构建与包核验/预检/烟测都已完成，四类包哈希见 `PROJECT_STATUS.md`。
-- Verify next: 提交推送后同步两处 G 盘，跑全量 `release_preflight.ps1 -ExpectedVersion 1.1.2`（不带 `-LocalOnly`）核验目标版本、清单与 SHA256，再发布 Release。
-- Notes: 编辑带中文的根目录 `.ps1`（`package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1`）后必须确认 UTF-8 BOM 仍在，`tests/test_release_cache_busting.py` 会直接失败。
+- Start here: 1.1.2 已发布并同步完毕；接下来的工作重点是用户验收反馈，以及自动更新签名链路 / Authenticode 签名（本次发布不含）。
+- Do not redo: F1–F5 源码修复、自动化验证、四类包构建、包核验、本地与两处 G 盘全量预检、烟测、GitHub Release。四类包哈希与 G 盘清单见 `PROJECT_STATUS.md`。
+- Verify next: 用户验收（模型切换、配置导入导出与共用、缩放、覆盖安装）；若要做自动更新，需要配置签名密钥并生成测试 feed，不能用源码检查或普通安装包替代。
+- Notes: 同步 G 盘时必须先把 `_release\web\NM_web_imagen-v1.1.2-Web-x64.zip` 原样复制为 `..\NM_web_imagen-v1.1.2.zip`，再用 `sync_release_to_g.ps1 -SkipPackage`，否则重新打包会让 ZIP 时间戳不同、全量预检哈希不一致。编辑带中文的根目录 `.ps1`（`package_web_tool.ps1`、`release_preflight.ps1`、`sync_release_to_g.ps1`）后必须确认 UTF-8 BOM 仍在，`tests/test_release_cache_busting.py` 会直接失败。
 - Do not claim: 真实覆盖升级已验收、自动更新链路已验收、Authenticode 已签名。
+
+## Published v1.1.2 Checklist
+- [x] Fix F1–F5 from the pre-release review and turn the reproducer into a green behavior regression.
+- [x] Add the model switcher inside one profile, config export/import, engine tabs, engine-scoped model lists, chat off by default, Chinese/English overwrite installer, and desktop UI zoom.
+- [x] Build the normal installer, offline WebView2 installer, portable desktop package, and web package; web ZIP last.
+- [x] Allow Studio code-split chunks in the release manifest allowlist; keep `index-*` counting intact.
+- [x] Pass 223 Node tests, 282 Python tests, package verification, local preflight, and the portable/coexistence/backend smokes.
+- [x] Publish GitHub Release `v1.1.2` with 12 assets (four packages plus manifests and SHA256 sidecars) and synchronize both approved G: roots.
+- [ ] Prove a real 1.1.1 → 1.1.2 overwrite upgrade and the updater feed on a test Release; add Authenticode signing before distributing to ordinary Windows users.
 
 ## Previous v1.1.1 Checklist
 - [x] Bump to v1.1.1, publish GitHub Release `v1.1.1`, and synchronize both approved G: roots without reusing the v1.1.0 tag (2026-08-29).
