@@ -28,6 +28,16 @@ const INSTANCE_MUTEX_NAME: &str = "Local\\NMImageStudioDesktop-v1";
 const APP_WINDOW_TITLE: &str = "NM Image Studio";
 const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
+pub fn show_startup_error(error: &str) {
+    let title = wide_null("NM Image Studio — 启动失败");
+    let message = wide_null(&format!(
+        "程序未能启动 / Unable to start\n\n{error}\n\n请确认完整解压程序、存图目录可写，并安装 WebView2 Runtime。可使用离线安装包补齐运行环境。请将此提示截图反馈。"
+    ));
+    unsafe {
+        MessageBoxW(null_mut(), message.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+}
+
 pub fn ensure_webview2_runtime() -> Result<(), String> {
     let registry_paths = [
         format!(

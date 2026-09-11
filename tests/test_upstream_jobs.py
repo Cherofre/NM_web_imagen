@@ -1900,6 +1900,53 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
                 assert_client_payload_is_sanitized(self, payload)
 
+    async def test_gpt_reference_input_is_never_removed_by_retry(self) -> None:
+        calls = []
+
+        def post(_url, **kwargs):
+            calls.append(dict(kwargs.get("json") or {}))
+            return FakeJsonResponse(
+                {"error": {"message": "Unknown parameter: image"}}, status_code=400,
+            )
+
+        with patch.object(webapp.requests, "post", side_effect=post):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"prompt": "edit", "api_key": EXACT_SECRET,
+                      "base_url": "https://example.com/v1",
+                      "api_endpoint": "/v1/images/generations"},
+                files=[("reference_files", ("base.png", PNG_1X1_RAW, "image/png"))],
+            )
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertEqual(1, len(calls))
+        self.assertEqual(1, len(calls[0]["image"]))
+
+    async def test_gpt_model_aliases_keep_all_reference_bytes_in_order(self) -> None:
+        references = [png_bytes("RGB", (1, 1), [color]) for color in
+                      [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]]
+        for model in ["「YS」gpt-image-2.5-sunburst", "「KB」gpt-image-2"]:
+            calls = []
+
+            def post(url, **kwargs):
+                calls.append((url, kwargs))
+                return FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]})
+
+            with self.subTest(model=model), patch.object(webapp.requests, "post", side_effect=post):
+                response = await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={"prompt": "edit first image using remaining images", "api_key": EXACT_SECRET,
+                          "base_url": "https://example.com/v1", "model": model},
+                    files=[("reference_files", (f"ref{i}.png", raw, "image/png"))
+                           for i, raw in enumerate(references)],
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertEqual(1, len(calls))
+                url, kwargs = calls[0]
+                self.assertTrue(url.endswith("/v1/images/edits"))
+                self.assertEqual(model, kwargs["data"]["model"])
+                self.assertEqual(["image[]"] * 4, [item[0] for item in kwargs["files"]])
+                self.assertEqual(references, [item[1][1] for item in kwargs["files"]])
+
     async def test_gpt_unknown_parameter_retry_keeps_raw_message_internal(self) -> None:
         calls = []
 

@@ -106,7 +106,6 @@
     if (renderedAt) return;
     if (Date.now() - startedAt > 6000) {
       show("界面脚本没有执行或执行后没有渲染任何内容。\nThe interface script did not run or rendered nothing.");
-      return;
     }
     window.setTimeout(watch, 500);
   }

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ZipPath = ""
 )
 
@@ -36,8 +36,10 @@ function Get-FreeTcpPort {
   return $Port
 }
 
-$SmokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_image_studio_portable_smoke_" + [guid]::NewGuid().ToString("N"))
+$SmokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("NM 中文兼容 smoke_" + [guid]::NewGuid().ToString("N"))
 $Process = $null
+$PreviousBrowserArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+$PreviousPath = $env:PATH
 New-Item -ItemType Directory -Force -Path $SmokeRoot | Out-Null
 
 try {
@@ -50,11 +52,16 @@ try {
   if (-not (Test-Path -LiteralPath $Backend -PathType Leaf)) { throw "Portable backend is missing." }
   if (-not (Test-Path -LiteralPath $Marker -PathType Leaf)) { throw "Portable marker is missing." }
 
-  # A hidden window can suppress painting, so let the window show: the whole point is to
-  # prove the interface really renders.
+  # The CDP check verifies DOM rendering even while the smoke window is hidden.
   $DebugPort = Get-FreeTcpPort
   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$DebugPort"
-  $Process = Start-Process -FilePath $Exe -WorkingDirectory $AppDir -PassThru
+  # Deliberately omit developer runtimes from the child's PATH and use an unrelated CWD.
+  try {
+    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+    $Process = Start-Process -FilePath $Exe -WorkingDirectory $env:SystemRoot -PassThru -WindowStyle Hidden
+  } finally {
+    $env:PATH = $PreviousPath
+  }
   $DataRoot = Join-Path $AppDir "data"
   $Ready = $false
   for ($Attempt = 0; $Attempt -lt 80; $Attempt += 1) {
@@ -76,9 +83,11 @@ try {
     throw "UI assertion helper is missing: $Checker"
   }
   Write-Host "Checking that the desktop window actually renders ..."
-  & node $Checker $DebugPort
+  $DropImage = Join-Path $SmokeRoot "拖拽测试 image.png"
+  [System.IO.File]::WriteAllBytes($DropImage, [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAO0lEQVR4nO3RQREAMAjEwKNCqqSyEVgJ4cMvK+CYCdXvZtNZXY8HBvwBMhEyETIRMhEyETIRMhEyUcgHWSwBTp9tVbMAAAAASUVORK5CYII="))
+  & node $Checker $DebugPort $DropImage
   if ($LASTEXITCODE -ne 0) {
-    throw "Portable desktop UI did not render. The packaged window would show up blank."
+    throw "Portable desktop UI or file-drop verification failed; see the checker output above."
   }
 
   Write-Host "Portable desktop smoke passed (backend started, window rendered)."
@@ -88,11 +97,15 @@ try {
     Stop-Process -Id $Process.Id -Force
     $Process.WaitForExit(5000)
   }
-  Get-Process -Name "nm-image-studio-backend" -ErrorAction SilentlyContinue | ForEach-Object {
-    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+  # The shell Job Object owns only this smoke instance and terminates its sidecar.
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $PreviousBrowserArguments
+  $env:PATH = $PreviousPath
+  $ResolvedSmoke = [System.IO.Path]::GetFullPath($SmokeRoot)
+  $TempPrefix = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+  if (-not $ResolvedSmoke.StartsWith($TempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing cleanup outside temp: $ResolvedSmoke"
   }
-  Remove-Item Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $SmokeRoot) {
+  if (Test-Path -LiteralPath $ResolvedSmoke) {
     Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }

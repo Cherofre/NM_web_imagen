@@ -224,6 +224,16 @@ def write_release_zip(
 
 
 class ReleaseCacheBustingTests(unittest.TestCase):
+    def test_root_page_boot_guard_is_actually_served(self) -> None:
+        with TestClient(webapp.create_app()) as client:
+            page = client.get("/")
+            self.assertIn('src="./boot-guard.js"', page.text)
+            response = client.get("/boot-guard.js")
+            self.assertEqual(200, response.status_code)
+            self.assertIn("javascript", response.headers["content-type"])
+            self.assertIn("nm-boot-guard", response.text)
+            self.assertEqual("no-cache", response.headers["cache-control"])
+
     def test_windows_release_scripts_have_utf8_bom(self) -> None:
         for relative_path in WINDOWS_RELEASE_SCRIPTS:
             path = ROOT / relative_path
@@ -439,7 +449,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.1.2", version)
+        self.assertEqual("1.1.3", version)
 
     def test_studio_about_pane_fallback_matches_the_release_version(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -620,7 +630,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('"--test"', script)
         self.assertIn('Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs"', script)
         self.assertIn("Sort-Object Name", script)
-        self.assertEqual(26, len(node_modules), node_modules)
+        self.assertEqual(27, len(node_modules), node_modules)
         for module in NEW_NODE_GATE_MODULES:
             self.assertIn(module, node_modules)
         self.assertIn('-Command "npm" -Arguments @("run", "test:size")', script)

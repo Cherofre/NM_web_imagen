@@ -4423,6 +4423,15 @@ def create_app() -> FastAPI:
         response.headers["Expires"] = "0"
         return response
 
+    @app.get("/boot-guard.js")
+    async def studio_boot_guard() -> FileResponse:
+        # The same relative script URL is used by /, file:// and the desktop shell.
+        return FileResponse(
+            STUDIO_STATIC_DIR / "boot-guard.js",
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
+
     @app.get("/classic")
     async def classic_index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -5224,7 +5233,9 @@ def create_app() -> FastAPI:
                     unknown_param = unknown_param_pattern.search(error_message)
                     if unknown_param:
                         parameter_name = unknown_param.group(1)
-                        if parameter_name in current_payload:
+                        if parameter_name in current_payload and parameter_name not in {
+                            "model", "prompt", "image", "input", "tools", "n"
+                        }:
                             current_payload.pop(parameter_name, None)
                             if "json" in current_request_kwargs:
                                 current_request_kwargs["json"] = current_payload

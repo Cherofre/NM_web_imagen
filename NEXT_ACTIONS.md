@@ -1,6 +1,21 @@
 # Next Actions
 
 ## Now
+- [x] 完成 1.1.3 缺陷修复、290 Python/226 Node 回归与四类包构建。
+- [x] 最终 ZIP 通过中文路径、系统 PATH、全新 WebView、正常渲染及外部文件拖入验证；网页包启动和 boot-guard HTTP 检查通过。
+- [x] 同步两处 G 盘干净工程与桌面分发；本地及两处预检通过。
+- [ ] 在另一台 Windows 10/11 x64 做真实安装/升级验收，特别是缺 WebView2 场景。
+- [ ] 若继续追查 sunburst 效果，请向渠道提供 edits + 4 图 + 时间证据，或经用户同意进行一次受控付费对照；当前未证实上游根因。
+
+## Handoff Notes
+- Start here: docs/v1.1.3-review.md 与 _release/desktop/*v1.1.3*；本轮已完成本地及 G 盘交付，GitHub 未发布。
+- Do not redo: 已通过的完整测试、四类包构建、最终 ZIP 兼容烟测和 G 盘同步。
+- Verify next: 用户安装新的 1.1.3 后验收真实 Explorer 拖入、覆盖升级与异机离线安装。
+- Do not claim: 上游 sunburst 已修复、任何电脑必定可运行、真实跨机或覆盖安装已验证、原安装目录已升级。
+- Notes: 旧程序已恢复打开，测试调试参数已移除；原有 .impeccable/ 和 PRODUCT.md 未纳入本轮修改。
+
+## Previous 1.1.2 Actions
+### Completed release actions
 - [x] 完成发布前审查，并修复 `docs/v1.1.2-pre-release-review.md` 的 F1–F5。
 - [x] 将复现转成正式行为回归；223 Node / 287 Python 测试、前端构建、尺寸规则和 Python 编译通过。
 - [x] 补全中文 release notes 的配置管理、修复与旧候选配置兼容性说明。

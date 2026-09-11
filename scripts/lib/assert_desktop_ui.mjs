@@ -143,5 +143,41 @@ if (problems.length) {
 }
 
 console.log("PASS: desktop UI rendered");
+if (process.argv[3]) {
+  const cleanState = await send("Runtime.evaluate", {
+    expression: "document.querySelectorAll('.reference-strip .reference-chip').length",
+    returnByValue: true,
+  });
+  if (cleanState.result?.result?.value !== 0) {
+    throw new Error("Clean portable profile unexpectedly inherited reference images");
+  }
+  // Use Chromium's external-file drag path, rather than assigning an input's files.
+  await send("Runtime.evaluate", { expression: "document.querySelector('.desktop-onboarding-skip')?.click()" });
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const rectResult = await send("Runtime.evaluate", {
+    expression: `JSON.stringify((() => {
+      const rect = document.querySelector('.composer').getBoundingClientRect();
+      return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+    })())`, returnByValue: true,
+  });
+  const point = JSON.parse(rectResult.result.result.value);
+  for (const type of ["dragEnter", "dragOver", "drop"]) {
+    const result = await send("Input.dispatchDragEvent", {
+      type, ...point, data: { items: [], files: [process.argv[3]], dragOperationsMask: 1 },
+    });
+    if (result.error) throw new Error(JSON.stringify(result.error));
+  }
+  let uploaded = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const result = await send("Runtime.evaluate", {
+      expression: "Array.from(document.querySelectorAll('.reference-strip .reference-chip img')).filter(img => img.complete && img.naturalWidth > 0).length",
+      returnByValue: true,
+    });
+    if (result.result?.result?.value === 1) { uploaded = true; break; }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (!uploaded) throw new Error("External file drop did not create a reference image");
+  console.log("PASS: external file drag created one reference image");
+}
 ws.close();
 process.exit(0);

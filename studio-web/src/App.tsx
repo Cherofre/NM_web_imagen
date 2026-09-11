@@ -457,7 +457,7 @@ const gptChatModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gp
 /** Same seeds as the select, without the trailing "custom" sentinel. */
 const gptChatModelPresets = gptChatModelOptions.filter((item) => item !== "custom");
 /** Fallback shown for the running version when the desktop shell cannot report one. */
-const APP_VERSION_FALLBACK = "1.1.2";
+const APP_VERSION_FALLBACK = "1.1.3";
 /** The Gemini model the app ships with; the relay's catalogue is the real source. */
 const bananaModelPresets = ["gemini-3-pro-image-preview"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -7074,7 +7074,7 @@ function App() {
                     <p>{t("desktop.aboutHint")}</p>
                   </div>
                   <dl className="desktop-about-list">
-                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.2"}</dd></div>
+                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.3"}</dd></div>
                     <div><dt>{t("desktop.runtime")}</dt><dd>Tauri 2 + FastAPI</dd></div>
                     <div><dt>{t("desktop.dataDirectory")}</dt><dd><code>{desktopRuntime.dataRoot}</code></dd></div>
                   </dl>

@@ -15,6 +15,18 @@ const windowsRuntimeSource = readFileSync(new URL("../src-tauri/src/windows_runt
 const tauriConfigSource = readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
 const iconSource = readFileSync(new URL("../src-tauri/icons/icon.svg", import.meta.url), "utf8");
 
+test("Windows file drops reach the existing HTML5 upload and reference handlers", () => {
+  const config = JSON.parse(tauriConfigSource);
+  assert.equal(config.app.windows.find((window) => window.label === "main").dragDropEnabled, false);
+  assert.match(appSource, /appendReferenceFiles\(Array.from\(event.dataTransfer.files/);
+});
+
+test("portable WebView storage stays beside portable backend data", () => {
+  assert.match(tauriLibSource, /window\.create = false/);
+  assert.match(tauriLibSource, /\.data_directory\(data_root\.join\("webview"\)\)/);
+  assert.match(tauriLibSource, /\.build\(context\)/);
+});
+
 test("desktop runtime exposes only allowlisted local utility commands", () => {
   assert.match(runtimeSource, /outputsRoot: string;/);
   assert.match(runtimeSource, /logPath: string;/);

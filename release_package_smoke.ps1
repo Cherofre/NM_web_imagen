@@ -103,6 +103,10 @@ try {
   if ($null -eq $HealthPayload) {
     throw "Packaged backend did not become healthy before timeout."
   }
+  $BootGuard = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/boot-guard.js" -UseBasicParsing -TimeoutSec 5
+  if ($BootGuard.StatusCode -ne 200 -or $BootGuard.Content -notmatch "nm-boot-guard") {
+    throw "Packaged web boot guard is missing or served incorrectly."
+  }
   if ($HealthPayload.version -ne $ExpectedVersion) {
     throw "Packaged backend VERSION mismatch: expected $ExpectedVersion, got $($HealthPayload.version)."
   }

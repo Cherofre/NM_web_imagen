@@ -1249,8 +1249,24 @@ pub fn run() {
     let _single_instance = match SingleInstanceGuard::acquire() {
         Ok(Some(guard)) => guard,
         Ok(None) => return,
-        Err(error) => panic!("{error}"),
+        Err(error) => {
+            windows_runtime::show_startup_error(&error);
+            return;
+        }
     };
+
+    let mut context = tauri::generate_context!();
+    let portable_window = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(is_portable_install))
+        .unwrap_or(false);
+    if portable_window {
+        for window in &mut context.config_mut().app.windows {
+            if window.label == "main" {
+                window.create = false;
+            }
+        }
+    }
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1394,7 +1410,9 @@ pub fn run() {
             if !backend_is_ready(port, &token) {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(std::io::Error::other("desktop backend did not become healthy").into());
+                return Err(std::io::Error::other(format!(
+                    "desktop backend did not become healthy; log: {}", log_path.display()
+                )).into());
             }
 
             app.manage(DesktopRuntimeState {
@@ -1418,6 +1436,18 @@ pub fn run() {
                 #[cfg(windows)]
                 _backend_job: backend_job,
             });
+
+            if portable {
+                // Config dataDirectory is relative to app-local-data; use the builder
+                // for an absolute portable path so localStorage never leaks across installs.
+                let config = app.config().app.windows.iter()
+                    .find(|window| window.label == "main")
+                    .ok_or_else(|| std::io::Error::other("main window config is missing"))?;
+                let window = tauri::WebviewWindowBuilder::from_config(app, config)?
+                    .data_directory(data_root.join("webview"))
+                    .build()?;
+                restore_window_state(&window, saved_window).map_err(std::io::Error::other)?;
+            }
 
             let open = MenuItem::with_id(
                 app,
@@ -1474,8 +1504,17 @@ pub fn run() {
             tray.build(app)?;
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("failed to build NM Image Studio desktop shell");
+        .build(context);
+
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            #[cfg(windows)]
+            windows_runtime::show_startup_error(&error.to_string());
+            eprintln!("failed to build NM Image Studio desktop shell: {error}");
+            return;
+        }
+    };
 
     app.run(|handle, event| match event {
         tauri::RunEvent::WindowEvent { label, event, .. } if label == "main" => match event {
