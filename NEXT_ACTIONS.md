@@ -1,6 +1,7 @@
 # Next Actions
 
 ## Now
+- [x] 按用户本轮要求补发 GitHub Release v1.1.3；推送提交和标签，12 个附件 SHA256 核验一致。
 - [x] 完成 1.1.3 缺陷修复、290 Python/226 Node 回归与四类包构建。
 - [x] 最终 ZIP 通过中文路径、系统 PATH、全新 WebView、正常渲染及外部文件拖入验证；网页包启动和 boot-guard HTTP 检查通过。
 - [x] 同步两处 G 盘干净工程与桌面分发；本地及两处预检通过。
@@ -8,7 +9,7 @@
 - [ ] 若继续追查 sunburst 效果，请向渠道提供 edits + 4 图 + 时间证据，或经用户同意进行一次受控付费对照；当前未证实上游根因。
 
 ## Handoff Notes
-- Start here: docs/v1.1.3-review.md 与 _release/desktop/*v1.1.3*；本轮已完成本地及 G 盘交付，GitHub 未发布。
+- Start here: docs/v1.1.3-review.md 与 _release/desktop/*v1.1.3*；本轮已完成本地、G 盘及 GitHub Release v1.1.3 交付。
 - Do not redo: 已通过的完整测试、四类包构建、最终 ZIP 兼容烟测和 G 盘同步。
 - Verify next: 用户安装新的 1.1.3 后验收真实 Explorer 拖入、覆盖升级与异机离线安装。
 - Do not claim: 上游 sunburst 已修复、任何电脑必定可运行、真实跨机或覆盖安装已验证、原安装目录已升级。

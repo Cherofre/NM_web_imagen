@@ -2,6 +2,11 @@
 
 ## Active Decisions
 
+## 2026-09-11 - 补发 GitHub Release 1.1.3
+- Status: active
+- Decision: 用户追问 release 后补充执行正式发布；推送 main/v1.1.3，上传既有已验证四类包及清单/校验文件，共12附件。正文使用中文面向使用者说明。
+- Evidence: GitHub 附件大小和 SHA256 与本地逐项一致，发布为非预发布/latest。前轮“本地及G盘交付、不发布”的范围限制由本次用户请求更新。
+
 ## 2026-09-10 - 1.1.3 兼容与参考图审查
 - Status: active
 - Decision: 按本轮用户要求升级 1.1.3；保留既有白屏构建防护，关闭 Tauri 拖拽接管以恢复 HTML5 上传，核心请求字段不得通过未知参数重试删除。

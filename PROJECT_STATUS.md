@@ -2,12 +2,13 @@
 
 ## Current Snapshot
 - Last Updated: 2026-09-11
-- Phase: 1.1.3 本地四类包与两处 G 盘分发完成；未发布 GitHub
-- Branch: main；本轮修复已本地提交、未推送，原有未跟踪 .impeccable/ 与 PRODUCT.md 不纳入。
+- Phase: v1.1.3 已正式发布 GitHub Release，并完成两处 G 盘分发
+- Branch: main；产品提交 46f563f 已推送，v1.1.3 标签指向该提交；原有未跟踪 .impeccable/ 与 PRODUCT.md 不纳入。
 - Fixed: Windows HTML5 拖拽；未知参数重试保护核心输入；慢启动提示恢复；根入口 boot-guard.js 404；桌面初始化失败原生提示；便携 WebView 存储与安装版隔离。
 - Reference Evidence: 截图三次本地历史均为 edits + 4 图；两个模型别名的上传字节、顺序回归通过。不能据此证明上游使用了图片，未重放付费生成；sunburst 根因未证实。
 - Verification: 226/226 Node、290/290 Python、尺寸规则、Python 编译、Studio/Rust release 构建通过。最终便携 ZIP 在中文空格临时路径、仅系统 PATH、独立 CWD/全新 WebView 下渲染通过，CDP 外部文件拖入后显示一张已解码参考图。网页最终 ZIP 离线环境准备、启动、boot-guard HTTP 返回检查通过。四类包清单/版本/SHA 与本地预检通过。
 - Distribution: 两处 G 盘（AI产出工具插件/美术/特效组/网页生图工具、网页生图站）均完成干净网页工程、网页 ZIP、桌面安装版/离线版/便携版及解压目录同步；两处全量预检通过。网页 ZIP SHA256 e3c8272bfbb4c567f4639415aed65257679a9718c9912ddd1a95d7be26f35bfb。
+- Release: https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.3 ，2026-09-11 10:36 +08:00 发布，非草稿、非预发布，设为 latest；四类包共 12 个附件全部上传并逐一核对 SHA256 与本地一致。
 - User App: 用户退出旧版后执行测试，测试实例已清理，原 I:/Program/NM Image Studio 程序已恢复普通启动，未替换其安装文件。
 - Limits: 未实际异机、无 WebView2 干净系统或覆盖安装验收；无 Authenticode/自动更新验收。便携版仍需 WebView2，新电脑优先离线安装版。详见 docs/v1.1.3-review.md。
 
