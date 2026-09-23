@@ -1,10 +1,10 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-09-23（v1.1.4 正式发布前验收与 G 盘同步完成）
-- Current task: 用户明确要求正式发布 v1.1.4；发布前回归通过，四类本地包齐全，两处 G 盘网页与桌面分发已同步并核验，下一步提交/推送/tag/GitHub Release。
-- Verification: Python 294/294、Node 229/229、Rust 6/6、py_compile、四包校验、本地及两处 G 盘预检、网页 ZIP 离线启动、桌面 frozen 后端启动与 mock n=3→3 图均通过；G 盘两处四类分发包 SHA256 与本地一致。
-- Boundary: 旧客户端所需原 Tauri 签名私钥仍未找到，本版不伪造或关闭验签；1.1.3 及以前需手动安装 1.1.4。用户安装版仍在运行，未覆盖，也未做新便携版原生窗口烟测。
+- Last Updated: 2026-09-23（v1.1.4 正式发布完成）
+- Current task: 产品提交 `8a7a10b` 已推送并标记 `v1.1.4`；正式 GitHub Release 为 https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.4 ，非草稿、非预发布，设为 latest。两处 G 盘分发已同步。
+- Verification: Python 294/294、Node 229/229、Rust 6/6、py_compile、四包校验、本地及两处 G 盘预检、网页 ZIP 离线启动、桌面 frozen 后端启动与 mock n=3→3 图均通过；G 盘两处四类分发包 SHA256 与本地一致；GitHub 12 个附件的大小与 SHA256 digest 逐一等于本地，普通安装版和网页包 Range 请求均返回 206（仅取 1 字节）。
+- Boundary: 旧客户端所需原 Tauri 签名私钥仍未找到，本版没有伪造或关闭验签；1.1.3 及以前需手动安装 1.1.4。用户安装版仍在运行，未覆盖，也未做新便携版原生窗口烟测或完整旧版升级验收。
 
 ## Previous Snapshot — 2026-09-23 附加提示词命名
 - Last Updated: 2026-09-23（「附加提示词」命名确认并纳入本地 1.1.4 四类包）

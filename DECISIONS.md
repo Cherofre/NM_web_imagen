@@ -5,7 +5,7 @@
 ## 2026-09-23 - v1.1.4 正式发布
 - Status: active
 - Decision: 用户明确授权发布 v1.1.4 并同步 G 盘；发布四类已验证的手动分发包及各自 manifest/SHA256，共 12 个附件。原 Tauri 签名私钥未找到，不上传不能验签的 updater/feed，发行说明明确旧版需手动安装一次。
-- Evidence: 两处 G 盘干净目录与 ZIP 预检通过、四类包与本地 SHA256 一致；发布前 Python 294/294、Node 229/229、Rust 6/6 等验收通过。
+- Evidence: 两处 G 盘干净目录与 ZIP 预检通过、四类包与本地 SHA256 一致；发布前 Python 294/294、Node 229/229、Rust 6/6 等验收通过。`v1.1.4` 正式 Release 已设为 latest，12 个附件的远端 SHA256 digest 与本地逐一一致。
 
 ## 2026-09-23 - 附加提示词命名
 - Status: active

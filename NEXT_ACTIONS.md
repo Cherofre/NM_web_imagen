@@ -1,16 +1,17 @@
 # Next Actions
 
-## Now (2026-09-23 v1.1.4 正式发布)
+## Now (2026-09-23 v1.1.4 已正式发布)
 - [x] 发布前 Python 294/294、Node 229/229、Rust 6/6、四包校验、网页离线启动及 frozen 后端 mock 验证通过。
 - [x] 两处 G 盘干净网页工程、网页 ZIP、桌面三类包及解压便携版同步；各处预检和四类包 SHA256 对照通过。
-- [ ] 提交并推送 1.1.4 产品源码，创建并推送 `v1.1.4` 标签。
-- [ ] 用中文发行说明创建正式 GitHub Release，上传四类包及对应 manifest/SHA256，共 12 个附件，逐一核验大小和 SHA256。
-- [ ] 发布后核对 latest 指向 v1.1.4；用户需手动安装此次升级，当前运行的旧版不覆盖。
+- [x] 产品提交 `8a7a10b` 已推送，`v1.1.4` 标签指向该提交。
+- [x] 中文正式 GitHub Release 已发布为 latest，四类包及对应 manifest/SHA256 共 12 个附件，远端大小和 SHA256 逐一核验通过。
+- [ ] 用户退出旧版后手动安装 1.1.4 并复核原生窗口；当前运行的安装版未覆盖。
+- [ ] 如后续希望旧客户端恢复应用内直装更新，需找回与内置公钥匹配的原 Tauri 签名私钥，再生成并验证签名 updater/feed。
 
-### Handoff Notes — v1.1.4 发布中
-- Start here: docs/release-notes-v1.1.4.md、_release/desktop、_release/web 与两处 G 盘 1.1.4 分发。
-- Do not redo: 完整回归、包构建、两处 G 同步及哈希对照已通过。
-- Verify next: GitHub Release 的 tag、latest、12 附件及远端大小/SHA256。
+### Handoff Notes — v1.1.4 已发布
+- Start here: https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.4 、docs/release-notes-v1.1.4.md 与两处 G 盘 1.1.4 分发。
+- Do not redo: 完整回归、包构建、两处 G 同步、Release 12 附件 SHA256 对照已通过。
+- Verify next: 用户退出旧版后的手动安装与原生窗口体验；如找回私钥再单独验证签名更新。
 - Do not claim: 旧客户端自动发现或应用内直装此版、用户安装版已覆盖、原生窗口或跨机器安装已验收。
 
 ## Now (2026-09-23 附加提示词命名)
