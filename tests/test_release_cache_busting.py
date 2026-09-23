@@ -449,7 +449,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.1.3", version)
+        self.assertEqual("1.1.4", version)
 
     def test_studio_about_pane_fallback_matches_the_release_version(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()

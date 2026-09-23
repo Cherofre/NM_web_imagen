@@ -110,7 +110,13 @@ export function imageModelSelectValue(
   return normalizeModelIdList(known).includes(model) ? model : "custom";
 }
 
-/** Merge a freshly fetched catalogue into the stored list, keeping the current model. */
+/** Replace a successfully fetched catalogue, dropping removed ids and selection. */
+export function refreshImageModelOptions(fetched: unknown, currentModel: string): { models: string[]; model: string } {
+  const models = normalizeModelIdList(fetched);
+  return { models, model: models.includes(currentModel) ? currentModel : models[0] ?? "" };
+}
+
+/** Remember an explicitly selected/custom model without discarding the catalogue. */
 export function mergeImageModelOptions(
   storedOptions: unknown,
   fetched: unknown,
@@ -167,4 +173,3 @@ export function storedImageModelIds(storedOptions: unknown, engine?: AppEngineId
   const stored = decodeModelOptions(storedOptions);
   return engine ? filterImageModelsForEngine(stored, engine) : stored;
 }
-

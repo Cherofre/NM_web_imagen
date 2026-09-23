@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -12,6 +12,7 @@ use url::Url;
 const PORTABLE_ENDPOINT: &str =
     "https://github.com/Cherofre/NM_web_imagen/releases/latest/download/portable-latest.json";
 const RELEASE_PAGE: &str = "https://github.com/Cherofre/NM_web_imagen/releases/latest";
+const RELEASE_API: &str = "https://api.github.com/repos/Cherofre/NM_web_imagen/releases/latest";
 
 pub struct PendingDesktopUpdate {
     pub update: Update,
@@ -35,10 +36,16 @@ pub struct DesktopUpdateInfo {
     pub release_page: String,
     pub package_url: Option<String>,
     pub package_name: Option<String>,
+    pub manual_download: bool,
 }
 
 #[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "event",
+    content = "data"
+)]
 pub enum DesktopDownloadEvent {
     Started {
         content_length: Option<u64>,
@@ -79,6 +86,7 @@ fn update_info(update: Option<&Update>, current_version: String, mode: &str) -> 
             release_page: RELEASE_PAGE.to_string(),
             package_url: None,
             package_name: None,
+            manual_download: false,
         };
     };
     DesktopUpdateInfo {
@@ -91,11 +99,65 @@ fn update_info(update: Option<&Update>, current_version: String, mode: &str) -> 
         release_page: raw_string(update, "releasePage").unwrap_or_else(|| RELEASE_PAGE.to_string()),
         package_url: Some(update.download_url.to_string()),
         package_name: raw_string(update, "package"),
+        manual_download: false,
     }
 }
 
 fn updater_error(error: impl std::fmt::Display) -> String {
     format!("desktop updater error: {error}")
+}
+
+// Release discovery is independent of signed installation. Never download or
+// execute unsigned artifacts through the updater when its feed is unavailable.
+fn release_info(
+    value: &serde_json::Value,
+    current: &str,
+    mode: &str,
+) -> Result<DesktopUpdateInfo, String> {
+    if value["draft"].as_bool() != Some(false) || value["prerelease"].as_bool() != Some(false) {
+        return Err(updater_error("not a stable public release"));
+    }
+    let version = value["tag_name"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_start_matches('v');
+    let latest = semver::Version::parse(version).map_err(updater_error)?;
+    let installed = semver::Version::parse(current).map_err(updater_error)?;
+    if !latest.pre.is_empty() {
+        return Err(updater_error("prerelease version is not supported"));
+    }
+    let available = latest > installed;
+    Ok(DesktopUpdateInfo {
+        available,
+        current_version: current.to_string(),
+        version: available.then(|| version.to_string()),
+        notes: value["body"].as_str().map(ToOwned::to_owned),
+        published_at: value["published_at"].as_str().map(ToOwned::to_owned),
+        mode: mode.to_string(),
+        release_page: RELEASE_PAGE.to_string(),
+        package_url: None,
+        package_name: None,
+        manual_download: available,
+    })
+}
+
+async fn check_release(current: &str, mode: &str) -> Result<DesktopUpdateInfo, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent("NM-Image-Studio-updater")
+        .build()
+        .map_err(updater_error)?;
+    let value = client
+        .get(RELEASE_API)
+        .send()
+        .await
+        .map_err(updater_error)?
+        .error_for_status()
+        .map_err(updater_error)?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(updater_error)?;
+    release_info(&value, current, mode)
 }
 
 fn portable_download_name(update: &Update) -> String {
@@ -171,19 +233,36 @@ pub async fn desktop_check_update(
     let update = if mode == "desktop-portable" {
         let endpoint = Url::parse(PORTABLE_ENDPOINT).map_err(updater_error)?;
         app.updater_builder()
+            .timeout(Duration::from_secs(20))
             .endpoints(vec![endpoint])
             .map_err(updater_error)?
             .build()
             .map_err(updater_error)?
             .check()
             .await
-            .map_err(updater_error)?
+            .map_err(updater_error)
     } else {
-        app.updater()
+        app.updater_builder()
+            .timeout(Duration::from_secs(20))
+            .build()
             .map_err(updater_error)?
             .check()
             .await
-            .map_err(updater_error)?
+            .map_err(updater_error)
+    };
+    let update = match update {
+        Ok(update) => update,
+        Err(feed_error) => {
+            let info = check_release(&current_version, &mode)
+                .await
+                .map_err(|error| format!("{feed_error}; release check: {error}"))?;
+            updater
+                .pending
+                .lock()
+                .map_err(|_| updater_error("updater state lock is poisoned"))?
+                .take();
+            return Ok(info);
+        }
     };
     let info = update_info(update.as_ref(), current_version, &mode);
     let mut pending = updater
@@ -205,13 +284,15 @@ pub async fn desktop_download_update(
     on_event: Channel<DesktopDownloadEvent>,
 ) -> Result<DesktopDownloadResult, String> {
     let mode = runtime.info.mode.to_string();
-    let pending_update = updater
+    let mut pending_update = updater
         .pending
         .lock()
         .map_err(|_| updater_error("updater state lock is poisoned"))?
         .as_ref()
         .map(|value| value.update.clone())
         .ok_or_else(|| updater_error("no update is waiting to be downloaded"))?;
+    // Checking a tiny manifest and downloading a full package need different limits.
+    pending_update.timeout = Some(Duration::from_secs(15 * 60));
     let mut downloaded = 0_u64;
     let mut started = false;
     let bytes = pending_update
@@ -316,5 +397,75 @@ pub fn desktop_open_release_page() -> Result<(), String> {
         Err(updater_error(
             "opening release pages is only supported on Windows",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn release(version: &str) -> serde_json::Value {
+        json!({"tag_name": version, "draft": false, "prerelease": false, "body": "Changes"})
+    }
+
+    #[test]
+    fn missing_signed_feed_can_offer_manual_update_without_installable_artifact() {
+        for mode in ["desktop-installed", "desktop-portable"] {
+            let info = release_info(&release("v1.1.4"), "1.1.3", mode).unwrap();
+            assert!(info.available && info.manual_download);
+            assert_eq!(info.version.as_deref(), Some("1.1.4"));
+            assert!(info.package_url.is_none());
+            assert_eq!(info.mode, mode);
+        }
+    }
+
+    #[test]
+    fn release_comparison_uses_semver_and_never_offers_downgrade() {
+        assert!(
+            release_info(&release("v1.1.10"), "1.1.9", "desktop-installed")
+                .unwrap()
+                .available
+        );
+        for version in ["v1.1.4", "v1.1.3"] {
+            let info = release_info(&release(version), "1.1.4", "desktop-installed").unwrap();
+            assert!(!info.available && !info.manual_download);
+        }
+    }
+
+    #[test]
+    fn release_discovery_rejects_invalid_draft_and_prerelease_metadata() {
+        for version in ["garbage", "v1.1.5-beta.1"] {
+            assert!(release_info(&release(version), "1.1.4", "desktop-installed").is_err());
+        }
+        for flag in ["draft", "prerelease"] {
+            let mut value = release("v1.1.5");
+            value[flag] = json!(true);
+            assert!(release_info(&value, "1.1.4", "desktop-installed").is_err());
+        }
+        assert!(release_info(&json!({}), "1.1.4", "desktop-installed").is_err());
+    }
+
+    #[test]
+    fn progress_wire_format_matches_typescript_listener() {
+        assert_eq!(
+            serde_json::to_value(DesktopDownloadEvent::Started {
+                content_length: Some(100)
+            })
+            .unwrap(),
+            json!({"event": "started", "data": {"contentLength": 100}})
+        );
+        assert_eq!(
+            serde_json::to_value(DesktopDownloadEvent::Progress {
+                downloaded: 50,
+                content_length: Some(100)
+            })
+            .unwrap(),
+            json!({"event": "progress", "data": {"downloaded": 50, "contentLength": 100}})
+        );
+        assert_eq!(
+            serde_json::to_value(DesktopDownloadEvent::Finished).unwrap(),
+            json!({"event": "finished"})
+        );
     }
 }

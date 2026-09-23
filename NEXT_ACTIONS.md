@@ -1,6 +1,79 @@
 # Next Actions
 
-## Now
+## Now (2026-09-23 v1.1.4 正式发布)
+- [x] 发布前 Python 294/294、Node 229/229、Rust 6/6、四包校验、网页离线启动及 frozen 后端 mock 验证通过。
+- [x] 两处 G 盘干净网页工程、网页 ZIP、桌面三类包及解压便携版同步；各处预检和四类包 SHA256 对照通过。
+- [ ] 提交并推送 1.1.4 产品源码，创建并推送 `v1.1.4` 标签。
+- [ ] 用中文发行说明创建正式 GitHub Release，上传四类包及对应 manifest/SHA256，共 12 个附件，逐一核验大小和 SHA256。
+- [ ] 发布后核对 latest 指向 v1.1.4；用户需手动安装此次升级，当前运行的旧版不覆盖。
+
+### Handoff Notes — v1.1.4 发布中
+- Start here: docs/release-notes-v1.1.4.md、_release/desktop、_release/web 与两处 G 盘 1.1.4 分发。
+- Do not redo: 完整回归、包构建、两处 G 同步及哈希对照已通过。
+- Verify next: GitHub Release 的 tag、latest、12 附件及远端大小/SHA256。
+- Do not claim: 旧客户端自动发现或应用内直装此版、用户安装版已覆盖、原生窗口或跨机器安装已验收。
+
+## Now (2026-09-23 附加提示词命名)
+- [x] 用户确认名称「附加提示词」后，统一桌面/窄屏/弹窗及英文对应文案，保持原有功能。
+- [x] Node 229/229、Studio 构建与窄屏显示验证通过；本地四类 1.1.4 包已重建并通过清单、网页离线启动及打包后端 mock 验证。
+- [ ] 用户安装现有本地 1.1.4 包后，复核原生窗口显示；当前安装版未被覆盖。
+- [ ] GitHub 发布及 G 盘同步仍待用户后续请求；原 Tauri 更新签名密钥限制继续有效。
+
+## Now (2026-09-23 配置弹窗滚动修复)
+- [x] 修复开启聊天后模型字段和底部按钮被裁切的问题，保持原生 select，表单独立滚动。
+- [x] Playwright 复现原问题；带 mock 诊断结果的四种窗口尺寸均能滚动选择聊天模型，保存/关闭按钮可见；Node 229/229 与 Studio 构建通过。
+- [x] 四类 1.1.4 包重建、最终校验与本地发布预检通过；网页离线启动、frozen 后端启动/模拟生图通过。
+- [ ] 用户安装版仍在运行；用户使用本轮安装包更新后再验收原窗口内操作，未自动覆盖安装。
+- [ ] 发布/同步 G 盘仍待用户后续请求；原更新签名密钥限制继续有效。
+
+### 2026-09-23 Handoff Notes
+- Start here: docs/v1.1.4-config-scroll-fix.md 与本轮 _release 下的 1.1.4 包。
+- Do not redo: 窄窗口、带诊断结果的聊天模型选择已用 mock 验证；未向真实上游生成图片。
+- Verify next: 用户安装本轮 1.1.4 更新并复核实际桌面窗口；用户退出旧实例后可做便携窗口烟测。
+- Do not claim: 用户当前已安装程序自动获得修复、原生桌面覆盖升级已验证、GitHub 已发布。
+
+## Now (2026-09-17 1.1.4 已重新打包)
+- [x] 模型刷新修复、桌面更新审查和修复纳入四类 1.1.4 包。
+- [x] Node 229/229、Python 294/294、Rust 6/6；构建、四包校验、本地发布预检、网页离线启动和 frozen 后端模拟渠道验证通过。
+- [ ] 如需发布，使用本轮 _release/desktop 与 _release/web 的 1.1.4 包，先按项目规则同步 G 盘，再发布；本轮未授权发布。
+- [ ] 用户关闭正在运行的安装版后，可运行 scripts/smoke_desktop_portable.ps1 验证新便携窗口；真实旧版覆盖升级仍待验收。
+- [ ] 若找回原 Tauri 私钥，重新生成签名 updater/portable 包及两个 feed，再验证旧客户端更新；否则旧用户手动安装一次 1.1.4。
+
+### Latest Handoff Notes
+- Start here: docs/v1.1.4-updater-review.md、docs/release-notes-v1.1.4.md 和本轮四类 1.1.4 包。
+- Do not redo: 测试、构建、包校验、网页与后端烟测均已通过；用户已安装程序未被修改。
+- Verify next: 用户退出旧实例后的便携窗口烟测，或按新请求执行发布/同步。
+- Do not claim: 老客户端已可自动更新、1.1.4 已发布、完整下载/验签/替换/重启已端到端验证、已修复那一次未知日志的历史下载失败。
+
+## Now (2026-09-17 模型列表刷新)
+- [x] 修复读取列表只增不减的问题，成功读取后替换列表并移除失效的当前选择。
+- [x] 定向 Node 20/20 测试及 Studio 构建通过，网页资源已更新。
+- [ ] 桌面安装版/便携版需重新打包才包含本次修复；现有 1.1.4 包仍为 9 月 12 日构建。
+- [ ] 使用新版点击读取模型列表，核对渠道实际返回内容；本次未对真实渠道做请求验证。
+
+### Current Handoff Notes
+- Start here: studio-web/src/App.tsx 的 fetchModelListForTarget 与 imageModelOptions.ts。
+- Do not redo: 20 项定向测试及网页构建已通过。
+- Verify next: 桌面交付时重新打包并验证刷新行为。
+- Do not claim: 已安装桌面程序已更新、已有发行包包含修复、渠道必定按模型限制过滤 /v1/models。
+
+## Now (2026-09-12 v1.1.4 打包，未发布)
+- [x] 版本号同步到 1.1.4（VERSION / tauri.conf.json / Cargo.toml+Cargo.lock / App.tsx 两处 / `verify_v1_1_0_packages.ps1` 断言 / `tests/test_release_cache_busting.py` 断言）。
+- [x] 按序构建四类包：普通安装器 → 离线 WebView2 安装器 → 便携包（-SkipBuild）→ 网页包；产物在 `_release/desktop/` 与 `_release/web/`（名称含 v1.1.4，附 manifest + sha256）。
+- [x] 验证：294/294 Python、226/226 Node、`verify_v1_1_0_packages.ps1`、`release_preflight.ps1 -LocalOnly -ExpectedVersion 1.1.4`、`smoke_desktop_backend.ps1`、`release_package_smoke.ps1` 全通过；打包后端 frozen exe 对 mock 渠道 n=3→3 张（上游 n 序列 `[3,1,1,1]`）。
+- [x] 便携包渲染烟测：用户在 2026-09-12 关闭安装版后补跑，`smoke_desktop_portable.ps1 -ZipPath .\_release\desktop\NM-Image-Studio-v1.1.4-Portable-x64.zip` 通过（窗口渲染 + 外部文件拖拽成参考图）。
+- [ ] 是否提交/推送/发 Release/同步 G 盘待用户决定（本轮明确「先不发布」）。
+- [ ] 渠道恢复后建议重跑一次真实付费验收：`python .runtime\probe_gpt_count.py --url http://127.0.0.1:7861 --n 2`（当前渠道上游 503 停摆，见下）。
+
+## Now (2026-09-11 生成数量根因)
+- [x] 定位「生成数量设了没用」根因：渠道只接受 `n=1`（`400 n currently supports 1 only`），非前端/后端丢参。
+- [x] 修复 `app.py`：命中该 400 时降级 `n=1` 并逐张补齐，`meta.count_strategy` 记录 `per-image`；新增 4 个回归测试。
+- [x] 真实渠道实测：修复前同请求 400（0.7s，即用户看到的报错），修复后 `n=4` 得 4 张（110.8s，$0.1422）。详见 `docs/gpt-image-2-count-limit-root-cause.md`。
+- [ ] 桌面版生效需**重新打包后端与四类包**（源码修复不会自动进入已安装的 `nm-image-studio-backend.exe`）；是否发 v1.1.4 待用户决定。
+- [x] （2026-09-12）已完成打包：源码修复已进四类包；见上方 v1.1.4 打包小节。
+- [ ] 可选：向用户确认是否愿意承担 N 倍费用逐个验证「KB/XJ/1K/CX」等其余渠道是否也只支持单张（当前由同一判定兜底）。
+
+## Now (v1.1.3 发行遗留)
 - [x] 按用户本轮要求补发 GitHub Release v1.1.3；推送提交和标签，12 个附件 SHA256 核验一致。
 - [x] 完成 1.1.3 缺陷修复、290 Python/226 Node 回归与四类包构建。
 - [x] 最终 ZIP 通过中文路径、系统 PATH、全新 WebView、正常渲染及外部文件拖入验证；网页包启动和 boot-guard HTTP 检查通过。

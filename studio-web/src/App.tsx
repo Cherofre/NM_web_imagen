@@ -151,6 +151,7 @@ import {
   filterImageModelsForEngine,
   imageModelSelectValue,
   mergeImageModelOptions,
+  refreshImageModelOptions,
   parseModelListResponse,
   storedImageModelIds,
 } from "./imageModelOptions";
@@ -457,7 +458,7 @@ const gptChatModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gp
 /** Same seeds as the select, without the trailing "custom" sentinel. */
 const gptChatModelPresets = gptChatModelOptions.filter((item) => item !== "custom");
 /** Fallback shown for the running version when the desktop shell cannot report one. */
-const APP_VERSION_FALLBACK = "1.1.3";
+const APP_VERSION_FALLBACK = "1.1.4";
 /** The Gemini model the app ships with; the relay's catalogue is the real source. */
 const bananaModelPresets = ["gemini-3-pro-image-preview"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -1555,6 +1556,11 @@ function App() {
   const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcutBindings>(() => loadDesktopShortcutBindings());
   const [capturingShortcut, setCapturingShortcut] = useState<DesktopShortcutAction | null>(null);
   const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>("idle");
+  const desktopUpdateBusy = useRef(false);
+  const desktopUpdateStatusRef = useRef(desktopUpdateStatus);
+  desktopUpdateStatusRef.current = desktopUpdateStatus;
+  const desktopCheckRef = useRef(handleDesktopCheckUpdate);
+  desktopCheckRef.current = handleDesktopCheckUpdate;
   const [desktopUpdateInfo, setDesktopUpdateInfo] = useState<DesktopUpdateInfo | null>(null);
   const [desktopUpdateProgress, setDesktopUpdateProgress] = useState({ downloaded: 0, contentLength: null as number | null });
   const [desktopUpdateDownloadedPath, setDesktopUpdateDownloadedPath] = useState("");
@@ -2146,11 +2152,12 @@ function App() {
 
   useEffect(() => {
     if (!desktopMode || !desktopAutoCheck || typeof window === "undefined") return undefined;
-    if (!shouldAutoCheckDesktopUpdate(window.localStorage)) return undefined;
-    const timer = window.setTimeout(() => {
-      void handleDesktopCheckUpdate(true);
-    }, 7000);
-    return () => window.clearTimeout(timer);
+    const check = () => {
+      if (shouldAutoCheckDesktopUpdate(window.localStorage)) void desktopCheckRef.current(true);
+    };
+    const timer = window.setTimeout(check, 7000);
+    const interval = window.setInterval(check, 60 * 60 * 1000);
+    return () => { window.clearTimeout(timer); window.clearInterval(interval); };
   }, [desktopMode, desktopAutoCheck]);
 
   function updateErrorText(error: unknown) {
@@ -2159,7 +2166,9 @@ function App() {
   }
 
   async function handleDesktopCheckUpdate(silent = false) {
-    if (!desktopMode) return;
+    if (!desktopMode || desktopUpdateBusy.current) return;
+    if (["readyToInstall", "portableDownloaded", "installing"].includes(desktopUpdateStatusRef.current)) return;
+    desktopUpdateBusy.current = true;
     setDesktopUpdateStatus("checking");
     setDesktopUpdateError("");
     try {
@@ -2176,19 +2185,22 @@ function App() {
       setDesktopUpdateStatus("failed");
       setDesktopUpdateError(updateErrorText(error));
       if (!silent) setNotice(t("desktop.updateCheckFailed"));
+    } finally {
+      desktopUpdateBusy.current = false;
     }
   }
 
   async function handleDesktopDownloadUpdate() {
-    if (!desktopUpdateInfo?.available) return;
+    if (!desktopUpdateInfo?.available || desktopUpdateInfo.manualDownload || desktopUpdateBusy.current) return;
+    desktopUpdateBusy.current = true;
     setDesktopUpdateStatus("downloading");
     setDesktopUpdateError("");
     setDesktopUpdateProgress({ downloaded: 0, contentLength: null });
     try {
       const result = await downloadDesktopUpdate((event: DesktopDownloadEvent) => {
-        if (event.event === "Started") {
+        if (event.event === "started") {
           setDesktopUpdateProgress((current) => ({ ...current, contentLength: event.data.contentLength }));
-        } else if (event.event === "Progress") {
+        } else if (event.event === "progress") {
           setDesktopUpdateProgress({ downloaded: event.data.downloaded, contentLength: event.data.contentLength });
         }
       });
@@ -2201,15 +2213,19 @@ function App() {
     } catch (error) {
       setDesktopUpdateStatus("failed");
       setDesktopUpdateError(updateErrorText(error));
+    } finally {
+      desktopUpdateBusy.current = false;
     }
   }
 
   async function handleDesktopInstallUpdate() {
+    if (desktopUpdateBusy.current) return;
     if (activeQueueCount > 0) {
       setDesktopUpdateStatus("readyToInstall");
       setDesktopUpdateError(t("desktop.updateInstallBlocked", { count: activeQueueCount }));
       return;
     }
+    desktopUpdateBusy.current = true;
     setDesktopUpdateStatus("installing");
     setDesktopUpdateError("");
     try {
@@ -2217,6 +2233,8 @@ function App() {
     } catch (error) {
       setDesktopUpdateStatus("failed");
       setDesktopUpdateError(updateErrorText(error));
+    } finally {
+      desktopUpdateBusy.current = false;
     }
   }
 
@@ -2912,21 +2930,19 @@ function App() {
         return;
       }
       const hidden = fetched.length - models.length;
-      const currentModel = isBanana ? bananaForm.model_type : isChat ? gptForm.chat_model : gptForm.model;
-      const merged = mergeImageModelOptions(
-        isBanana ? bananaForm.model_type_options : isChat ? gptForm.chat_model_options : gptForm.model_options,
-        models,
-        currentModel,
-        isChat ? undefined : isBanana ? "banana" : "gpt-image-2",
-      );
+      const merged = models;
       if (isBanana) {
-        setBananaForm((current) => isCurrentRequest() ? ({ ...current, model_type_options: encodeModelOptions(merged) }) : current);
+        setBananaForm((current) => isCurrentRequest() ? ({
+          ...current,
+          model_type: refreshImageModelOptions(models, current.model_type).model,
+          model_type_options: encodeModelOptions(merged),
+        }) : current);
       } else {
         setGptForm((current) => isCurrentRequest() ? ({
           ...current,
           ...(isChat
-            ? { chat_model_options: encodeModelOptions(merged) }
-            : { model_options: encodeModelOptions(merged) }),
+            ? { chat_model: refreshImageModelOptions(models, current.chat_model).model, chat_model_options: encodeModelOptions(merged) }
+            : { model: refreshImageModelOptions(models, current.model).model, model_options: encodeModelOptions(merged) }),
         }) : current);
       }
       // The profile editor shows this inline (it is about saving the profile);
@@ -7074,7 +7090,7 @@ function App() {
                     <p>{t("desktop.aboutHint")}</p>
                   </div>
                   <dl className="desktop-about-list">
-                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.3"}</dd></div>
+                    <div><dt>{t("desktop.appVersion")}</dt><dd>{desktopRuntime.version || "1.1.4"}</dd></div>
                     <div><dt>{t("desktop.runtime")}</dt><dd>Tauri 2 + FastAPI</dd></div>
                     <div><dt>{t("desktop.dataDirectory")}</dt><dd><code>{desktopRuntime.dataRoot}</code></dd></div>
                   </dl>
@@ -7102,6 +7118,7 @@ function App() {
                           <strong>{t("desktop.updateAvailable", { version: desktopUpdateInfo.version })}</strong>
                           {desktopUpdatePublishedAt && <span>{t("desktop.updatePublished", { date: desktopUpdatePublishedAt })}</span>}
                           {desktopUpdateInfo.notes && <p>{desktopUpdateInfo.notes}</p>}
+                          {desktopUpdateInfo.manualDownload && <span>{t("desktop.updateManualHint")}</span>}
                         </div>
                       )}
                       {desktopUpdateStatus === "downloading" && (
@@ -7127,6 +7144,7 @@ function App() {
                         <div className="desktop-update-message is-error">
                           <strong>{t("desktop.updateFailed")}</strong>
                           <span>{desktopUpdateError || t("desktop.updateRetryHint")}</span>
+                          <span>{t("desktop.updateBrowserFallback")}</span>
                         </div>
                       )}
                     </div>
@@ -7136,7 +7154,9 @@ function App() {
                       )}
                       {desktopUpdateStatus === "available" && (
                         <>
-                          <button type="button" onClick={() => void handleDesktopDownloadUpdate()}>{t("desktop.updateDownload")}</button>
+                          {desktopUpdateInfo?.manualDownload
+                            ? <button type="button" onClick={() => void openDesktopReleasePage()}>{t("desktop.updateManualDownload")}</button>
+                            : <button type="button" onClick={() => void handleDesktopDownloadUpdate()}>{t("desktop.updateDownload")}</button>}
                           <button type="button" onClick={snoozeDesktopUpdate}>{t("desktop.updateLater")}</button>
                         </>
                       )}

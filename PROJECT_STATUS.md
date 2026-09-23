@@ -1,6 +1,56 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-09-23（v1.1.4 正式发布前验收与 G 盘同步完成）
+- Current task: 用户明确要求正式发布 v1.1.4；发布前回归通过，四类本地包齐全，两处 G 盘网页与桌面分发已同步并核验，下一步提交/推送/tag/GitHub Release。
+- Verification: Python 294/294、Node 229/229、Rust 6/6、py_compile、四包校验、本地及两处 G 盘预检、网页 ZIP 离线启动、桌面 frozen 后端启动与 mock n=3→3 图均通过；G 盘两处四类分发包 SHA256 与本地一致。
+- Boundary: 旧客户端所需原 Tauri 签名私钥仍未找到，本版不伪造或关闭验签；1.1.3 及以前需手动安装 1.1.4。用户安装版仍在运行，未覆盖，也未做新便携版原生窗口烟测。
+
+## Previous Snapshot — 2026-09-23 附加提示词命名
+- Last Updated: 2026-09-23（「附加提示词」命名确认并纳入本地 1.1.4 四类包）
+- Current task: 用户选定输入框下方入口名为「附加提示词」；桌面、窄屏与弹窗标题统一，英文对应 Extra prompts；功能和字段未改。
+- Verification: Node 229/229、Studio 构建与 390px 窄屏实图检查通过；四类包版本/清单、本地预检、网页包离线启动、桌面 sidecar 启动及 mock 渠道 n=3→3 图通过；网页与便携包内 JS 均与当前构建一致且含新文案。
+- Packages: 本地 _release/desktop 与 _release/web 的四类 1.1.4 包已重建；未提交、未同步 G 盘、未发布，也未替换用户正在运行的安装版。
+
+## Previous Snapshot — 2026-09-23 配置弹窗滚动修复
+- Last Updated: 2026-09-23（1.1.4 配置弹窗滚动修复，四类包已更新）
+- Current task: 修复启用聊天后模型和底部按钮被裁切；配置弹窗四行布局、表单独立滚动，保持标题和操作按钮可见。
+- Verification: Playwright 复现旧版溢出并验证修复；开启聊天 + mock 诊断结果，1280×720、960×540、640×450、390×600 均可滚动选择模型且按钮在窗口内；Node 229/229、Studio/Rust release 构建通过；四包校验、本地发布预检、网页离线启动、打包后端启动与 mock n=3→3 图通过。
+- Packages: _release/desktop 与 _release/web 四类 1.1.4 包已更新。离线安装包使用本次编译产物经 Tauri bundle 生成；便携包 EXE/JS/CSS 与本次构建逐项 SHA256 一致。当前资源 index-DId2HIQu.js / index-C46Beuze.css；下方旧包哈希与资源名不代表本轮产物。
+- Evidence: docs/v1.1.4-config-scroll-fix.md 与 output/playwright/config-chat-scroll-fixed.png。
+- Limits: 未发布/同步 G 盘/提交，用户旧安装版仍在运行，未覆盖安装或进行本轮原生窗口烟测；浏览器 UI 验收不等同于已安装程序生效。
+
+## Previous Snapshot — 2026-09-17 rebuilt packages
+- Last Updated: 2026-09-17（1.1.4 模型刷新 + 桌面更新修复，四类包已重建）
+- Current task: 四类 1.1.4 包已重建，位于 _release/desktop 与 _release/web；纳入模型刷新替换语义、GitHub 版本发现兜底、定时重查、操作去重、下载事件协议与失败指引。
+- Verification: Node 229/229、Python 294/294、Rust 6/6、Studio/Rust release 构建通过；四包校验、LocalOnly 发布预检、网页包离线启动、打包后端启动与 mock n=3→3 图均通过；便携 ZIP 内 EXE/后端/JS 与当前构建 SHA256 一致。当前前端 index-B2UqdnaP.js，经典脚本解析通过。
+- Online evidence: GitHub latest 为 v1.1.3，两种 updater feed 均 HTTP 404；普通 Setup 与 Portable 附件 Range 请求均 206（仅读取 1 字节，没有完整下载）。
+- Limits: 未定位原签名私钥，不能生成旧公钥认可的更新；未发布/同步 G 盘/提交。已安装旧客户端需手动升级一次才能获得 GitHub 兜底。用户安装版正在运行，本轮未关闭它、未执行便携窗口烟测、未覆盖安装或验收完整旧版升级。审查见 docs/v1.1.4-updater-review.md。下方旧包哈希已过时，以本轮 manifest 为准。
+
+## Previous Snapshot — 2026-09-17 model refresh
+- Last Updated: 2026-09-17（模型列表刷新修复）
+- Current task: Studio 读取模型成功后以新列表替换旧缓存；当前模型被移除时切到第一项，仍有效则保留；失败/空响应不改配置。手动添加模型继续保留原列表。
+- Verification: 模型列表、配置切换、聊天设置定向 Node 测试 20/20 通过；TypeScript + Vite 构建通过，网页资源已更新。
+- Limits: 此次仅源码与网页资源更新；未重打桌面包、未替换已安装程序、未发布/同步 G 盘；没有向真实渠道发起生成请求。下方 9 月 12 日包不含此次修复。
+
+## Previous Snapshot — 2026-09-12 packages
+- Last Updated: 2026-09-12（v1.1.4 打包，未发布）
+- Phase: 生成数量修复已进源码与四类包，本地验证通过；**未提交、未推送、未发 Release、未同步 G 盘**（用户选择「先不发布」）。
+- Branch: main（工作区含未提交改动：app.py、tests、VERSION→1.1.4、tauri.conf/Cargo/App.tsx 版本、docs、PROJECT_STATUS/NEXT_ACTIONS）。原有未跟踪 .impeccable/ 与 PRODUCT.md 不纳入。
+- Fix: `app.py` 新增 `upstream_rejects_multiple_images()`，渠道以「n currently supports 1 only」拒绝 `n>1` 时降级 `n=1` 并逐张补齐，`meta.count_strategy` 记录 `single-call`/`per-image`。根因与证据见 `docs/gpt-image-2-count-limit-root-cause.md`。
+- Packages(Draft): 普通安装器 33,475,919 字节 `7e77a74865802bf98ac14faaeba84ad2fdbb53f7ef8e4bcc81770629c0b9cc31`；离线 WebView2 安装器 248,986,456 字节 `228f4b544e974a6afad5893c82e6d237cd562621a9bcc016951c8694640419a0`；便携包 867 项 53,742,099 字节 `4e7e498a59e414f12284cb74fa38e0748dda3bd4d91dfd321969d986a5cdb6ad`；网页包 29,346,666 字节 `cf29f1b58847fcb8ea6712fcdba5284ff4cbd7d2410901f0473c5221d965ee8d`。Studio 资源 `index-oA7RxA01.js` / `index-CSOpIyAR.css`。
+- Verification: 294/294 Python、226/226 Node 通过；`verify_v1_1_0_packages.ps1` 通过（四包版本一致且隔离）；`release_preflight.ps1 -ExpectedVersion 1.1.4 -LocalOnly` 通过；`smoke_desktop_backend.ps1` 通过（1.1.4、无 token 401）；**便携包渲染烟测通过**（`page readyState=complete rootChildren=1`、界面渲染、外部文件拖拽生成 1 张参考图）；网页包 `release_package_smoke.ps1` 通过（离线运行时就绪、boot 检查通过）；**打包后端（frozen exe）对 mock 渠道 n=3 → 3 张、上游 n 序列 [3,1,1,1]、count_strategy=per-image**；重建后的 Studio 页面已截图复核。
+- Blocker(外部): 验收当天真实渠道上游停摆——直连 `64.186.244.43:12001` 模型 `「YS」gpt-image-2.5-sunburst` 的 `n=1` 返回 `503 No active tokens available in the pool`（`n>1` 仍稳定返回 `400 n currently supports 1 only`）。源码后端与打包后端同一时刻表现一致（均 502「上游服务返回异常」），证明不是打包或修复引入的问题。
+- Limits: 四类包均未异机安装验收、未发布、未同步 G 盘；工作区改动未提交（用户选择先留在工作区）。便携包渲染烟测受单实例限制、需先关闭安装版，已在用户关闭后补跑通过。
+
+## Previous Snapshot — 生成数量根因（2026-09-11）
+- Phase: 「生成数量无效」根因已定位并修复，未发版（桌面端需重新打包后端才生效）。
+- Root Cause: 上游渠道只接受单张，`n>1` 直接 `400 {"message": "n currently supports 1 only"}`（`/v1/images/generations` 与 `/v1/images/edits` 均如此，0.7s 速拒、未计费）。Studio 一直正确发送 `n`；v1.1.3 起 `n` 又受「未知参数剔除」保护，因此首次请求被拒后补齐循环根本没机会执行，用户只看到「上游服务拒绝了请求，请检查模型与生成参数。」
+- Fix: `app.py` 新增 `upstream_rejects_multiple_images()` 判定（只认数量限制为 1 的说法），`post_gpt_payload` 命中时降级为 `n=1` 重试，补齐循环在 `per-image` 模式下逐张请求，`meta.count_strategy` 标记 `single-call`/`per-image`。
+- Verification: 真实渠道同请求修复前 400 / 修复后 `n=4`→4 张（110.76s、$0.1422、`count_strategy=per-image`）；294 Python / 27 Node 通过；`py_compile` 通过；`start_web.ps1` 真启动 `/api/health` 200。证据见 `docs/gpt-image-2-count-limit-root-cause.md`、`outputs/count-fix-evidence/`。
+- Limits: N 张 = N 次请求（N 倍时间与费用，渠道能力决定）；其余「」渠道是否同样只支持单张未逐个付费验证；桌面版需重新打包才会带上该修复。
+
+## Previous v1.1.3 Snapshot
 - Last Updated: 2026-09-11
 - Phase: v1.1.3 已正式发布 GitHub Release，并完成两处 G 盘分发
 - Branch: main；产品提交 46f563f 已推送，v1.1.3 标签指向该提交；原有未跟踪 .impeccable/ 与 PRODUCT.md 不纳入。

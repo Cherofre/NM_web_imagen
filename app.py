@@ -1055,6 +1055,38 @@ def extract_upstream_control_message(response: requests.Response) -> str:
     return compact_text(response_text_utf8_first(response), 1000)
 
 
+# 有些渠道一次只允许生成 1 张（真实渠道回应：400「n currently supports 1 only」）。
+# 这类拒绝不该让「生成数量」失效：识别后把 n 降级为 1，再由补齐循环逐张生成。
+_COUNT_LIMIT_ONLY_ONE_PATTERN = re.compile(
+    r"only\s+1\s+(?:image|images|result|results|picture|pictures)"
+    r"|(?:每次|一次)(?:只|仅)(?:能|可)?\s*(?:生成|返回|输出|出)?\s*1\s*张",
+    re.IGNORECASE,
+)
+_COUNT_LIMIT_TERM_PATTERN = re.compile(r"(?:\bn\b|数量|张数|张|count)", re.IGNORECASE)
+_COUNT_LIMIT_VERB_PATTERN = re.compile(
+    r"(?:supports?|allows?|accepts?|requires?|must\s+be|limited\s+to|max(?:imum)?(?:\s+of)?)\s*"
+    r"(?:n\s*=\s*)?1\b(?:\s+only)?"
+    r"|(?:最多|只支持|仅支持|只能|仅能)(?:生成|返回|输出|出)?\s*(?:为|是)?\s*1"
+    r"|not\s+support\w*|unsupport\w*|不支持",
+    re.IGNORECASE,
+)
+
+
+def upstream_rejects_multiple_images(message: str) -> bool:
+    """判断上游 400 文本是否表示“一次只能出 1 张”，用于把 n>1 降级为逐张生成。
+
+    只认「数量被限制为 1」的说法，避免把无关的 400（内容审核、尺寸、鉴权）误判成数量限制。
+    """
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _COUNT_LIMIT_ONLY_ONE_PATTERN.search(text):
+        return True
+    if not _COUNT_LIMIT_TERM_PATTERN.search(text):
+        return False
+    return bool(_COUNT_LIMIT_VERB_PATTERN.search(text))
+
+
 def create_requests_session(bypass_proxy: bool = False) -> requests.Session:
     session = requests.Session()
     if bypass_proxy:
@@ -5188,9 +5220,10 @@ def create_app() -> FastAPI:
         )
         fallback_api_url = fallback_yuzapi_image_url(api_url)
         used_yuzapi_fallback = False
+        count_strategy = "single-call"
 
         async def post_gpt_payload(current_payload: Dict[str, Any], current_request_kwargs: Dict[str, Any]) -> Dict[str, Any]:
-            nonlocal api_url, used_yuzapi_fallback
+            nonlocal api_url, used_yuzapi_fallback, count_strategy
             response_data: Optional[Dict[str, Any]] = None
             retry_delay = 1.0
             retryable_count = 0
@@ -5243,6 +5276,20 @@ def create_app() -> FastAPI:
                                 current_request_kwargs["data"] = current_payload
                             JOB_REGISTRY.raise_if_canceled(job_id)
                             continue
+                    if (
+                        count_strategy == "single-call"
+                        and int(current_payload.get("n") or 1) > 1
+                        and upstream_rejects_multiple_images(error_message)
+                    ):
+                        # 渠道一次只能出 1 张：把 n 降级为 1 重试，剩余张数交给补齐循环逐张生成。
+                        count_strategy = "per-image"
+                        current_payload["n"] = 1
+                        if "json" in current_request_kwargs:
+                            current_request_kwargs["json"] = current_payload
+                        if "data" in current_request_kwargs:
+                            current_request_kwargs["data"] = current_payload
+                        JOB_REGISTRY.raise_if_canceled(job_id)
+                        continue
                     raise client_http_error(
                         "E_UPSTREAM_REQUEST",
                         status_code=400,
@@ -5300,7 +5347,8 @@ def create_app() -> FastAPI:
                 JOB_REGISTRY.raise_if_canceled(job_id)
                 result_budget.ensure_image_slot()
                 remaining = min(n - len(images), result_budget.remaining_images)
-                next_payload = {**payload, "n": remaining}
+                # 渠道只接受单张时，后续每个请求都必须继续按 1 张发送，否则会被再次拒绝。
+                next_payload = {**payload, "n": 1 if count_strategy == "per-image" else remaining}
                 if resolved_endpoint == "/v1/images/edits":
                     next_request_kwargs = {"data": next_payload, "files": files}
                 else:
@@ -5342,6 +5390,7 @@ def create_app() -> FastAPI:
                 "size": normalized_size,
                 "quality": quality,
                 "n": n,
+                "count_strategy": count_strategy,
                 "seed": response_data.get("seed", seed),
                 "edit_mode": edit_mode,
                 "style_preset": style_preset,

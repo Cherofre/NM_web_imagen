@@ -38,7 +38,7 @@ test("studio translates user-visible system states without translating user cont
   assert.match(appSource, /autoSummary:\s*t\("composer\.autoSizeSummary"\)/);
   assert.match(appSource, /customPrefix:\s*t\("config\.custom"\)/);
   assert.match(i18nSource, /"composer\.autoSizeSummary": "Auto size decided by upstream"/);
-  assert.match(i18nSource, /"composer\.sessionPromptShort": "Session"/);
+  assert.match(i18nSource, /"composer\.sessionPromptShort": "Extra prompts"/);
   assert.match(i18nSource, /"composer\.sessionPromptUnsetShort": "Unset"/);
   assert.match(i18nSource, /"composer\.expandPromptShort": "Expand"/);
   assert.match(i18nSource, /"inspiration\.characterPoster\.title": "Collectible Character Poster"/);

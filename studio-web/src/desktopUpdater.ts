@@ -21,12 +21,13 @@ export type DesktopUpdateInfo = {
   releasePage: string;
   packageUrl: string | null;
   packageName: string | null;
+  manualDownload: boolean;
 };
 
 export type DesktopDownloadEvent =
-  | { event: "Started"; data: { contentLength: number | null } }
-  | { event: "Progress"; data: { downloaded: number; contentLength: number | null } }
-  | { event: "Finished" };
+  | { event: "started"; data: { contentLength: number | null } }
+  | { event: "progress"; data: { downloaded: number; contentLength: number | null } }
+  | { event: "finished" };
 
 export type DesktopDownloadResult = {
   mode: string;

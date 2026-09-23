@@ -12,6 +12,7 @@ import {
   imageModelSelectValue,
   isGeminiModelId,
   mergeImageModelOptions,
+  refreshImageModelOptions,
   normalizeModelIdList,
   parseModelListResponse,
   storedImageModelIds,
@@ -20,6 +21,31 @@ import {
 const appSource = fs.readFileSync(path.resolve("src/App.tsx"), "utf8");
 const i18nSource = fs.readFileSync(path.resolve("src/i18n.ts"), "utf8");
 const stylesSource = fs.readFileSync(path.resolve("src/styles.css"), "utf8");
+
+test("refresh removes revoked YS models including the selected model after serialization", () => {
+  const fetched = ["「KB」gpt-image-2", "「Rim」gpt-image-2.5-sunburst"];
+  const refreshed = refreshImageModelOptions(fetched, "「YS」gpt-image-2.5-sunburst");
+  assert.equal(refreshed.model, fetched[0]);
+  const saved = encodeModelOptions(refreshed.models);
+  assert.deepEqual(composerImageModelOptions(refreshed.model, saved, "gpt-image-2"), fetched);
+  assert.deepEqual(buildImageModelOptions(refreshed.model, saved).filter(item => !item.custom).map(item => item.value), fetched);
+});
+
+test("refresh preserves a still permitted selection for image, Gemini and chat", () => {
+  for (const models of [["gpt-image-2", "flare"], ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"], ["chat-a", "chat-b"]]) {
+    assert.equal(refreshImageModelOptions(models, models[1]).model, models[1]);
+    assert.equal(refreshImageModelOptions(models, "removed").model, models[0]);
+  }
+});
+
+test("fetch replaces options only after success and keeps manual model merging separate", () => {
+  const fetchSource = appSource.slice(appSource.indexOf("async function fetchModelListForTarget"), appSource.indexOf("async function fetchImageModelList"));
+  assert.doesNotMatch(fetchSource, /mergeImageModelOptions\(/);
+  assert.ok(fetchSource.indexOf("if (!payload.ok || models.length === 0)") < fetchSource.indexOf("setBananaForm("));
+  for (const field of ["model_type", "chat_model", "model"]) {
+    assert.ok(fetchSource.includes(`refreshImageModelOptions(models, current.${field}).model`));
+  }
+});
 
 test("each engine only keeps its own family from the shared catalogue", () => {
   const catalogue = [
@@ -159,7 +185,7 @@ test("select value falls back to custom for hand written models", () => {
   assert.equal(imageModelSelectValue("", "flare"), "custom");
 });
 
-test("refresh keeps fetched ids first and never drops the current model", () => {
+test("manual model merging keeps existing ids and the current model", () => {
   assert.deepEqual(
     mergeImageModelOptions("old-model", ["flare", "sunburst"], "old-model"),
     ["flare", "sunburst", "old-model"],

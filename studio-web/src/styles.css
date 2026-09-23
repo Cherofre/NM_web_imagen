@@ -3021,6 +3021,7 @@ button.primary-action:focus-visible,
 }
 
 .connection-drawer {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   width: min(780px, calc(100vw - 36px));
 }
 
@@ -3070,8 +3071,14 @@ button.primary-action:focus-visible,
 .connection-layout {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
+  align-items: start;
   gap: 14px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 2px;
 }
 
 .profile-list {

@@ -285,6 +285,37 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
                 )
                 assert_client_payload_is_sanitized(self, message)
 
+    def test_count_limit_detector_matches_real_channel_rejection(self) -> None:
+        limited_to_one = [
+            "n currently supports 1 only",
+            "N currently supports 1 only",
+            "n must be 1",
+            "n only supports 1",
+            "Invalid value for 'n': only 1 image is supported",
+            "n is limited to 1",
+            "n 只支持 1",
+            "每次只能生成 1 张",
+            "n=4 is not supported",
+            "This model only supports n=1",
+            "only 1 image can be generated per request",
+        ]
+        unrelated = [
+            "",
+            "size is not supported for this model",
+            "prompt violates our content policy",
+            "Invalid API key provided",
+            "rate limit reached, please retry later",
+            "image must be a PNG or JPEG",
+            "n must be between 1 and 10",
+            "unknown parameter: quality",
+        ]
+        for message in limited_to_one:
+            with self.subTest(message=message):
+                self.assertTrue(webapp.upstream_rejects_multiple_images(message))
+        for message in unrelated:
+            with self.subTest(message=message):
+                self.assertFalse(webapp.upstream_rejects_multiple_images(message))
+
     async def test_gpt_response_processes_only_requested_url_candidates(self) -> None:
         download_calls = []
 
@@ -1328,6 +1359,108 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual(2, len(response.json()["images"]))
         self.assertEqual(2, response.json()["meta"]["image_count"])
+
+    @staticmethod
+    def _single_image_channel_post(record):
+        """模拟只接受 n=1 的渠道：n>1 时回 400「n currently supports 1 only」，否则每次给 1 张。"""
+
+        def post(_url, **kwargs):
+            payload = kwargs.get("json") or kwargs.get("data") or {}
+            requested = int(payload.get("n") or 1)
+            record.append(requested)
+            if requested > 1:
+                return FakeJsonResponse(
+                    {
+                        "message": "n currently supports 1 only",
+                        "type": "invalid_request_error",
+                        "param": "",
+                        "code": "ERR-272507F5B8",
+                    },
+                    status_code=400,
+                )
+            return FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]})
+
+        return post
+
+    async def test_gpt_generate_still_honors_count_when_channel_only_supports_one(self) -> None:
+        upstream_n = []
+        with patch.object(
+            webapp.requests,
+            "post",
+            side_effect=self._single_image_channel_post(upstream_n),
+        ):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "「YS」gpt-image-2.5-sunburst",
+                    "n": "3",
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertEqual(3, len(body["images"]))
+        self.assertEqual(3, body["meta"]["image_count"])
+        self.assertEqual(3, body["meta"]["n"])
+        self.assertEqual("per-image", body["meta"]["count_strategy"])
+        # 先按 3 发一次被拒，随后降级为 n=1 逐张补齐，共 4 次上游请求。
+        self.assertEqual([3, 1, 1, 1], upstream_n)
+
+    async def test_gpt_edit_still_honors_count_when_channel_only_supports_one(self) -> None:
+        upstream_n = []
+        with patch.object(
+            webapp.requests,
+            "post",
+            side_effect=self._single_image_channel_post(upstream_n),
+        ):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "edit square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "「YS」gpt-image-2.5-sunburst",
+                    "api_endpoint": "/v1/images/edits",
+                    "n": "2",
+                },
+                files=[("reference_files", ("reference.png", PNG_1X1_RAW, "image/png"))],
+            )
+
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertEqual(2, len(body["images"]))
+        self.assertEqual("per-image", body["meta"]["count_strategy"])
+        self.assertEqual([2, 1, 1], upstream_n)
+
+    async def test_gpt_unrelated_400_keeps_failing_and_does_not_downgrade_count(self) -> None:
+        upstream_n = []
+
+        def policy_rejection(_url, **kwargs):
+            payload = kwargs.get("json") or kwargs.get("data") or {}
+            upstream_n.append(int(payload.get("n") or 1))
+            return FakeJsonResponse(
+                {"error": {"message": "prompt violates our content policy", "type": "invalid_request_error"}},
+                status_code=400,
+            )
+
+        with patch.object(webapp.requests, "post", side_effect=policy_rejection):
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={
+                    "prompt": "square",
+                    "api_key": "sk-test",
+                    "base_url": "https://example.com/v1",
+                    "model": "gpt-image-2",
+                    "n": "3",
+                },
+            )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("上游服务拒绝了请求，请检查模型与生成参数。", response.json()["detail"])
+        self.assertEqual([3], upstream_n)
 
     async def test_gpt_retry_budget_overflow_saves_no_partial_images_or_history(self) -> None:
         with (
