@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-09-27
+- Follow-up: 用户截图指出预览底部工具栏白底白字。已提高工具栏容器/按钮选择器优先级，使用固定深色配色隔离旧 lightbox 样式；本轮构建验证，浏览器工具因安全策略校验不可用未能读取用户标签页，显示效果待刷新复核。
 - Current task: codex/web-image-editing 分支实现网页版标注、位置评论、移除背景、擦除。
 - Boundary: 仅源码与网页资源，不调整大小、不打包、不发布、不同步 G 盘。
 - Workflow: ledger-only，沿用现有 React Studio 与单次图片调用。

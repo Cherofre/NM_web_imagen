@@ -29,8 +29,12 @@
 .image-editor .primary-action { background: #f3f4f6; color: #17191c; }
 .image-editor .primary-action:hover:not(:disabled) { background: #dbeafe; }
 .image-editor-error { margin: 0; padding: 10px 16px; color: #fecaca; background: #451e24; font-size: 13px; }
-.preview-image-edit-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 8px; background: var(--panel); }
-.preview-image-edit-tools button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); color: var(--ink); }
+/* Keep the toolbar independent of the later-loaded lightbox div/button rules. */
+.lightbox-card > .preview-image-edit-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; padding: 8px; background: #1c1e22; border-radius: 10px; }
+.lightbox-card > .preview-image-edit-tools > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 76px; height: 38px; padding: 0 14px; border: 1px solid #59616d; border-radius: 8px; background: #30343a; color: #f3f4f6; font-size: 13px; font-weight: 600; cursor: pointer; }
+.lightbox-card > .preview-image-edit-tools > button:hover:not(:disabled) { background: #454b54; }
+.lightbox-card > .preview-image-edit-tools > button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.lightbox-card > .preview-image-edit-tools > button:disabled { opacity: .5; cursor: default; }
 .lightbox-card:has(.preview-image-edit-tools) { grid-template-rows: auto minmax(0, 1fr) auto; }
 @media (max-width: 700px) {
   .image-editor-backdrop { padding: 0; }
