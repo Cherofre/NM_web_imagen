@@ -5050,6 +5050,7 @@ def create_app() -> FastAPI:
         reference_files: Optional[List[UploadFile]] = File(default=None),
         mask_file: Optional[UploadFile] = File(default=None),
         mask_encoding: str = Form("standard"),
+        image_edit_action: str = Form(""),
         # Compatibility-only field for an older cached Studio build. It is
         # intentionally ignored: masked results are never hard-composited.
         strict_mask: bool = Form(False),
@@ -5062,10 +5063,18 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="请填写提示词")
         if n < 1 or n > 10:
             raise HTTPException(status_code=400, detail="GPT Image 的数量只能是 1 到 10")
+        if image_edit_action not in {"", "annotate", "comment", "background", "erase"}:
+            raise HTTPException(status_code=400, detail="不支持的图片编辑操作")
+        if image_edit_action and api_endpoint not in {"auto", "/v1/images/edits"}:
+            raise HTTPException(status_code=400, detail="图片编辑工具需要使用 images/edits 接口")
+        if image_edit_action == "erase" and mask_file is None:
+            raise HTTPException(status_code=400, detail="擦除需要涂抹选区")
 
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)
             request_reference_assets = reference_assets
+            if image_edit_action and not reference_assets:
+                raise HTTPException(status_code=400, detail="图片编辑需要原图")
             normalized_size = normalize_gpt_size(custom_size if size == "custom" else size)
             mask_asset: Optional[Dict[str, Any]] = None
             normalized_mask_encoding = "standard"
@@ -5138,6 +5147,10 @@ def create_app() -> FastAPI:
             payload["response_format"] = response_format
         if quality != "auto":
             payload["quality"] = quality
+
+        if image_edit_action == "background":
+            payload["background"] = "transparent"
+            payload["output_format"] = "png"
 
         if negative_prompt.strip():
             payload["negative_prompt"] = negative_prompt
@@ -5267,7 +5280,7 @@ def create_app() -> FastAPI:
                     if unknown_param:
                         parameter_name = unknown_param.group(1)
                         if parameter_name in current_payload and parameter_name not in {
-                            "model", "prompt", "image", "input", "tools", "n"
+                            "model", "prompt", "image", "input", "tools", "n", "background", "output_format"
                         }:
                             current_payload.pop(parameter_name, None)
                             if "json" in current_request_kwargs:
@@ -5399,6 +5412,7 @@ def create_app() -> FastAPI:
                 "mask_used": mask_asset is not None,
                 "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
                 "mask_guidance": "visual-alpha" if mask_asset is not None else "",
+                "image_edit_action": image_edit_action,
                 "image_count": len(images),
                 "saved_count": saved_count,
                 "output_dir": "outputs",
@@ -5426,6 +5440,7 @@ def create_app() -> FastAPI:
                 "mask_used": mask_asset is not None,
                 "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
                 "mask_guidance": "visual-alpha" if mask_asset is not None else "",
+                "image_edit_action": image_edit_action,
                 "timeout": timeout,
                 "infinite_timeout": infinite_timeout,
             }

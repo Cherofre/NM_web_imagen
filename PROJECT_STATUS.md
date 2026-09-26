@@ -1,6 +1,15 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-09-27
+- Current task: codex/web-image-editing 分支实现网页版标注、位置评论、移除背景、擦除。
+- Boundary: 仅源码与网页资源，不调整大小、不打包、不发布、不同步 G 盘。
+- Workflow: ledger-only，沿用现有 React Studio 与单次图片调用。
+- Verification: Python 297/297、Node 233/233、TypeScript/Vite 构建通过；浏览器完成四模式操作、标注导出、草稿恢复、390px 擦除界面、模拟请求与重试检查。擦除上传遮罩已解码验证透明/不透明区域。
+- Runtime: 本仓库网页版已通过 start_web.ps1 -NoBrowser 启动在 http://127.0.0.1:7861/ 。实际 AI 改图与透明背景效果待用户渠道验收；没有调用付费生图接口。
+- Evidence: docs/web-image-editing.md、output/playwright/image-edit-*.png。原有 .impeccable/、PRODUCT.md 未跟踪文件不纳入本轮提交。
+
+## Previous Snapshot — v1.1.4 release
 - Last Updated: 2026-09-23（v1.1.4 正式发布完成）
 - Current task: 产品提交 `8a7a10b` 已推送并标记 `v1.1.4`；正式 GitHub Release 为 https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.4 ，非草稿、非预发布，设为 latest。两处 G 盘分发已同步。
 - Verification: Python 294/294、Node 229/229、Rust 6/6、py_compile、四包校验、本地及两处 G 盘预检、网页 ZIP 离线启动、桌面 frozen 后端启动与 mock n=3→3 图均通过；G 盘两处四类分发包 SHA256 与本地一致；GitHub 12 个附件的大小与 SHA256 digest 逐一等于本地，普通安装版和网页包 Range 请求均返回 206（仅取 1 字节）。

@@ -265,6 +265,37 @@ class ImageSafetyTests(unittest.TestCase):
 
 
 class SecurityBoundaryApiTests(unittest.TestCase):
+    def test_image_edit_background_uses_transparent_png_and_persists_action(self):
+        with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"api_key": "sk-test", "base_url": "https://example.com/v1", "prompt": "移除背景", "image_edit_action": "background"},
+                files={"reference_files": ("base.png", PNG_RGB_2X2, "image/png")},
+            )
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(1, upstream.call_count)
+        self.assertEqual("transparent", upstream.call_args.kwargs["data"]["background"])
+        self.assertEqual("png", upstream.call_args.kwargs["data"]["output_format"])
+        self.assertEqual("background", response.json()["meta"]["image_edit_action"])
+
+    def test_image_edit_rejects_invalid_or_incomplete_input_before_upstream(self):
+        for extra in ({"image_edit_action": "bad"}, {"image_edit_action": "erase"}, {"image_edit_action": "background"}, {"image_edit_action": "comment", "api_endpoint": "/v1/responses"}):
+            with self.subTest(extra=extra), patch.object(webapp.requests, "post") as upstream:
+                response = self.client.post("/api/generate/gpt-image-2", data={"api_key": "sk-test", "prompt": "edit", **extra})
+                self.assertEqual(400, response.status_code)
+                upstream.assert_not_called()
+
+    def test_background_rejection_does_not_silently_drop_transparency(self):
+        rejected = type("Rejected", (), {"ok": False, "status_code": 400, "text": 'Unknown parameter: background', "headers": {}, "json": lambda self: {"error": {"message": "Unknown parameter: background"}}})()
+        with patch.object(webapp.requests, "post", return_value=rejected) as upstream:
+            response = self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"api_key": "sk-test", "base_url": "https://example.com/v1", "prompt": "remove background", "image_edit_action": "background"},
+                files={"reference_files": ("base.png", PNG_RGB_2X2, "image/png")},
+            )
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertEqual(1, upstream.call_count)
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)

@@ -2,6 +2,14 @@
 
 ## Active Decisions
 
+## 2026-09-27 - 网页图片编辑实验分支
+- Status: active
+- Decision: 在 codex/web-image-editing 实现标注、位置评论、移除背景、擦除，入口仅在网页版图片预览显示。暂不调整大小、打包、发布或同步 G 盘。
+- Implementation: 标注与评论将原图和引导图放进单次 edits 请求；擦除复用 Alpha 遮罩接口；移除背景按用户截图发送固定指令并请求 transparent PNG。透明参数不参与未知参数自动删除，避免悄悄降级。
+- Isolation: 编辑固定一张结果、auto 尺寸，清除本次请求的会话附加提示词/负面词/画面文字，不改变原图或主界面生成配置。失败重试与再次生成保留编辑类型和参考图。
+- Workflow: ledger-only；保留已有 Superpowers 历史，不新增依赖或切换工程框架。草稿按稳定文件标识保存于本页内存，最多 20 个；刷新页面不恢复未提交草稿。
+- Evidence: Python 297/297、Node 233/233、构建通过，浏览器模拟确认 n=1、edits、正确参考图数量及遮罩 Alpha；不宣称实际 AI 效果。
+
 ## 2026-09-23 - v1.1.4 正式发布
 - Status: active
 - Decision: 用户明确授权发布 v1.1.4 并同步 G 盘；发布四类已验证的手动分发包及各自 manifest/SHA256，共 12 个附件。原 Tauri 签名私钥未找到，不上传不能验签的 updater/feed，发行说明明确旧版需手动安装一次。

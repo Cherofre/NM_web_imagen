@@ -193,6 +193,8 @@ import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
 import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
+import { ImageEditor, type ImageEditorSubmission } from "./ImageEditor";
+import { imageEditActionFrom, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import {
   activeMaskAttachment,
   appendGenerationFiles,
@@ -297,6 +299,7 @@ type ChatMessage = {
 };
 
 type SubmitOverrides = {
+  imageEditAction?: ImageEditAction;
   mode?: SubmitMode;
   engine?: Engine;
   sessionId?: string;
@@ -349,6 +352,7 @@ type QueueJob = {
 };
 
 type GenerationQueuePayload = {
+  imageEditAction?: ImageEditAction;
   sessionId: string;
   turnId: string;
   jobId: string;
@@ -1351,6 +1355,7 @@ function createFormData(
   maskEncoding: MaskEncoding | null | undefined,
   gptTextDraft: { context_prompt?: string; negative_prompt?: string; poster_text?: string } | undefined,
   jobId: string,
+  imageEditAction?: ImageEditAction,
 ) {
   const data = new FormData();
   const source = engine === "banana" ? banana : { ...gpt, custom_size: normalizeCustomImageSize(gpt.custom_size).value };
@@ -1358,6 +1363,7 @@ function createFormData(
     data.append(key, String(value));
   });
   appendGenerationFiles(data, references, maskFile);
+  if (imageEditAction) data.append("image_edit_action", imageEditAction);
   if (maskFile) {
     data.append("mask_encoding", normalizeMaskEncoding(maskEncoding));
   }
@@ -1513,6 +1519,8 @@ function App() {
   const [desktopOutputsRoot, setDesktopOutputsRoot] = useState(desktopRuntime.outputsRoot);
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
+  const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string } | null>(null);
+  const imageEditorDrafts = useRef(new Map<string, ImageEditorDraft>());
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
@@ -3194,6 +3202,12 @@ function App() {
   }
 
   function retryQueueJob(job: QueueJob) {
+    const sourceTurn = sessions.find((session) => session.id === job.sessionId)?.turns.find((turn) => turn.id === job.turnId);
+    if (sourceTurn && imageEditActionFrom(sourceTurn.meta?.image_edit_action)) {
+      setQueueOpen(false);
+      void regenerateFromTurn(sourceTurn, job.sessionId);
+      return;
+    }
     setQueueOpen(false);
     const targetExists = sessions.some((session) => session.id === job.sessionId);
     if (targetExists) {
@@ -4287,6 +4301,37 @@ function App() {
     }
   }
 
+  async function openImageEditor(preview: PreviewImage, action: ImageEditAction) {
+    if (previewMaskLoading) return;
+    const requestId = ++previewMaskRequestRef.current;
+    setPreviewMaskLoading(true);
+    try {
+      const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
+      if (requestId !== previewMaskRequestRef.current) return;
+      const sourceKey = preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src;
+      setImageEditor({ file, action, key: `${sourceKey}:${action}` });
+      closePreviewImage();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed"));
+    } finally { setPreviewMaskLoading(false); }
+  }
+
+  async function sendImageEdit(edit: ImageEditorSubmission) {
+    const issues = configIssues("gpt-image-2", gptForm, bananaForm, t);
+    if (issues.length) return false;
+    const base = edit.references[0];
+    const attachment: MaskAttachment<File> | null = edit.maskFile ? {
+      baseFile: base, baseFingerprint: referenceFileFingerprint(base), maskFile: edit.maskFile,
+      previewFile: edit.previewFile, encoding: "standard", coverage: 0,
+    } : null;
+    const queued = await submit(undefined, {
+      mode: "generate", engine: "gpt-image-2", prompt: edit.prompt,
+      references: edit.references, maskAttachment: attachment, imageEditAction: edit.action,
+      draftOverride: { shared: { fixed_prompt: "" }, gpt: { negative_prompt: "", poster_text: "" } },
+    });
+    return queued === true;
+  }
+
   /**
    * Engine tabs inside the config drawer, so both engines can be managed without
    * closing it. Unlike the workspace switcher this only switches the view — the
@@ -4427,7 +4472,7 @@ function App() {
     return true;
   }
 
-  async function regenerateFromTurn(turn: ConversationTurn) {
+  async function regenerateFromTurn(turn: ConversationTurn, sessionId?: string) {
     const sourceUsesMask = turnUsesMaskGuidance(turn);
     if (sourceUsesMask && !turnMaskPayloadsRef.current.has(turn.id) && !turn.maskFileSnapshot?.src) {
       setNotice(t("mask.regenerateUnavailable"));
@@ -4479,6 +4524,7 @@ function App() {
       : null;
     if (regeneratedMask) setNotice(t("mask.regenerateWithMask"));
     await submit(undefined, {
+      sessionId,
       mode: "generate",
       engine: turn.engine,
       prompt: turn.prompt,
@@ -4500,6 +4546,7 @@ function App() {
       maskAttachment: regeneratedMask,
       maskSnapshot: turn.maskSnapshot,
       maskFileSnapshot: turn.maskFileSnapshot,
+      imageEditAction: imageEditActionFrom(turn.meta?.image_edit_action),
     });
   }
 
@@ -4578,6 +4625,7 @@ function App() {
             poster_text: payload.posterText,
           },
           payload.jobId,
+          payload.imageEditAction,
         ),
       });
       const responsePayload = await response.json().catch(() => ({}));
@@ -4725,7 +4773,9 @@ function App() {
     const requestedSessionId = overrides.sessionId || activeSessionId;
     const requestedSession = sessions.find((session) => session.id === requestedSessionId);
     const currentDrafts = requestedSession?.drafts || activeSession.drafts;
-    const currentGptForm = gptForm;
+    const currentGptForm = overrides.imageEditAction
+      ? { ...gptForm, n: 1, api_endpoint: "/v1/images/edits", size: "auto", seed: -1, style_preset: "none", enhance_prompt: false }
+      : gptForm;
     const currentBananaForm = bananaForm;
     const currentReferences = referencesForSubmitMode(currentMode, overrides.references || references);
     const requestedMaskAttachment = overrides.maskAttachment === undefined ? maskAttachment : overrides.maskAttachment;
@@ -4952,6 +5002,7 @@ function App() {
       meta: {
         model: currentModel,
         reference_count: submissionReferences.length,
+        image_edit_action: overrides.imageEditAction,
         mask_used: Boolean(currentMask),
         mask_encoding: currentMask?.encoding || "",
         mask_coverage: currentMask?.coverage,
@@ -4986,6 +5037,7 @@ function App() {
         createdAt,
       }));
     queuePayloadsRef.current[queueJobId] = {
+      imageEditAction: overrides.imageEditAction,
       sessionId: targetSessionId,
       turnId,
       jobId: queueJobId,
@@ -5002,6 +5054,7 @@ function App() {
     };
     setQueueOpen(true);
     setStatus(t("status.queuedGeneration"));
+    return true;
   }
 
   async function openOutputs() {
@@ -7979,6 +8032,13 @@ function App() {
         />
       )}
 
+      {imageEditor && <ImageEditor
+        key={imageEditor.key}
+        file={imageEditor.file} action={imageEditor.action} language={language}
+        draft={imageEditorDrafts.current.get(imageEditor.key)}
+        onDraft={(draft) => { imageEditorDrafts.current.set(imageEditor.key, draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
+        onClose={() => setImageEditor(null)} onSend={sendImageEdit}
+      />}
       {previewImage && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
@@ -8062,6 +8122,11 @@ function App() {
                 } as CSSProperties}
               />
             </div>
+            {!desktopMode && !previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
+              {([["annotate", "标注", "Annotate"], ["comment", "添加评论", "Add comments"], ["background", "移除背景", "Remove background"], ["erase", "擦除", "Erase"]] as const).map(([action, zh, en]) =>
+                <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}>{language === "en" ? en : zh}</button>
+              )}
+            </div>}
           </div>
         </div>
       )}

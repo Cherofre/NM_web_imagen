@@ -1,0 +1,45 @@
+.image-editor-backdrop { position: fixed; inset: 0; z-index: 90; background: #080a0ded; display: grid; place-items: center; padding: 16px; }
+.image-editor { width: min(1440px, 100%); height: 100%; display: flex; flex-direction: column; background: #151719; color: #f3f4f6; border-radius: 12px; overflow: hidden; outline: none; }
+.image-editor header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; gap: 12px; }
+.image-editor header div { display: flex; gap: 16px; min-width: 0; align-items: center; }
+.image-editor header span { color: #c0c5ce; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.image-editor button { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 36px; padding: 7px 10px; border: 0; border-radius: 8px; background: #30343a; color: #f3f4f6; cursor: pointer; }
+.image-editor button:hover:not(:disabled) { background: #454b54; }
+.image-editor button:disabled { opacity: .4; cursor: default; }
+.image-editor button[aria-pressed="true"], .image-editor button.selected { background: #21539a; }
+.image-editor :focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.image-editor-body { display: flex; flex: 1; min-height: 0; }
+.image-editor-stage { flex: 1; min-width: 0; overflow: auto; background: #080a0d; padding: 20px; }
+.image-editor-sheet { position: relative; margin: auto; flex-shrink: 0; background-color: #34383f; background-image: conic-gradient(#34383f 25%, #24282d 0 50%, #34383f 0 75%, #24282d 0); background-size: 20px 20px; }
+.image-editor-sheet > img, .image-editor-sheet > canvas, .image-editor-sheet > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.image-editor-sheet > svg { touch-action: none; }
+.image-editor-details { width: 260px; flex-shrink: 0; padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.image-editor-details p { font-size: 13px; line-height: 1.7; margin: 0; }
+.image-editor-details > button { text-align: left; justify-content: flex-start; overflow-wrap: anywhere; }
+.image-editor-details label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.image-editor textarea { width: 100%; min-height: 100px; resize: vertical; padding: 10px; background: #23272d; border: 1px solid #69717e; border-radius: 8px; color: #f3f4f6; }
+.image-editor textarea::placeholder { color: #b8c0cc; }
+.image-editor-hint { color: #c0c5ce; }
+.image-editor footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px; }
+.image-editor-toolbar, .image-editor-send { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.image-editor-toolbar > span { font-size: 13px; padding: 0 8px; }
+.image-editor-toolbar input[type="color"] { width: 32px; height: 32px; padding: 2px; background: transparent; border: 0; }
+.image-editor-size { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 0 6px; }
+.image-editor-size input { width: 78px; accent-color: #93c5fd; }
+.image-editor .primary-action { background: #f3f4f6; color: #17191c; }
+.image-editor .primary-action:hover:not(:disabled) { background: #dbeafe; }
+.image-editor-error { margin: 0; padding: 10px 16px; color: #fecaca; background: #451e24; font-size: 13px; }
+.preview-image-edit-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 8px; background: var(--panel); }
+.preview-image-edit-tools button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); color: var(--ink); }
+.lightbox-card:has(.preview-image-edit-tools) { grid-template-rows: auto minmax(0, 1fr) auto; }
+@media (max-width: 700px) {
+  .image-editor-backdrop { padding: 0; }
+  .image-editor { border-radius: 0; }
+  .image-editor-body { flex-direction: column; }
+  .image-editor-stage { min-height: 180px; }
+  .image-editor-details { width: 100%; max-height: 180px; padding: 10px 14px; }
+  .image-editor-details textarea { min-height: 65px; }
+  .image-editor footer { padding: 8px; }
+  .image-editor-toolbar { gap: 3px; }
+  .image-editor header span { max-width: 180px; }
+}
