@@ -4693,7 +4693,7 @@ function App() {
                         finishedAt,
                         elapsedSeconds: elapsed,
                         images,
-                        error: responsePayload.ok ? "" : t("status.noImagesFromResponse"),
+                        error: responsePayload.ok ? "" : (responsePayload.meta?.empty_result_reason || t("status.noImagesFromResponse")),
                         meta: {
                           ...(item.meta || {}),
                           ...(responsePayload.meta || {}),
@@ -4720,7 +4720,7 @@ function App() {
         finishedAt,
         elapsedSeconds: elapsed,
         images,
-        error: responsePayload.ok ? "" : t("status.noImagesFromResponse"),
+        error: responsePayload.ok ? "" : (responsePayload.meta?.empty_result_reason || t("status.noImagesFromResponse")),
       });
       if (responsePayload.history_entry) {
         void loadHistory();

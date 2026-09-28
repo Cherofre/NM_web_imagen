@@ -265,6 +265,20 @@ class ImageSafetyTests(unittest.TestCase):
 
 
 class SecurityBoundaryApiTests(unittest.TestCase):
+    def test_empty_result_diagnostics_do_not_expose_upstream_secrets(self):
+        cases = [
+            ({"error": {"message": "sk-secret private prompt"}}, "失败状态"),
+            ({"status": "processing", "id": "private-id"}, "处理中"),
+            ({"data": [{"b64_json": "broken-image"}]}, "无法读取"),
+            ({"data": [], "message": "private prompt"}, "没有可识别"),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                message = webapp.describe_empty_gpt_result(payload)
+                self.assertIn(expected, message)
+                self.assertNotIn("private", message)
+                self.assertNotIn("sk-secret", message)
+
     def test_image_edit_background_uses_transparent_png_and_persists_action(self):
         with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
             response = self.client.post(

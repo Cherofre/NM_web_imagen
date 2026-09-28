@@ -4222,6 +4222,17 @@ def extract_gpt_image_values(
     return values
 
 
+def describe_empty_gpt_result(payload: Dict[str, Any]) -> str:
+    """Explain empty results without exposing arbitrary upstream text or credentials."""
+    if payload.get("error") or payload.get("status") in ("failed", "error"):
+        return "渠道返回了失败状态，但 HTTP 状态码为成功；未取得图片。请检查渠道服务与模型支持。"
+    if payload.get("status") in ("queued", "pending", "in_progress", "processing"):
+        return "渠道仅返回了排队或处理中状态，尚未返回图片；当前接口需要直接返回图片结果。"
+    if extract_gpt_image_values(payload):
+        return "渠道返回了图片字段，但图片内容无法读取或图片链接下载失败；未保存图片。"
+    return "渠道响应中没有可识别的图片字段（b64_json、url 或图片 result）。可能未生成图片或返回格式不兼容。"
+
+
 def normalize_plain_base64_image(
     value: str,
     budget: Optional[UpstreamImageBudget] = None,
@@ -5415,6 +5426,7 @@ def create_app() -> FastAPI:
                 "image_edit_action": image_edit_action,
                 "image_count": len(images),
                 "saved_count": saved_count,
+                "empty_result_reason": describe_empty_gpt_result(response_data) if not images else "",
                 "output_dir": "outputs",
                 "elapsed_seconds": elapsed_seconds,
                 "tokens_used": total_tokens,
