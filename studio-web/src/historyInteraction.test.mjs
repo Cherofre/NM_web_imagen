@@ -41,7 +41,8 @@ test("history-backed previews expose a direct view-details action", () => {
 });
 
 test("preview actions follow workflow priority and keep close at the far right", () => {
-  const previewStart = appSource.indexOf("{previewImage && (");
+  const previewStart = appSource.indexOf("{previewImage && !imageEditor && !maskEditorOpen && (");
+  assert.ok(previewStart >= 0, "preview must return when both editors are closed");
   const toolbarEnd = appSource.indexOf("className={`lightbox-stage", previewStart);
   const toolbar = appSource.slice(previewStart, toolbarEnd);
   const positions = [

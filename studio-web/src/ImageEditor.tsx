@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, ArrowUpRight, Brush, Check, Circle, Download, Eraser, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
-import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
+import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint, eraseEditObjects, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import "./imageEditor.css";
 
 export type ImageEditorSubmission = { action: ImageEditAction; prompt: string; references: File[]; maskFile?: File; previewFile?: File };
@@ -43,6 +43,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const [brushPoint, setBrushPoint] = useState<EditPoint | null>(null);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
+  const noteUndoRecorded = useRef(false);
   const [error, setError] = useState("");
   const past = useRef<EditObject[][]>([]);
   const future = useRef<EditObject[][]>([]);
@@ -100,6 +101,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     drawEditObjects(ctx, objects.filter((item) => item.kind !== "comment"));
   }, [objects, dimensions]);
 
+  function closeNote() { setSelected(null); setEditing(false); dialog.current?.focus(); }
   function remember(before: EditObject[]) { past.current = [...past.current.slice(-49), before]; future.current = []; refresh((v) => v + 1); }
   function commit(next: EditObject[]) { remember(objects); setObjects(next); }
   function undo() { const previous = past.current.pop(); if (previous) { future.current.push(objects); setObjects(previous); setSelected(null); } }
@@ -108,6 +110,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   function start(event: ReactPointerEvent<SVGSVGElement>) {
     if (busy || event.button !== 0 || action === "background" || gesture.current) return;
     event.preventDefault();
+    dialog.current?.focus();
     const p = point(event);
     const hit = (event.target as Element).closest("[data-object]")?.getAttribute("data-object");
     const existing = objects.find((item) => item.id === hit);
@@ -133,7 +136,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     const g = gesture.current;
     if (!g || g.pointer !== event.pointerId) return;
     const p = point(event);
-    if (g.move) setObjects(g.before.map((item) => item.id === g.object.id ? moveEditObject(item, p.x - g.start.x, p.y - g.start.y) : item));
+    if (g.move) setObjects(g.before.map((item) => item.id === g.object.id ? moveEditObject(item, p.x - g.start.x, p.y - g.start.y, dimensions) : item));
     else {
       g.object = { ...g.object, points: (g.object.kind === "pen" || g.object.kind === "eraser") ? [...g.object.points, p] : [g.start, p] };
       setObjects([...g.before, g.object]);
@@ -142,7 +145,10 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   function finish(event: ReactPointerEvent<SVGSVGElement>, cancel = false) {
     const g = gesture.current;
     if (!g || g.pointer !== event.pointerId) return;
-    if (cancel) setObjects(g.before); else remember(g.before);
+    const movedObject = objects.find((item) => item.id === g.object.id);
+    const moved = movedObject?.points.some((p, i) => p.x !== g.object.points[i].x || p.y !== g.object.points[i].y);
+    if (cancel) setObjects(g.before); else if (!g.move || moved) remember(g.before);
+    if (!cancel && g.object.kind === "eraser") setObjects(eraseEditObjects(g.before, g.object));
     gesture.current = null;
     if (!cancel && g.object.kind !== "eraser" && (action === "annotate" || action === "comment")) setEditing(true);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -199,7 +205,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   return <div className="image-editor-backdrop">
     <div className="image-editor" role="dialog" aria-modal="true" aria-label={labels[action][en ? 1 : 0]} tabIndex={-1} ref={dialog} onKeyDown={(event) => {
       event.stopPropagation();
-      if (event.key === "Escape" && !busy) { event.preventDefault(); if (editing && selected) setSelected(null); else onClose(); }
+      if (event.key === "Escape" && !busy) { event.preventDefault(); if (editing && selected) closeNote(); else onClose(); }
       if (event.key === "Tab") {
         const nodes = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || [])];
         const first = nodes[0], last = nodes[nodes.length - 1];
@@ -208,7 +214,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
       }
       if ((event.target as HTMLElement).matches("input,textarea") || busy) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
-      if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); commit(objects.filter((o) => o.id !== selected)); setSelected(null); }
+      if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); commit(objects.filter((o) => o.id !== selected)); closeNote(); }
     }}>
       <header><div><button className="image-editor-back" type="button" onClick={onClose} disabled={busy}><ArrowLeft size={17} />{text("返回图片", "Back to image")}</button><strong>{labels[action][en ? 1 : 0]}</strong><span>{file.name}</span></div><button type="button" onClick={onClose} disabled={busy} title={text("退出编辑，返回图片", "Exit editing and return to image")} aria-label={text("退出编辑，返回图片", "Exit editing and return to image")}><X size={20} /></button></header>
       <div className="image-editor-body">
@@ -226,11 +232,11 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                 if (o.kind === "eraser") return null;
                 const p = o.points[0], q = o.points[o.points.length - 1];
                 const ctx = canvas.current?.getContext("2d");
-                const label = ctx && o.text.trim() && o.kind !== "comment" ? annotationTextLayout(ctx, o) : null;
+                const label = ctx && (o.text.trim() || o.kind === "text") && o.kind !== "comment" ? annotationTextLayout(ctx, o.text.trim() ? o : { ...o, text: "T" }) : null;
                 return <g key={o.id} data-object={o.id}>
                   {o.kind === "comment" ? <g><circle cx={p.x} cy={p.y} r={o.width * 3} fill="#2563eb" stroke="white" strokeWidth={2 / scale} /><text x={p.x} y={p.y} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={o.width * 3}>{index + 1}</text></g>
                     : o.kind !== "text" && <polyline points={o.points.map((v) => `${v.x},${v.y}`).join(" ")} fill="none" stroke="transparent" strokeWidth={Math.max(o.width, 18 / scale)} pointerEvents="stroke" />}
-                  {label && <rect x={label.x} y={label.y} width={label.width} height={label.height} fill="transparent" stroke={selected === o.id ? "#60a5fa" : "none"} strokeWidth={1 / scale} />}
+                  {label && <rect x={label.x} y={label.y} width={label.width} height={label.height} fill="transparent" stroke={selected === o.id || !o.text.trim() ? "#60a5fa" : "none"} strokeWidth={1 / scale} />}
                   {(o.kind === "rect" || o.kind === "ellipse") && <rect x={Math.min(p.x, q.x)} y={Math.min(p.y, q.y)} width={Math.max(1, Math.abs(q.x - p.x))} height={Math.max(1, Math.abs(q.y - p.y))} fill="transparent" stroke={selected === o.id ? "#60a5fa" : "transparent"} strokeWidth={2 / scale} />}
                 </g>;
               })}
@@ -253,14 +259,14 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
               <label><span className="image-comment-title">{action === "comment" ? text("评论", "Comment") : text("标注说明", "Annotation note")}</span>
                 <textarea autoFocus aria-label={action === "comment" ? text("评论内容", "Comment") : text("标注文字", "Annotation text")} maxLength={2000} disabled={busy}
                   value={selectedObject.text} placeholder={text("输入此处的修改要求…", "Describe the change here…")}
-                  onFocus={() => remember(objects)}
-                  onChange={(event) => setObjects(objects.map((o) => o.id === selected ? { ...o, text: event.target.value } : o))}
-                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); setSelected(null); } }}
+                  onFocus={() => { noteUndoRecorded.current = false; }}
+                  onChange={(event) => { if (!noteUndoRecorded.current) { remember(objects); noteUndoRecorded.current = true; } setObjects(objects.map((o) => o.id === selected ? { ...o, text: event.target.value } : o)); }}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); closeNote(); } }}
                 />
               </label>
-              <div><button type="button" disabled={busy} aria-label={text("删除此条评论", "Delete this comment")} onClick={() => { commit(objects.filter((o) => o.id !== selected)); setSelected(null); }}><Trash2 size={15} /></button>
+              <div><button type="button" disabled={busy} aria-label={text("删除此条评论", "Delete this comment")} onClick={() => { commit(objects.filter((o) => o.id !== selected)); closeNote(); }}><Trash2 size={15} /></button>
                 <span className="image-comment-keyhint">{text("Enter 完成 · Shift+Enter 换行", "Enter to finish · Shift+Enter for newline")}</span>
-                <button className="image-comment-done" type="button" disabled={busy} title={text("完成此条，继续添加", "Finish and add another")} aria-label={text("完成此条", "Done")} onClick={() => setSelected(null)}><Check size={16} /></button></div>
+                <button className="image-comment-done" type="button" disabled={busy} title={text("完成此条，继续添加", "Finish and add another")} aria-label={text("完成此条", "Done")} onClick={closeNote}><Check size={16} /></button></div>
             </div>}
           </div>}
         </div>
@@ -269,7 +275,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
             {action === "comment" && <strong className="image-editor-section-title">{text("位置评论", "Comments")}<span>{commentCount}</span></strong>}
             <p>{action === "comment" ? text("点击图片标记位置，输入修改要求。可以添加多处，最后一起发送。", "Click the image to describe a change. Add more locations, then send them together.") : text("画完后可在标记旁输入说明。选择工具可移动标记、修改说明；橡皮擦只擦除经过的标注。", "Add a note beside each mark. Use Select to move or edit it; the eraser removes only the area you brush.")}</p>
             {action === "comment" && <button className="image-comment-add" type="button" disabled={busy || !url} onClick={() => { const o: EditObject = { id: crypto.randomUUID(), kind: "comment", points: [{ x: dimensions.width / 2, y: dimensions.height / 2 }], color, width: 5 / fit, text: "" }; commit([...objects, o]); setSelected(o.id); setEditing(true); }}><Plus size={15} />{text("添加评论", "Add comment")}</button>}
-            {action === "comment" && objects.map((o, i) => <button type="button" className={`image-comment-item${selected === o.id ? " selected" : ""}`} key={o.id} onClick={() => { setSelected(o.id); setEditing(true); }}><span className="image-comment-number">{i + 1}</span><span>{o.text || text("待填写评论", "Empty comment")}</span></button>)}
+            {action === "comment" && objects.map((o, i) => <button type="button" className={`image-comment-item${selected === o.id ? " selected" : ""}`} disabled={busy} key={o.id} onClick={() => { setSelected(o.id); setEditing(true); }}><span className="image-comment-number">{i + 1}</span><span>{o.text || text("待填写评论", "Empty comment")}</span></button>)}
             {action === "annotate" && <label>{text("整体补充要求（可选）", "Additional instructions (optional)")}<textarea value={prompt} disabled={busy} maxLength={8000} onChange={(event) => setPrompt(event.target.value)} placeholder={text("例如：将箭头指向的蝴蝶改为金色", "For example: make the butterfly at the arrow gold")} /></label>}
           </>}
         </aside>}
@@ -277,7 +283,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
       {error && <p className="image-editor-error" role="alert">{error}</p>}
       <footer>
         <div className="image-editor-toolbar" aria-label={text("编辑工具", "Editing tools")}>
-          {action === "annotate" && tools.map(([id, Icon, label]) => <button type="button" key={id} disabled={busy} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { setTool(id); setSelected(null); setEditing(false); }}><Icon size={18} /></button>)}
+          {action === "annotate" && tools.map(([id, Icon, label]) => <button type="button" key={id} disabled={busy} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { setTool(id); setSize((current) => Math.min(current, id === "eraser" ? 160 : 20)); setSelected(null); setEditing(false); }}><Icon size={18} /></button>)}
           {action === "annotate" && <input aria-label={text("标注颜色", "Annotation color")} type="color" value={color} disabled={busy} onChange={(event) => { setColor(event.target.value); if (tool === "select" && selected) commit(objects.map((o) => o.id === selected ? { ...o, color: event.target.value } : o)); }} />}
           {(action === "erase" || action === "annotate") && <label className="image-editor-size">{text("笔刷", "Brush")}<input aria-label={text("笔刷大小", "Brush size")} type="range" min={2} max={action === "erase" || tool === "eraser" ? 160 : 20} value={size} disabled={busy} onChange={(event) => setSize(Number(event.target.value))} /></label>}
           {action === "erase" && <span>{text("涂蓝要删除的内容，再发送补全背景", "Paint what to remove, then send to fill the background")}</span>}

@@ -1,6 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { annotationTextLayout, buildImageEditPrompt, editPoint, moveEditObject, imageEditActionFrom, drawEditObjects } from "./imageEditorModel.ts";
+import { annotationTextLayout, buildImageEditPrompt, editPoint, eraseEditObjects, moveEditObject, imageEditActionFrom, drawEditObjects } from "./imageEditorModel.ts";
+
+test("erased sections move with their annotation without changing undo snapshots or later marks", () => {
+  const original = { kind: "pen", points: [{ x: 10, y: 10 }, { x: 30, y: 30 }], text: "", width: 2 };
+  const erased = eraseEditObjects([original], { points: [{ x: 20, y: 20 }], width: 5 });
+  const moved = moveEditObject(erased[0], 100, 100, { width: 64, height: 64 });
+  assert.deepEqual(moved.points[1], { x: 64, y: 64 });
+  assert.deepEqual(moved.cuts[0].points[0], { x: 54, y: 54 });
+  assert.deepEqual(erased[0].cuts[0].points[0], { x: 20, y: 20 });
+  assert.equal(original.cuts, undefined);
+  const later = { ...original, id: "new" };
+  assert.equal([...erased, later][1].cuts, undefined);
+});
+
+test("text layout also stays inside one-pixel and very narrow textures", () => {
+  for (const width of [1, 2, 8]) {
+    const ctx = { canvas: { width, height: 1 }, font: "", measureText(value) { return { width: value.length * parseFloat(this.font) }; } };
+    const label = annotationTextLayout(ctx, { kind: "text", text: "边缘", width: 5, points: [{ x: width, y: 1 }] });
+    assert.ok(label.x + label.width <= width && label.y + label.height <= 1);
+  }
+});
 
 test("edge labels wrap and remain inside the original export dimensions", () => {
   const ctx = { canvas: { width: 64, height: 64 }, font: "", measureText(value) { return { width: [...value].length * parseFloat(this.font) }; } };
@@ -37,18 +57,18 @@ test("moving an annotation translates every point without mutating undo state", 
   assert.deepEqual(moveEditObject(object, 2, -4).points, [{ x: 12, y: 16 }, { x: 32, y: 46 }]);
   assert.equal(object.points[0].x, 10);
 });
-test("comment prompt and guide numbering skip empty drafts consistently", () => {
+test("comment prompt and guide preserve visible pin numbers across empty drafts", () => {
   const objects = [
     { kind: "comment", text: " ", points: [{ x: 0, y: 0 }], width: 3 },
     { kind: "comment", text: "改为金色", points: [{ x: 250, y: 400 }], width: 3 },
   ];
   const prompt = buildImageEditPrompt("comment", objects, "unrelated", 1000, 800);
-  assert.match(prompt, /1\. 位置（从左到右 25%，从上到下 50%）：改为金色/);
-  assert.doesNotMatch(prompt, /2\.|unrelated/);
+  assert.match(prompt, /2\. 位置（从左到右 25%，从上到下 50%）：改为金色/);
+  assert.doesNotMatch(prompt, /1\.|unrelated/);
   const numbers = [];
   const ctx = new Proxy({}, { get: (_target, key) => key === "fillText" ? (value) => numbers.push(value) : () => {} });
   drawEditObjects(ctx, objects);
-  assert.deepEqual(numbers, ["1"]);
+  assert.deepEqual(numbers, ["2"]);
   assert.throws(() => buildImageEditPrompt("comment", [], "", 100, 100));
 });
 test("background and erasure keep their dedicated intent", () => {
@@ -66,6 +86,6 @@ test("multiple completed comments are combined into one numbered edit prompt", (
   ];
   const prompt = buildImageEditPrompt("comment", objects, "", 1000, 1000);
   assert.match(prompt, /1\. 位置（从左到右 20%，从上到下 10%）：帽子改蓝色/);
-  assert.match(prompt, /2\. 位置（从左到右 60%，从上到下 50%）：移除冰淇淋/);
-  assert.doesNotMatch(prompt, /3\. 位置/);
+  assert.match(prompt, /3\. 位置（从左到右 60%，从上到下 50%）：移除冰淇淋/);
+  assert.doesNotMatch(prompt, /2\. 位置/);
 });

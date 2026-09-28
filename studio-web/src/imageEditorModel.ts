@@ -10,6 +10,7 @@ export type EditObject = {
   color: string;
   width: number;
   textWidth?: number;
+  cuts?: { points: EditPoint[]; width: number }[];
   text: string;
 };
 export type ImageEditorDraft = { objects: EditObject[]; prompt: string };
@@ -23,13 +24,25 @@ export function buildImageEditPrompt(action: ImageEditAction, objects: EditObjec
   if (action === "annotate") return `第一张是原图，第二张是用户的标注引导图。标注只用于说明修改位置，不是成品内容。按以下要求修改原图，最终结果不要保留引导线、箭头或标注文字：\n${prompt.trim()}\n${objects.filter((o) => o.kind !== "eraser" && o.text.trim()).map((o) => `位置（${Math.round(o.points[0].x / width * 100)}%，${Math.round(o.points[0].y / height * 100)}%）：${o.text.trim()}`).join("\n")}`;
   const comments = objects.filter((item) => item.kind === "comment" && item.text.trim());
   if (!comments.length) throw new Error("请至少填写一条评论");
-  return "第一张是原图，第二张是编号位置引导图。请逐条完成以下修改，编号只是位置提示，最终图片不要保留编号。未提及的内容尽量保持不变：\n" + comments.map((item, i) =>
-    `${i + 1}. 位置（从左到右 ${Math.round(item.points[0].x / width * 100)}%，从上到下 ${Math.round(item.points[0].y / height * 100)}%）：${item.text.trim()}`,
+  return "第一张是原图，第二张是编号位置引导图。请逐条完成以下修改，编号只是位置提示，最终图片不要保留编号。未提及的内容尽量保持不变：\n" + comments.map((item) =>
+    `${objects.indexOf(item) + 1}. 位置（从左到右 ${Math.round(item.points[0].x / width * 100)}%，从上到下 ${Math.round(item.points[0].y / height * 100)}%）：${item.text.trim()}`,
   ).join("\n");
 }
 
-export function moveEditObject(object: EditObject, dx: number, dy: number): EditObject {
-  return { ...object, points: object.points.map((point) => ({ x: point.x + dx, y: point.y + dy })) };
+export function moveEditObject(object: EditObject, dx: number, dy: number, bounds?: { width: number; height: number }): EditObject {
+  if (bounds) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const point of object.points) { minX = Math.min(minX, point.x); minY = Math.min(minY, point.y); maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y); }
+    dx = Math.max(-minX, Math.min(bounds.width - maxX, dx));
+    dy = Math.max(-minY, Math.min(bounds.height - maxY, dy));
+  }
+  const translate = (point: EditPoint) => ({ x: point.x + dx, y: point.y + dy });
+  return { ...object, points: object.points.map(translate), ...(object.cuts ? { cuts: object.cuts.map((cut) => ({ ...cut, points: cut.points.map(translate) })) } : {}) };
+}
+
+export function eraseEditObjects(objects: EditObject[], stroke: EditObject): EditObject[] {
+  const cut = { width: stroke.width, points: stroke.points.map((point) => ({ ...point })) };
+  return objects.map((object) => object.kind === "eraser" || object.kind === "comment" ? object : { ...object, cuts: [...(object.cuts || []), cut] });
 }
 
 export function editPoint(clientX: number, clientY: number, rect: { left: number; top: number; width: number; height: number }, width: number, height: number): EditPoint {
@@ -40,7 +53,8 @@ export function editPoint(clientX: number, clientY: number, rect: { left: number
 }
 
 export function annotationTextLayout(ctx: CanvasRenderingContext2D, item: EditObject) {
-  const maxWidth = Math.max(1, ctx.canvas.width - 2), maxHeight = Math.max(1, ctx.canvas.height - 2);
+  const padding = Math.min(1, ctx.canvas.width / 4, ctx.canvas.height / 4);
+  const maxWidth = ctx.canvas.width - padding * 2, maxHeight = ctx.canvas.height - padding * 2;
   let fontSize = Math.min((item.textWidth ?? item.width) * 5, maxHeight / 1.2, maxWidth);
   let lines: string[] = [];
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -57,15 +71,28 @@ export function annotationTextLayout(ctx: CanvasRenderingContext2D, item: EditOb
     if (lines.length * fontSize * 1.2 <= maxHeight) break;
     fontSize *= Math.min(0.9, maxHeight / (lines.length * fontSize * 1.2));
   }
-  const width = Math.min(maxWidth, Math.max(1, ...lines.map((line) => ctx.measureText(line).width)));
+  const width = Math.min(maxWidth, Math.max(fontSize, ...lines.map((line) => ctx.measureText(line).width)));
   const height = lines.length * fontSize * 1.2;
   const anchor = item.kind === "text" ? item.points[0] : item.points[item.points.length - 1];
-  return { lines, fontSize, width, height, x: Math.max(1, Math.min(ctx.canvas.width - width - 1, anchor.x)), y: Math.max(1, Math.min(ctx.canvas.height - height - 1, anchor.y)) };
+  return { lines, fontSize, width, height, x: Math.max(padding, Math.min(ctx.canvas.width - width - padding, anchor.x)), y: Math.max(padding, Math.min(ctx.canvas.height - height - padding, anchor.y)) };
 }
 
 export function drawEditObjects(ctx: CanvasRenderingContext2D, objects: EditObject[], mask = false) {
   let commentIndex = 0;
+  let scratch: HTMLCanvasElement | undefined;
   for (const item of objects) {
+    commentIndex++;
+    if (item.cuts?.length && !mask) {
+      scratch ??= document.createElement("canvas");
+      if (scratch.width !== ctx.canvas.width) scratch.width = ctx.canvas.width;
+      if (scratch.height !== ctx.canvas.height) scratch.height = ctx.canvas.height;
+      const layer = scratch.getContext("2d");
+      if (!layer) throw new Error("Canvas unavailable");
+      layer.clearRect(0, 0, scratch.width, scratch.height);
+      drawEditObjects(layer, [{ ...item, cuts: undefined }, ...item.cuts.map((cut) => ({ ...cut, id: "cut", kind: "eraser" as const, color: "black", text: "" }))]);
+      ctx.drawImage(scratch, 0, 0);
+      continue;
+    }
     const p = item.points[0];
     const q = item.points[item.points.length - 1];
     ctx.save();
@@ -90,7 +117,6 @@ export function drawEditObjects(ctx: CanvasRenderingContext2D, objects: EditObje
       ctx.moveTo(q.x - length * Math.cos(angle - Math.PI / 6), q.y - length * Math.sin(angle - Math.PI / 6));
       ctx.lineTo(q.x, q.y); ctx.lineTo(q.x - length * Math.cos(angle + Math.PI / 6), q.y - length * Math.sin(angle + Math.PI / 6)); ctx.stroke();
     } else if (item.kind === "comment" && item.text.trim()) {
-      commentIndex++;
       const radius = item.width * 3;
       ctx.fillStyle = "#2563eb"; ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "white"; ctx.lineWidth = radius * 2 / 15; ctx.stroke();
