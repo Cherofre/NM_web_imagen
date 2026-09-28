@@ -1,6 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildImageEditPrompt, editPoint, moveEditObject, imageEditActionFrom, drawEditObjects } from "./imageEditorModel.ts";
+import { annotationTextLayout, buildImageEditPrompt, editPoint, moveEditObject, imageEditActionFrom, drawEditObjects } from "./imageEditorModel.ts";
+
+test("edge labels wrap and remain inside the original export dimensions", () => {
+  const ctx = { canvas: { width: 64, height: 64 }, font: "", measureText(value) { return { width: [...value].length * parseFloat(this.font) }; } };
+  for (const value of ["这里挖空", "这是一个需要换行的很长的标注文字".repeat(8)]) {
+    const layout = annotationTextLayout(ctx, { kind: "text", text: value, width: 5, points: [{ x: 63, y: 63 }] });
+    assert.ok(layout.x >= 0 && layout.y >= 0);
+    assert.ok(layout.x + layout.width <= 64 && layout.y + layout.height <= 64);
+    assert.equal(layout.lines.join(""), value);
+  }
+});
+
+test("eraser strokes remove overlay pixels in order and restore drawing for later marks", () => {
+  const strokes = [], states = [];
+  const ctx = new Proxy({
+    globalCompositeOperation: "source-over",
+    save() { states.push(this.globalCompositeOperation); },
+    restore() { this.globalCompositeOperation = states.pop(); },
+    stroke() { strokes.push(this.globalCompositeOperation); },
+  }, { get: (target, key) => key in target ? target[key] : () => {} });
+  drawEditObjects(ctx, ["pen", "eraser", "pen"].map((kind) => ({ kind, text: "", width: 4, color: "red", points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] })));
+  assert.deepEqual(strokes, ["source-over", "destination-out", "source-over"]);
+});
+
+test("shape notes are submitted without requiring a separate global prompt", () => {
+  assert.match(buildImageEditPrompt("annotate", [{ kind: "rect", text: "这里挖空", points: [{ x: 20, y: 30 }] }], "", 100, 100), /这里挖空/);
+});
 
 test("coordinates stay in original image space at zoom and clamp at edges", () => {
   assert.deepEqual(editPoint(150, 100, { left: 100, top: 50, width: 200, height: 100 }, 1000, 500), { x: 250, y: 250 });
