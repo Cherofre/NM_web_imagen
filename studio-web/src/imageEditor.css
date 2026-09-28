@@ -14,6 +14,7 @@
 .image-editor :focus-visible { outline: 2px solid var(--edit-focus); outline-offset: 2px; }
 .image-editor-body { display: flex; flex: 1; min-height: 0; padding: 0 12px; gap: 12px; }
 .image-editor-stage { flex: 1; min-width: 0; overflow: auto; background: #080808; padding: 20px; border-radius: 10px; }
+.image-editor-space { position: relative; display: flex; }
 .image-editor-sheet { position: relative; margin: auto; flex-shrink: 0; background-color: #333; background-image: conic-gradient(#333 25%, #252525 0 50%, #333 0 75%, #252525 0); background-size: 20px 20px; }
 .image-editor-sheet > img, .image-editor-sheet > canvas, .image-editor-sheet > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .image-editor-sheet > svg { touch-action: none; }
@@ -31,7 +32,7 @@
 .image-editor .image-comment-item.selected { background: var(--edit-raised); }
 .image-comment-item > span:last-child { min-width: 0; white-space: pre-wrap; }
 .image-comment-number { flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center; background: #414141; border-radius: 50%; font-size: 11px; font-variant-numeric: tabular-nums; }
-.image-comment-popover { position: absolute; z-index: 1; padding: 10px 12px 8px; border: 1px solid var(--edit-line); border-radius: 12px; background: var(--edit-raised); color: var(--edit-text); }
+.image-comment-popover { position: absolute; box-sizing: border-box; z-index: 1; padding: 10px 12px 8px; border: 1px solid var(--edit-line); border-radius: 12px; background: var(--edit-raised); color: var(--edit-text); }
 .image-comment-popover label { display: flex; flex-direction: column; gap: 4px; }
 .image-comment-title { font-size: 11px; font-weight: 500; color: var(--edit-muted); }
 .image-comment-popover textarea { min-height: 64px; height: 64px; resize: none; padding: 4px 0; border: 0; border-radius: 0; background: transparent; font-size: 13px; }

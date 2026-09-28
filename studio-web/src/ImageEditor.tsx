@@ -36,6 +36,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const [size, setSize] = useState(action === "erase" ? 60 : 6);
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(1);
+  const [viewport, setViewport] = useState({ width: 0, height: 0, left: 0, top: 0 });
   const stage = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +49,11 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const selectedObject = objects.find((item) => item.id === selected);
   const scale = fit * zoom;
   const commentCount = objects.filter((item) => item.kind === "comment" && item.text.trim()).length;
-  const commentWidth = Math.min(260, dimensions.width * scale);
+  const sheetWidth = dimensions.width * scale;
+  const sheetHeight = dimensions.height * scale;
+  const spaceWidth = Math.max(viewport.width, sheetWidth);
+  const spaceHeight = Math.max(viewport.height, sheetHeight);
+  const commentWidth = Math.min(280, viewport.width);
 
   useEffect(() => {
     const source = URL.createObjectURL(file);
@@ -71,7 +76,12 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   useEffect(() => {
     const el = stage.current;
     if (!el || !dimensions.width) return;
-    const resize = () => setFit(Math.min(1, (el.clientWidth - 40) / dimensions.width, (el.clientHeight - 40) / dimensions.height));
+    const resize = () => {
+      const width = Math.max(1, el.clientWidth - 40), height = Math.max(1, el.clientHeight - 40);
+      setViewport({ width, height, left: el.scrollLeft, top: el.scrollTop });
+      // Enlarge small textures to a useful editing size without changing source pixels.
+      setFit(Math.min(Math.max(1, 480 / Math.max(dimensions.width, dimensions.height)), width / dimensions.width, height / dimensions.height));
+    };
     resize();
     const observer = new ResizeObserver(resize); observer.observe(el);
     return () => observer.disconnect();
@@ -188,9 +198,13 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     }}>
       <header><div><button className="image-editor-back" type="button" onClick={onClose} disabled={busy}><ArrowLeft size={17} />{text("返回图片", "Back to image")}</button><strong>{labels[action][en ? 1 : 0]}</strong><span>{file.name}</span></div><button type="button" onClick={onClose} disabled={busy} title={text("退出编辑，返回图片", "Exit editing and return to image")} aria-label={text("退出编辑，返回图片", "Exit editing and return to image")}><X size={20} /></button></header>
       <div className="image-editor-body">
-        <div className="image-editor-stage" ref={stage}>
+        <div className="image-editor-stage" ref={stage} onScroll={(event) => {
+          const el = event.currentTarget;
+          setViewport((previous) => ({ ...previous, left: el.scrollLeft, top: el.scrollTop }));
+        }}>
           {!url && !error && <span role="status">{text("正在载入图片…", "Loading image…")}</span>}
-          {url && <div className="image-editor-sheet" style={{ width: dimensions.width * scale, height: dimensions.height * scale }}>
+          {url && <div className="image-editor-space" style={{ width: spaceWidth, height: spaceHeight }}>
+          <div className="image-editor-sheet" style={{ width: sheetWidth, height: sheetHeight }}>
             <img src={url} alt={file.name} draggable={false} />
             <canvas ref={canvas} width={dimensions.width} height={dimensions.height} style={{ opacity: action === "erase" ? 0.5 : 1 }} />
             <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label={text("图片编辑画布", "Image editing canvas")} style={{ cursor: tool === "select" ? "default" : "crosshair" }} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={(event) => finish(event, true)}>
@@ -204,13 +218,14 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                 </g>;
               })}
             </svg>
+          </div>
             {action === "comment" && selectedObject?.kind === "comment" && <div
               key={selectedObject.id}
               className="image-comment-popover"
               style={{
                 width: commentWidth,
-                left: Math.max(0, Math.min(dimensions.width * scale - commentWidth, selectedObject.points[0].x * scale + 18)),
-                top: Math.max(0, Math.min(dimensions.height * scale - 150, selectedObject.points[0].y * scale + 18)),
+                left: Math.max(viewport.left, Math.min(viewport.left + viewport.width - commentWidth, (spaceWidth - sheetWidth) / 2 + selectedObject.points[0].x * scale + 18)),
+                top: Math.max(viewport.top, Math.min(viewport.top + viewport.height - 150, (spaceHeight - sheetHeight) / 2 + selectedObject.points[0].y * scale + 18)),
               }}
             >
               <label><span className="image-comment-title">{text("评论", "Comment")} {objects.indexOf(selectedObject) + 1}</span>
@@ -250,7 +265,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
           {action === "erase" && <span>{text("涂蓝要删除的内容，再发送补全背景", "Paint what to remove, then send to fill the background")}</span>}
           {action !== "background" && <><button type="button" aria-label={text("撤销", "Undo")} title={text("撤销", "Undo")} disabled={!past.current.length || busy} onClick={undo}><Undo2 size={18} /></button><button type="button" aria-label={text("重做", "Redo")} title={text("重做", "Redo")} disabled={!future.current.length || busy} onClick={redo}><Redo2 size={18} /></button><button type="button" aria-label={text("清空", "Clear")} title={text("清空", "Clear")} disabled={!objects.length || busy} onClick={() => commit([])}><Trash2 size={18} /></button></>}
           <button type="button" aria-label={text("缩小视图", "Zoom out")} disabled={zoom <= 1} onClick={() => setZoom((v) => Math.max(1, v - 0.5))}><ZoomOut size={18} /></button><button type="button" aria-label={text("放大视图", "Zoom in")} disabled={zoom >= 4} onClick={() => setZoom((v) => Math.min(4, v + 0.5))}><ZoomIn size={18} /></button>
-          <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+          <button type="button" title={text("恢复适配视图", "Fit image")} onClick={() => setZoom(1)}>{text("适配", "Fit")} · {Math.round(scale * 100)}%</button>
         </div>
         <div className="image-editor-send">
           {action === "annotate" && <button type="button" disabled={busy || !url || !objects.length} onClick={() => void download()}><Download size={17} />{text("下载标注图", "Download")}</button>}
