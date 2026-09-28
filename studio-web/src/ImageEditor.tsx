@@ -92,7 +92,8 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     const ctx = canvas.current?.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, dimensions.width, dimensions.height);
-    drawEditObjects(ctx, objects);
+    // Live comment pins are drawn by SVG; raster duplicates blur when small images are enlarged.
+    drawEditObjects(ctx, objects.filter((item) => item.kind !== "comment"));
   }, [objects, dimensions]);
 
   function remember(before: EditObject[]) { past.current = [...past.current.slice(-49), before]; future.current = []; refresh((v) => v + 1); }

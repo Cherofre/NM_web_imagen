@@ -71,7 +71,7 @@ export function drawEditObjects(ctx: CanvasRenderingContext2D, objects: EditObje
       commentIndex++;
       const radius = item.width * 3;
       ctx.fillStyle = "#2563eb"; ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "white"; ctx.lineWidth = Math.max(2, radius / 10); ctx.stroke();
+      ctx.strokeStyle = "white"; ctx.lineWidth = radius * 2 / 15; ctx.stroke();
       ctx.fillStyle = "white"; ctx.font = `bold ${radius}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(commentIndex), p.x, p.y);
     }
     ctx.restore();
