@@ -6,6 +6,7 @@
 .image-editor header div { display: flex; gap: 14px; min-width: 0; align-items: center; }
 .image-editor header strong { font-size: 14px; font-weight: 600; white-space: nowrap; }
 .image-editor header span { color: var(--edit-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.image-editor header .image-editor-back { flex-shrink: 0; white-space: nowrap; }
 .image-editor button { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 36px; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--edit-text); font-size: 13px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
 .image-editor button:hover:not(:disabled) { background: var(--edit-hover); }
 .image-editor button:disabled { opacity: .4; cursor: default; }

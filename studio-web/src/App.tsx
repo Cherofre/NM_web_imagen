@@ -4312,7 +4312,8 @@ function App() {
       if (requestId !== previewMaskRequestRef.current) return;
       const sourceKey = preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src;
       setImageEditor({ file, action, key: `${sourceKey}:${action}` });
-      closePreviewImage();
+      // Keep the preview and its object URL alive while the editor is open.
+      // Cancel returns to the same image, gallery position and zoom.
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed"));
     } finally { setPreviewMaskLoading(false); }
@@ -8039,9 +8040,10 @@ function App() {
         file={imageEditor.file} action={imageEditor.action} language={language}
         draft={imageEditorDrafts.current.get(imageEditor.key)}
         onDraft={(draft) => { imageEditorDrafts.current.set(imageEditor.key, draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
-        onClose={() => setImageEditor(null)} onSend={sendImageEdit}
+        onClose={() => { setImageEditor(null); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
+        onSent={() => { setImageEditor(null); closePreviewImage(); }} onSend={sendImageEdit}
       />}
-      {previewImage && (
+      {previewImage && !imageEditor && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
           <div ref={previewDialogRef} className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>

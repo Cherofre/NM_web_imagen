@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Brush, Check, Circle, Download, Eraser, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { buildImageEditPrompt, drawEditObjects, editPoint, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import "./imageEditor.css";
 
@@ -11,6 +11,7 @@ type Props = {
   draft?: ImageEditorDraft;
   onDraft: (draft: ImageEditorDraft) => void;
   onClose: () => void;
+  onSent: () => void;
   onSend: (submission: ImageEditorSubmission) => Promise<boolean>;
 };
 type Tool = "select" | "pen" | "text" | "rect" | "ellipse" | "arrow" | "delete";
@@ -20,7 +21,7 @@ function blobOf(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("图片导出失败 / Image export failed")), "image/png"));
 }
 
-export function ImageEditor({ file, action, language, draft, onDraft, onClose, onSend }: Props) {
+export function ImageEditor({ file, action, language, draft, onDraft, onClose, onSent, onSend }: Props) {
   const en = language === "en";
   const text = (zh: string, english: string) => en ? english : zh;
   const dialog = useRef<HTMLDivElement>(null);
@@ -164,7 +165,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
       const submission: ImageEditorSubmission = { action, prompt: editPrompt, references: [base] };
       if (action === "erase") { submission.maskFile = await exportFile("mask"); submission.previewFile = await exportFile("marked"); }
       if (action === "comment" || action === "annotate") submission.references.push(await exportFile("marked"));
-      if (await onSend(submission)) onClose();
+      if (await onSend(submission)) onSent();
       else setError(text("尚未发送，请检查 GPT 图片连接配置后重试。编辑内容已保留。", "Not sent. Check the GPT image connection and retry. Your edits are retained."));
     } catch (cause) { setError(String(cause instanceof Error ? cause.message : cause)); }
     finally { sending.current = false; setBusy(false); }
@@ -185,7 +186,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); commit(objects.filter((o) => o.id !== selected)); setSelected(null); }
     }}>
-      <header><div><strong>{labels[action][en ? 1 : 0]}</strong><span>{file.name}</span></div><button type="button" onClick={onClose} disabled={busy} aria-label={text("关闭编辑", "Close editor")}><X size={20} /></button></header>
+      <header><div><button className="image-editor-back" type="button" onClick={onClose} disabled={busy}><ArrowLeft size={17} />{text("返回图片", "Back to image")}</button><strong>{labels[action][en ? 1 : 0]}</strong><span>{file.name}</span></div><button type="button" onClick={onClose} disabled={busy} title={text("退出编辑，返回图片", "Exit editing and return to image")} aria-label={text("退出编辑，返回图片", "Exit editing and return to image")}><X size={20} /></button></header>
       <div className="image-editor-body">
         <div className="image-editor-stage" ref={stage}>
           {!url && !error && <span role="status">{text("正在载入图片…", "Loading image…")}</span>}
