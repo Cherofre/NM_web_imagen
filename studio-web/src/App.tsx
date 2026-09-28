@@ -12,6 +12,8 @@ import {
   Ellipsis,
   Eye,
   EyeOff,
+  Eraser,
+  ScanLine,
   ExternalLink,
   FileText,
   FolderOpen,
@@ -8123,8 +8125,8 @@ function App() {
               />
             </div>
             {!desktopMode && !previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
-              {([["annotate", "标注", "Annotate"], ["comment", "添加评论", "Add comments"], ["background", "移除背景", "Remove background"], ["erase", "擦除", "Erase"]] as const).map(([action, zh, en]) =>
-                <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}>{language === "en" ? en : zh}</button>
+              {([["annotate", "标注", "Annotate", PencilLine], ["comment", "添加评论", "Add comments", MessageSquarePlus], ["background", "移除背景", "Remove background", ScanLine], ["erase", "擦除", "Erase", Eraser]] as const).map(([action, zh, en, Icon]) =>
+                <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}><Icon size={16} strokeWidth={1.7} /><span>{language === "en" ? en : zh}</span></button>
               )}
             </div>}
           </div>

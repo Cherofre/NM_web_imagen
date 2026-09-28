@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUpRight, Brush, Circle, Download, Eraser, Loader2, MousePointer2, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { buildImageEditPrompt, drawEditObjects, editPoint, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import "./imageEditor.css";
 
@@ -212,7 +212,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                 top: Math.max(0, Math.min(dimensions.height * scale - 150, selectedObject.points[0].y * scale + 18)),
               }}
             >
-              <label>{text("评论", "Comment")} {objects.indexOf(selectedObject) + 1}
+              <label><span className="image-comment-title">{text("评论", "Comment")} {objects.indexOf(selectedObject) + 1}</span>
                 <textarea autoFocus aria-label={text("评论内容", "Comment")} maxLength={2000} disabled={busy}
                   value={selectedObject.text} placeholder={text("输入此处的修改要求…", "Describe the change here…")}
                   onFocus={() => remember(objects)}
@@ -221,15 +221,17 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                 />
               </label>
               <div><button type="button" disabled={busy} aria-label={text("删除此条评论", "Delete this comment")} onClick={() => { commit(objects.filter((o) => o.id !== selected)); setSelected(null); }}><Trash2 size={15} /></button>
-                <button type="button" disabled={busy} onClick={() => setSelected(null)}>{text("完成此条", "Done")}</button></div>
+                <span className="image-comment-keyhint">{text("Enter 完成 · Shift+Enter 换行", "Enter to finish · Shift+Enter for newline")}</span>
+                <button className="image-comment-done" type="button" disabled={busy} title={text("完成此条，继续添加", "Finish and add another")} aria-label={text("完成此条", "Done")} onClick={() => setSelected(null)}><Check size={16} /></button></div>
             </div>}
           </div>}
         </div>
         {(action === "comment" || action === "background" || action === "annotate") && <aside className="image-editor-details">
           {action === "background" ? <><strong>{text("移除背景并保留主体", "Remove background, keep the subject")}</strong><p>{text(REMOVE_BACKGROUND_PROMPT, "Remove the background, preserve all foreground subjects and their details, and return a transparent image with clean edges.")}</p><p className="image-editor-hint">{text("点击发送后使用当前 GPT 图片配置生成一张结果，原图保留。", "Send generates one result using your GPT image settings. The original is preserved.")}</p></> : <>
-            <p>{action === "comment" ? text("点击图片，在标点旁输入。按 Enter 完成此条，再点其他位置继续添加；最后统一发送。拖动编号可调整位置。", "Click the image and type beside the pin. Press Enter to finish, then click elsewhere to add another. Send all comments when ready. Drag pins to reposition them.") : text("在图片上标注，下载标注图，或填写要求继续改图。", "Annotate the image, download it, or describe an edit and send.")}</p>
-            {action === "comment" && <button type="button" disabled={busy || !url} onClick={() => { const o: EditObject = { id: crypto.randomUUID(), kind: "comment", points: [{ x: dimensions.width / 2, y: dimensions.height / 2 }], color, width: 5 / fit, text: "" }; commit([...objects, o]); setSelected(o.id); }}>{text("添加评论", "Add comment")}</button>}
-            {action === "comment" && objects.map((o, i) => <button type="button" className={selected === o.id ? "selected" : ""} key={o.id} onClick={() => setSelected(o.id)}>{i + 1}. {o.text || text("待填写评论", "Empty comment")}</button>)}
+            {action === "comment" && <strong className="image-editor-section-title">{text("位置评论", "Comments")}<span>{commentCount}</span></strong>}
+            <p>{action === "comment" ? text("点击图片标记位置，输入修改要求。可以添加多处，最后一起发送。", "Click the image to describe a change. Add more locations, then send them together.") : text("标记修改位置，再描述你的要求。也可以直接下载标注图。", "Mark what to change, then describe your edit. You can also download the annotations.")}</p>
+            {action === "comment" && <button className="image-comment-add" type="button" disabled={busy || !url} onClick={() => { const o: EditObject = { id: crypto.randomUUID(), kind: "comment", points: [{ x: dimensions.width / 2, y: dimensions.height / 2 }], color, width: 5 / fit, text: "" }; commit([...objects, o]); setSelected(o.id); }}><Plus size={15} />{text("添加评论", "Add comment")}</button>}
+            {action === "comment" && objects.map((o, i) => <button type="button" className={`image-comment-item${selected === o.id ? " selected" : ""}`} key={o.id} onClick={() => setSelected(o.id)}><span className="image-comment-number">{i + 1}</span><span>{o.text || text("待填写评论", "Empty comment")}</span></button>)}
             {selectedObject && selectedObject.kind === "text" && <label key={selectedObject.id}>{text("标注文字", "Annotation text")}
               <textarea aria-label={selectedObject.kind === "text" ? text("标注文字", "Annotation text") : text("评论内容", "Comment")} autoFocus maxLength={2000} disabled={busy} value={selectedObject.text} placeholder={text("输入内容…", "Write here…")} onFocus={() => remember(objects)} onChange={(event) => setObjects(objects.map((o) => o.id === selected ? { ...o, text: event.target.value } : o))} />
               <button type="button" disabled={busy} onClick={() => { commit(objects.filter((o) => o.id !== selected)); setSelected(null); }}><Trash2 size={15} />{text("删除", "Delete")}</button>
