@@ -3823,12 +3823,14 @@ function App() {
     setReferences((current) => current.length ? [result.baseFile, ...current.slice(1)] : current);
     setMaskAttachment(attachment);
     setMaskEditorOpen(false);
+    if (previewImage) closePreviewImage();
     setNotice(t(result.encoding === "compat" ? "mask.appliedCompat" : "mask.applied"));
   }
 
   function removeMask() {
     setMaskAttachment(null);
     setMaskEditorOpen(false);
+    if (previewImage) closePreviewImage();
     setNotice(t("mask.removed"));
   }
 
@@ -4290,7 +4292,7 @@ function App() {
       setSubmitMode("generate");
       setReferences((current) => referencesWithMaskBase(current, file, 16));
       if (!keepCurrentMask) setMaskAttachment(null);
-      closePreviewImage();
+      // Hide the preview while editing, preserving its image URL and view for cancel.
       setMaskEditorOpen(true);
     } catch (error) {
       if (previewMaskRequestRef.current === requestId) {
@@ -8029,7 +8031,7 @@ function App() {
           initialMaskFile={activeComposerMask?.maskFile}
           initialEncoding={activeComposerMask?.encoding}
           t={t}
-          onCancel={() => setMaskEditorOpen(false)}
+          onCancel={() => { setMaskEditorOpen(false); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
           onApply={applyMaskResult}
           onRemove={activeComposerMask ? removeMask : undefined}
         />
@@ -8043,7 +8045,7 @@ function App() {
         onClose={() => { setImageEditor(null); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
         onSent={() => { setImageEditor(null); closePreviewImage(); }} onSend={sendImageEdit}
       />}
-      {previewImage && !imageEditor && (
+      {previewImage && !imageEditor && !maskEditorOpen && (
         <div className="lightbox">
           <button className="lightbox-backdrop" type="button" onClick={closePreviewImage} aria-label={t("preview.close")} />
           <div ref={previewDialogRef} className="lightbox-card" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={handlePreviewKeyDown}>
