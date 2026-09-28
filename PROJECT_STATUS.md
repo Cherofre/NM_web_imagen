@@ -1,7 +1,8 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-09-27
+- Last Updated: 2026-09-28
+- Comment follow-up: 改为标点旁浮动输入，Enter/完成此条仅收起输入；可继续添加多个点，底部显示“发送全部 N 条评论”统一提交。擦除提示明确涂蓝内容后发送补全背景。构建与评论逻辑测试验证；当前浏览器视觉复核待用户刷新。
 - Follow-up: 用户截图指出预览底部工具栏白底白字。已提高工具栏容器/按钮选择器优先级，使用固定深色配色隔离旧 lightbox 样式；本轮构建验证，浏览器工具因安全策略校验不可用未能读取用户标签页，显示效果待刷新复核。
 - Current task: codex/web-image-editing 分支实现网页版标注、位置评论、移除背景、擦除。
 - Boundary: 仅源码与网页资源，不调整大小、不打包、不发布、不同步 G 盘。

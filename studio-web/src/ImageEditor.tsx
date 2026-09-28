@@ -46,6 +46,8 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const [, refresh] = useState(0);
   const selectedObject = objects.find((item) => item.id === selected);
   const scale = fit * zoom;
+  const commentCount = objects.filter((item) => item.kind === "comment" && item.text.trim()).length;
+  const commentWidth = Math.min(260, dimensions.width * scale);
 
   useEffect(() => {
     const source = URL.createObjectURL(file);
@@ -172,7 +174,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   return <div className="image-editor-backdrop">
     <div className="image-editor" role="dialog" aria-modal="true" aria-label={labels[action][en ? 1 : 0]} tabIndex={-1} ref={dialog} onKeyDown={(event) => {
       event.stopPropagation();
-      if (event.key === "Escape" && !busy) { event.preventDefault(); onClose(); }
+      if (event.key === "Escape" && !busy) { event.preventDefault(); if (action === "comment" && selected) setSelected(null); else onClose(); }
       if (event.key === "Tab") {
         const nodes = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || [])];
         const first = nodes[0], last = nodes[nodes.length - 1];
@@ -201,14 +203,34 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                 </g>;
               })}
             </svg>
+            {action === "comment" && selectedObject?.kind === "comment" && <div
+              key={selectedObject.id}
+              className="image-comment-popover"
+              style={{
+                width: commentWidth,
+                left: Math.max(0, Math.min(dimensions.width * scale - commentWidth, selectedObject.points[0].x * scale + 18)),
+                top: Math.max(0, Math.min(dimensions.height * scale - 150, selectedObject.points[0].y * scale + 18)),
+              }}
+            >
+              <label>{text("评论", "Comment")} {objects.indexOf(selectedObject) + 1}
+                <textarea autoFocus aria-label={text("评论内容", "Comment")} maxLength={2000} disabled={busy}
+                  value={selectedObject.text} placeholder={text("输入此处的修改要求…", "Describe the change here…")}
+                  onFocus={() => remember(objects)}
+                  onChange={(event) => setObjects(objects.map((o) => o.id === selected ? { ...o, text: event.target.value } : o))}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); setSelected(null); } }}
+                />
+              </label>
+              <div><button type="button" disabled={busy} aria-label={text("删除此条评论", "Delete this comment")} onClick={() => { commit(objects.filter((o) => o.id !== selected)); setSelected(null); }}><Trash2 size={15} /></button>
+                <button type="button" disabled={busy} onClick={() => setSelected(null)}>{text("完成此条", "Done")}</button></div>
+            </div>}
           </div>}
         </div>
         {(action === "comment" || action === "background" || action === "annotate") && <aside className="image-editor-details">
           {action === "background" ? <><strong>{text("移除背景并保留主体", "Remove background, keep the subject")}</strong><p>{text(REMOVE_BACKGROUND_PROMPT, "Remove the background, preserve all foreground subjects and their details, and return a transparent image with clean edges.")}</p><p className="image-editor-hint">{text("点击发送后使用当前 GPT 图片配置生成一张结果，原图保留。", "Send generates one result using your GPT image settings. The original is preserved.")}</p></> : <>
-            <p>{action === "comment" ? text("点击图片添加位置评论，拖动编号可调整位置。", "Click the image to add a comment. Drag a pin to reposition it.") : text("在图片上标注，下载标注图，或填写要求继续改图。", "Annotate the image, download it, or describe an edit and send.")}</p>
+            <p>{action === "comment" ? text("点击图片，在标点旁输入。按 Enter 完成此条，再点其他位置继续添加；最后统一发送。拖动编号可调整位置。", "Click the image and type beside the pin. Press Enter to finish, then click elsewhere to add another. Send all comments when ready. Drag pins to reposition them.") : text("在图片上标注，下载标注图，或填写要求继续改图。", "Annotate the image, download it, or describe an edit and send.")}</p>
             {action === "comment" && <button type="button" disabled={busy || !url} onClick={() => { const o: EditObject = { id: crypto.randomUUID(), kind: "comment", points: [{ x: dimensions.width / 2, y: dimensions.height / 2 }], color, width: 5 / fit, text: "" }; commit([...objects, o]); setSelected(o.id); }}>{text("添加评论", "Add comment")}</button>}
             {action === "comment" && objects.map((o, i) => <button type="button" className={selected === o.id ? "selected" : ""} key={o.id} onClick={() => setSelected(o.id)}>{i + 1}. {o.text || text("待填写评论", "Empty comment")}</button>)}
-            {selectedObject && (selectedObject.kind === "text" || selectedObject.kind === "comment") && <label key={selectedObject.id}>{selectedObject.kind === "text" ? text("标注文字", "Annotation text") : text("评论内容", "Comment")}
+            {selectedObject && selectedObject.kind === "text" && <label key={selectedObject.id}>{text("标注文字", "Annotation text")}
               <textarea aria-label={selectedObject.kind === "text" ? text("标注文字", "Annotation text") : text("评论内容", "Comment")} autoFocus maxLength={2000} disabled={busy} value={selectedObject.text} placeholder={text("输入内容…", "Write here…")} onFocus={() => remember(objects)} onChange={(event) => setObjects(objects.map((o) => o.id === selected ? { ...o, text: event.target.value } : o))} />
               <button type="button" disabled={busy} onClick={() => { commit(objects.filter((o) => o.id !== selected)); setSelected(null); }}><Trash2 size={15} />{text("删除", "Delete")}</button>
             </label>}
@@ -222,14 +244,14 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
           {action === "annotate" && tools.map(([id, Icon, label]) => <button type="button" key={id} disabled={busy} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => setTool(id)}><Icon size={18} /></button>)}
           {action === "annotate" && <input aria-label={text("标注颜色", "Annotation color")} type="color" value={color} disabled={busy} onChange={(event) => { setColor(event.target.value); if (tool === "select" && selected) commit(objects.map((o) => o.id === selected ? { ...o, color: event.target.value } : o)); }} />}
           {(action === "erase" || action === "annotate") && <label className="image-editor-size">{text("笔刷", "Brush")}<input aria-label={text("笔刷大小", "Brush size")} type="range" min={2} max={action === "erase" ? 160 : 20} value={size} disabled={busy} onChange={(event) => setSize(Number(event.target.value))} /></label>}
-          {action === "erase" && <span>{text("涂抹要擦除的区域", "Paint the area to erase")}</span>}
+          {action === "erase" && <span>{text("涂蓝要删除的内容，再发送补全背景", "Paint what to remove, then send to fill the background")}</span>}
           {action !== "background" && <><button type="button" aria-label={text("撤销", "Undo")} title={text("撤销", "Undo")} disabled={!past.current.length || busy} onClick={undo}><Undo2 size={18} /></button><button type="button" aria-label={text("重做", "Redo")} title={text("重做", "Redo")} disabled={!future.current.length || busy} onClick={redo}><Redo2 size={18} /></button><button type="button" aria-label={text("清空", "Clear")} title={text("清空", "Clear")} disabled={!objects.length || busy} onClick={() => commit([])}><Trash2 size={18} /></button></>}
           <button type="button" aria-label={text("缩小视图", "Zoom out")} disabled={zoom <= 1} onClick={() => setZoom((v) => Math.max(1, v - 0.5))}><ZoomOut size={18} /></button><button type="button" aria-label={text("放大视图", "Zoom in")} disabled={zoom >= 4} onClick={() => setZoom((v) => Math.min(4, v + 0.5))}><ZoomIn size={18} /></button>
           <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
         </div>
         <div className="image-editor-send">
           {action === "annotate" && <button type="button" disabled={busy || !url || !objects.length} onClick={() => void download()}><Download size={17} />{text("下载标注图", "Download")}</button>}
-          <button className="primary-action" type="button" disabled={!canSend} onClick={() => void send()}>{busy ? <Loader2 className="spin" size={17} /> : <Send size={17} />}{text("发送", "Send")}</button>
+          <button className="primary-action" type="button" disabled={!canSend} onClick={() => void send()}>{busy ? <Loader2 className="spin" size={17} /> : <Send size={17} />}{action === "comment" ? text(`发送全部 ${commentCount} 条评论`, `Send all ${commentCount} comments`) : text("发送", "Send")}</button>
         </div>
       </footer>
     </div>

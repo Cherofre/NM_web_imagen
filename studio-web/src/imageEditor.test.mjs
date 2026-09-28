@@ -31,3 +31,15 @@ test("background and erasure keep their dedicated intent", () => {
   assert.equal(imageEditActionFrom("background"), "background");
   assert.equal(imageEditActionFrom("unsupported"), undefined);
 });
+
+test("multiple completed comments are combined into one numbered edit prompt", () => {
+  const objects = [
+    { kind: "comment", text: "帽子改蓝色", points: [{ x: 200, y: 100 }] },
+    { kind: "comment", text: "", points: [{ x: 300, y: 200 }] },
+    { kind: "comment", text: "移除冰淇淋", points: [{ x: 600, y: 500 }] },
+  ];
+  const prompt = buildImageEditPrompt("comment", objects, "", 1000, 1000);
+  assert.match(prompt, /1\. 位置（从左到右 20%，从上到下 10%）：帽子改蓝色/);
+  assert.match(prompt, /2\. 位置（从左到右 60%，从上到下 50%）：移除冰淇淋/);
+  assert.doesNotMatch(prompt, /3\. 位置/);
+});

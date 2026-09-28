@@ -20,6 +20,10 @@
 .image-editor textarea { width: 100%; min-height: 100px; resize: vertical; padding: 10px; background: #23272d; border: 1px solid #69717e; border-radius: 8px; color: #f3f4f6; }
 .image-editor textarea::placeholder { color: #b8c0cc; }
 .image-editor-hint { color: #c0c5ce; }
+.image-comment-popover { position: absolute; z-index: 1; padding: 10px; border: 1px solid #69717e; border-radius: 10px; background: #23272d; color: #f3f4f6; }
+.image-comment-popover label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.image-comment-popover textarea { min-height: 64px; height: 64px; resize: none; padding: 6px; }
+.image-comment-popover > div { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
 .image-editor footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px; }
 .image-editor-toolbar, .image-editor-send { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .image-editor-toolbar > span { font-size: 13px; padding: 0 8px; }
