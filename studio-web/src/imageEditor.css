@@ -17,7 +17,8 @@
 .image-editor-space { position: relative; display: flex; }
 .image-editor-sheet { position: relative; margin: auto; flex-shrink: 0; background-color: #333; background-image: conic-gradient(#333 25%, #252525 0 50%, #333 0 75%, #252525 0); background-size: 20px 20px; }
 .image-editor-sheet > img, .image-editor-sheet > canvas, .image-editor-sheet > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.image-editor-sheet > svg { touch-action: none; }
+.image-editor-sheet > svg { touch-action: none; user-select: none; -webkit-user-select: none; }
+.image-editor-sheet > svg text { pointer-events: none; }
 .image-editor-details { width: 248px; flex-shrink: 0; padding: 16px 8px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
 .image-editor-details p { font-size: 12px; line-height: 1.8; color: var(--edit-muted); margin: 0; }
 .image-editor-details > button { text-align: left; justify-content: flex-start; overflow-wrap: anywhere; }

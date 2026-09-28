@@ -134,6 +134,7 @@ test("mask canvas fit scale keeps the complete image inside the real stage", () 
   assert.ok(2000 * landscapeScale <= 800 - 24);
   assert.ok(1000 * landscapeScale <= 600 - 24);
 
-  assert.equal(masks.maskCanvasFitScale(800, 600, 100, 100, 12), 1);
+  assert.equal(masks.maskCanvasFitScale(800, 600, 100, 100, 12), 4.8);
+  assert.equal(masks.maskCanvasFitScale(300, 240, 64, 64, 12), 216 / 64);
   assert.equal(masks.maskCanvasFitScale(0, 600, 1000, 1000, 12), 1);
 });

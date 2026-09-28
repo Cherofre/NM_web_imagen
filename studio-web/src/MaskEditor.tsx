@@ -209,9 +209,16 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     const scaleX = rect.width / overlay.width;
     const scaleY = rect.height / overlay.height;
     const displayScale = Math.max(0.0001, (scaleX + scaleY) / 2);
+    // Cursor resolution follows the screen, not the (possibly tiny) source texture.
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 4096 / Math.max(rect.width, rect.height));
+    const cursorWidth = Math.max(1, Math.ceil(rect.width * pixelRatio));
+    const cursorHeight = Math.max(1, Math.ceil(rect.height * pixelRatio));
+    if (cursor.width !== cursorWidth) cursor.width = cursorWidth;
+    if (cursor.height !== cursorHeight) cursor.height = cursorHeight;
     const radius = brushSize / 2;
 
     context.save();
+    context.scale(cursor.width / overlay.width, cursor.height / overlay.height);
     context.beginPath();
     context.arc(point.x, point.y, radius, 0, Math.PI * 2);
     context.strokeStyle = "rgba(0, 0, 0, 0.9)";
@@ -391,7 +398,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
   useEffect(() => {
     const frame = window.requestAnimationFrame(redrawBrushCursor);
     return () => window.cancelAnimationFrame(frame);
-  }, [brushSize, tool, ready, saving, zoom, pan.x, pan.y, dimensions.width, dimensions.height]);
+  }, [brushSize, tool, ready, saving, zoom, fitScale, pan.x, pan.y, dimensions.width, dimensions.height]);
 
   function canvasPoint(event: PointerEvent<HTMLCanvasElement>) {
     const canvas = overlayCanvasRef.current;

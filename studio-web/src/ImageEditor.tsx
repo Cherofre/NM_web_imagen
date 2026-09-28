@@ -39,6 +39,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const [viewport, setViewport] = useState({ width: 0, height: 0, left: 0, top: 0 });
   const stage = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [brushPoint, setBrushPoint] = useState<EditPoint | null>(null);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   const [error, setError] = useState("");
@@ -103,6 +104,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   function point(event: ReactPointerEvent<SVGSVGElement>) { return editPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), dimensions.width, dimensions.height); }
   function start(event: ReactPointerEvent<SVGSVGElement>) {
     if (busy || event.button !== 0 || action === "background" || gesture.current) return;
+    event.preventDefault();
     const p = point(event);
     const hit = (event.target as Element).closest("[data-object]")?.getAttribute("data-object");
     const existing = objects.find((item) => item.id === hit);
@@ -124,6 +126,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function move(event: ReactPointerEvent<SVGSVGElement>) {
+    if (action === "erase") setBrushPoint(point(event));
     const g = gesture.current;
     if (!g || g.pointer !== event.pointerId) return;
     const p = point(event);
@@ -208,7 +211,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
           <div className="image-editor-sheet" style={{ width: sheetWidth, height: sheetHeight }}>
             <img src={url} alt={file.name} draggable={false} />
             <canvas ref={canvas} width={dimensions.width} height={dimensions.height} style={{ opacity: action === "erase" ? 0.5 : 1 }} />
-            <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label={text("图片编辑画布", "Image editing canvas")} style={{ cursor: tool === "select" ? "default" : "crosshair" }} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={(event) => finish(event, true)}>
+            <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label={text("图片编辑画布", "Image editing canvas")} style={{ cursor: action === "erase" ? "none" : tool === "select" ? "default" : "crosshair" }} onPointerEnter={(event) => setBrushPoint(point(event))} onPointerLeave={() => setBrushPoint(null)} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={(event) => { finish(event, true); setBrushPoint(null); }}>
               {objects.map((o, index) => {
                 const p = o.points[0], q = o.points[o.points.length - 1];
                 return <g key={o.id} data-object={o.id}>
@@ -218,6 +221,11 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
                   {(o.kind === "rect" || o.kind === "ellipse") && <rect x={Math.min(p.x, q.x)} y={Math.min(p.y, q.y)} width={Math.max(1, Math.abs(q.x - p.x))} height={Math.max(1, Math.abs(q.y - p.y))} fill="transparent" stroke={selected === o.id ? "#60a5fa" : "transparent"} strokeWidth={2 / scale} />}
                 </g>;
               })}
+              {action === "erase" && brushPoint && !busy && <g pointerEvents="none">
+                <circle cx={brushPoint.x} cy={brushPoint.y} r={size / fit / 2} fill="none" stroke="#111" strokeWidth={3 / scale} />
+                <circle cx={brushPoint.x} cy={brushPoint.y} r={size / fit / 2} fill="none" stroke="white" strokeWidth={1 / scale} />
+                <circle cx={brushPoint.x} cy={brushPoint.y} r={1 / scale} fill="white" />
+              </g>}
             </svg>
           </div>
             {action === "comment" && selectedObject?.kind === "comment" && <div

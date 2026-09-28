@@ -94,7 +94,8 @@ export function maskCanvasFitScale(
   const padding = Math.max(0, Number(edgePadding) || 0) * 2;
   const availableWidth = Math.max(1, safeStageWidth - padding);
   const availableHeight = Math.max(1, safeStageHeight - padding);
-  return Math.min(1, availableWidth / safeImageWidth, availableHeight / safeImageHeight);
+  const preferredScale = Math.max(1, 480 / Math.max(safeImageWidth, safeImageHeight));
+  return Math.min(preferredScale, availableWidth / safeImageWidth, availableHeight / safeImageHeight);
 }
 
 export function referenceFileFingerprint(file: ReferenceFileIdentity | null | undefined) {
