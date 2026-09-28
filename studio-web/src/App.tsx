@@ -8110,12 +8110,6 @@ function App() {
                   <button type="button" className="lightbox-gallery-button next" onClick={() => shiftPreviewImage(1)} aria-label={t("preview.next")} title={t("preview.next")}><ChevronRight size={22} /></button>
                 </>
               )}
-              <div className="lightbox-zoom-tools" aria-label={t("preview.zoomControls")}>
-                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label={t("preview.zoomOut")} title={t("preview.zoomOut")}><ZoomOut size={18} /></button>
-                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label={t("preview.zoomIn")} title={t("preview.zoomIn")}><ZoomIn size={18} /></button>
-                <button type="button" onClick={resetPreviewCanvas} title={t("preview.fit")}>{t("preview.fit")}</button>
-                <span>{Math.round(previewZoom * 100)}%</span>
-              </div>
               <img
                 src={resolveRuntimeUrl(previewImage.src)}
                 alt={previewImage.name}
@@ -8126,11 +8120,19 @@ function App() {
                 } as CSSProperties}
               />
             </div>
+            <footer className="preview-footer">
             {!desktopMode && !previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
               {([["annotate", "标注", "Annotate", PencilLine], ["comment", "添加评论", "Add comments", MessageSquarePlus], ["background", "移除背景", "Remove background", ScanLine], ["erase", "擦除", "Erase", Eraser]] as const).map(([action, zh, en, Icon]) =>
                 <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}><Icon size={16} strokeWidth={1.7} /><span>{language === "en" ? en : zh}</span></button>
               )}
             </div>}
+              <div className="lightbox-zoom-tools" aria-label={t("preview.zoomControls")}>
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom - 0.25)} aria-label={t("preview.zoomOut")} title={t("preview.zoomOut")}><ZoomOut size={18} /></button>
+                <button type="button" onClick={() => setPreviewZoomLevel(previewZoom + 0.25)} aria-label={t("preview.zoomIn")} title={t("preview.zoomIn")}><ZoomIn size={18} /></button>
+                <button type="button" onClick={resetPreviewCanvas} title={t("preview.fit")}>{t("preview.fit")}</button>
+                <span>{Math.round(previewZoom * 100)}%</span>
+              </div>
+            </footer>
           </div>
         </div>
       )}
