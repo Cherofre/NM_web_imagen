@@ -6342,13 +6342,13 @@ function App() {
                                     type="button"
                                     className="image-mask-action"
                                     onClick={() => void editPreviewMask({ src, name, dimensions: image.dimensions })}
-                                    title={isSameOriginOutput(src) ? t("preview.editMask") : t("status.outputOnly")}
-                                    aria-label={t("preview.editMask")}
+                                    title={isSameOriginOutput(src) ? t(desktopMode ? "preview.editMask" : "editor.local") : t("status.outputOnly")}
+                                    aria-label={t(desktopMode ? "preview.editMask" : "editor.local")}
                                     aria-busy={previewMaskLoading}
                                     disabled={previewMaskLoading || !isSameOriginOutput(src)}
                                   >
                                     {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
-                                    <span>{t("preview.editMask")}</span>
+                                    <span>{t(desktopMode ? "preview.editMask" : "editor.local")}</span>
                                   </button>
                                   <button type="button" className="image-download-action" onClick={() => void downloadImage(src, name)} title={t("image.download")} aria-label={t("image.download")}>
                                     <Download size={15} />
@@ -8083,13 +8083,13 @@ function App() {
                     type="button"
                     className="preview-mask-action"
                     onClick={() => void editPreviewMask(previewImage)}
-                    title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t("preview.editMask") : t("status.outputOnly")}
-                    aria-label={t("preview.editMask")}
+                    title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t(desktopMode ? "preview.editMask" : "editor.local") : t("status.outputOnly")}
+                    aria-label={t(desktopMode ? "preview.editMask" : "editor.local")}
                     aria-busy={previewMaskLoading}
                     disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
                   >
                     {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
-                    <span>{t("preview.editMask")}</span>
+                    <span>{t(desktopMode ? "preview.editMask" : "editor.local")}</span>
                   </button>
                 )}
                 {!previewImage.isMaskSnapshot && (
