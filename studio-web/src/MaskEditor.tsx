@@ -767,9 +767,9 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
         {unified && <div className="local-edit-instructions">
           <div className="local-edit-intents" role="group" aria-label={words("修改方式", "Edit intent")}>
             <button type="button" aria-pressed={intent === "local"} disabled={saving} onClick={() => setIntent("local")}>{words("自定义修改", "Custom change")}</button>
-            <button type="button" aria-pressed={intent === "erase"} disabled={saving} onClick={() => setIntent("erase")}>{words("移除内容", "Remove content")}</button>
+            <button type="button" aria-pressed={intent === "erase"} disabled={saving} onClick={() => setIntent("erase")}>{words("擦除内容", "Erase content")}</button>
           </div>
-          {intent === "local" ? <textarea aria-label={words("局部修改要求", "Local edit instructions")} maxLength={8000} disabled={saving} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder={words("涂出区域，再描述要怎么改…", "Paint an area, then describe the change…")} /> : <p>{words("涂出要移除的内容，发送后由 AI 补全背景。切换修改方式会保留选区。", "Paint content to remove; AI will fill the background. Switching intent preserves the selection.")}</p>}
+          {intent === "local" ? <textarea aria-label={words("局部修改要求", "Local edit instructions")} maxLength={8000} disabled={saving} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder={words("涂出区域，再描述要怎么改…", "Paint an area, then describe the change…")} /> : <p>{words("涂出要擦除的内容，发送后由 AI 补全背景。切换修改方式会保留选区。", "Paint content to erase; AI will fill the background. Switching intent preserves the selection.")}</p>}
         </div>}
         <div ref={stageRef} className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
           {!ready && !error && <div className="mask-editor-loading"><Loader2 className="spin" size={22} /> {t("mask.loading")}</div>}
