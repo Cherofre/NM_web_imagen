@@ -1,5 +1,7 @@
 import {
   AlertCircle,
+  ArrowLeft,
+  Send,
   Brush,
   Check,
   Eraser,
@@ -17,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   type CSSProperties,
+  type ReactNode,
   type KeyboardEvent,
   type PointerEvent,
   type WheelEvent,
@@ -25,6 +28,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { ERASE_PROMPT } from "./imageEditorModel";
 import {
   maskAlphaSelectsPixel,
   maskCanvasFitScale,
@@ -50,6 +54,12 @@ export type MaskEditorResult = {
 };
 
 type MaskEditorProps = {
+  unified?: boolean;
+  english?: boolean;
+  navigation?: ReactNode;
+  initialIntent?: "local" | "erase";
+  onSend?: (result: MaskEditorResult, prompt: string, intent: "local" | "erase") => Promise<boolean>;
+  onBusyChange?: (busy: boolean) => void;
   file: File;
   initialMaskFile?: File | null;
   initialEncoding?: MaskEncoding;
@@ -139,7 +149,7 @@ function drawCommand(context: CanvasRenderingContext2D, command: MaskCommand) {
   drawStroke(context, command);
 }
 
-export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel, onApply, onRemove }: MaskEditorProps) {
+export function MaskEditor({ unified = false, english = false, navigation, initialIntent = "local", onSend, onBusyChange, file, initialMaskFile, initialEncoding, t, onCancel, onApply, onRemove }: MaskEditorProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -159,6 +169,10 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     panY: number;
   } | null>(null);
 
+  const words = (zh: string, en: string) => english ? en : zh;
+  const [intent, setIntent] = useState(initialIntent);
+  const [instructions, setInstructions] = useState("");
+  const exportLock = useRef(false);
   const [tool, setTool] = useState<MaskTool>("brush");
   const [brushSize, setBrushSize] = useState(64);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -215,7 +229,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     const cursorHeight = Math.max(1, Math.ceil(rect.height * pixelRatio));
     if (cursor.width !== cursorWidth) cursor.width = cursorWidth;
     if (cursor.height !== cursorHeight) cursor.height = cursorHeight;
-    const radius = brushSize / 2;
+    const radius = unified ? brushSize / fitScale / 2 : brushSize / 2;
 
     context.save();
     context.scale(cursor.width / overlay.width, cursor.height / overlay.height);
@@ -434,7 +448,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     const stroke: Extract<MaskCommand, { kind: "stroke" }> = {
       kind: "stroke",
       tool,
-      size: brushSize,
+      size: unified ? brushSize / fitScale : brushSize,
       points: [point],
     };
     activeStrokeRef.current = stroke;
@@ -539,15 +553,17 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
     return sampled ? selected / sampled : 0;
   }
 
-  async function applyMask() {
+  async function applyMask(send = false) {
     const base = baseCanvasRef.current;
     const overlay = overlayCanvasRef.current;
-    if (!base || !overlay || !ready || saving) return;
+    if (!base || !overlay || !ready || saving || exportLock.current) return;
+    if (send && intent === "local" && !instructions.trim()) { setError(words("请填写局部修改要求", "Describe the local change")); return; }
     const selectedCoverage = coverage();
     if (selectedCoverage <= 0) {
       setError(t("mask.empty"));
       return;
     }
+    exportLock.current = true;
     setSaving(true);
     setError("");
     try {
@@ -589,21 +605,29 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
         throw new Error(t("mask.fileTooLarge"));
       }
       const stamp = Date.now();
-      onApply({
+      const result = {
         baseFile: new File([baseBlob], pngName(file.name), { type: "image/png", lastModified: stamp }),
         maskFile: new File([maskBlob], "mask.png", { type: "image/png", lastModified: stamp }),
         previewFile: new File([previewBlob], "mask-preview.webp", { type: "image/webp", lastModified: stamp }),
         coverage: selectedCoverage,
         encoding,
-      });
+      };
+      if (send && onSend) {
+        if (!(await onSend(result, intent === "erase" ? ERASE_PROMPT : instructions.trim(), intent))) setError(words("尚未发送，请检查图片连接配置。选区已保留。", "Not sent. Check the image connection. Your selection is retained."));
+      } else onApply(result);
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : t("mask.exportFailed"));
     } finally {
+      exportLock.current = false;
       setSaving(false);
     }
   }
 
+  useEffect(() => { onBusyChange?.(saving); }, [saving, onBusyChange]);
+
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (saving) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -614,7 +638,7 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
       const dialog = dialogRef.current;
         const focusable = dialog
           ? Array.from(dialog.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
         ))
           : [];
       if (!focusable.length) {
@@ -633,13 +657,14 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
       }
       return;
     }
+    if (event.nativeEvent.isComposing || (event.target as HTMLElement).matches('textarea,input:not([type="range"]),select,[contenteditable="true"]')) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) redo();
       else undo();
       return;
     }
-    if (!ready || saving || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (!ready || saving || activeStrokeRef.current || event.ctrlKey || event.metaKey || event.altKey) return;
     const shortcut = event.key.toLowerCase();
     switch (shortcut) {
       case "b":
@@ -686,18 +711,48 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
   const fittedHeight = dimensions.height ? Math.max(1, Math.floor(dimensions.height * fitScale)) : 0;
   void historyVersion;
 
+  const zoomTools = (
+          <div className="mask-editor-zoom-tools" aria-label={t("mask.zoomTools")}>
+            <button type="button" onClick={() => setZoom((value) => clamp(value - 0.25, 0.5, 4))} title={`${t("mask.zoomOut")} (-)`} aria-label={t("mask.zoomOut")} aria-keyshortcuts="-"><ZoomOut size={17} /></button>
+            <button type="button" onClick={() => setZoom((value) => clamp(value + 0.25, 0.5, 4))} title={`${t("mask.zoomIn")} (+)`} aria-label={t("mask.zoomIn")} aria-keyshortcuts="+ ="><ZoomIn size={17} /></button>
+            <button type="button" onClick={resetView} title={`${t("mask.fit")} (0)`} aria-keyshortcuts="0"><RotateCcw size={16} /> {t("mask.fit")}</button>
+            <span>{Math.round((unified ? fitScale : 1) * zoom * 100)}%</span>
+          </div>
+  );
+  const toolbar = (
+        <div className="mask-editor-toolbar" aria-label={t("mask.tools")}>
+          <div className="mask-editor-tool-group">
+            <button type="button" className={tool === "brush" ? "active" : ""} disabled={saving} onClick={() => setTool("brush")} aria-pressed={tool === "brush"} aria-keyshortcuts="B" title={`${t("mask.brush")} (B)`}><Brush size={17} /><span>{unified ? words("添加选区", "Add selection") : t("mask.brush")}</span></button>
+            <button type="button" className={tool === "eraser" ? "active" : ""} disabled={saving} onClick={() => setTool("eraser")} aria-pressed={tool === "eraser"} aria-keyshortcuts="E" title={`${t("mask.eraser")} (E)`}><Eraser size={17} /><span>{unified ? words("取消选区", "Subtract selection") : t("mask.eraser")}</span></button>
+            <button type="button" className={tool === "move" ? "active" : ""} disabled={saving} onClick={() => setTool("move")} aria-pressed={tool === "move"} aria-keyshortcuts="H" title={`${t("mask.move")} (H)`}><Hand size={17} /><span>{t("mask.move")}</span></button>
+          </div>
+          <label className="mask-editor-size">
+            <span>{t("mask.brushSize")}</span>
+            <input type="range" min={8} max={512} step={4} value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} disabled={!ready || saving} aria-keyshortcuts="[ ]" title="[ / ]" />
+            <output>{brushSize}px</output>
+          </label>
+          <div className="mask-editor-tool-group compact">
+            <button type="button" onClick={undo} disabled={!canUndo || saving} title={t("mask.undo")} aria-label={t("mask.undo")}><Undo2 size={17} /></button>
+            <button type="button" onClick={redo} disabled={!canRedo || saving} title={t("mask.redo")} aria-label={t("mask.redo")}><Redo2 size={17} /></button>
+            <button type="button" onClick={clearMask} disabled={!ready || saving} title={t("mask.clear")} aria-label={t("mask.clear")}><Trash2 size={17} /></button>
+            <button type="button" onClick={fillMask} disabled={!ready || saving} title={t("mask.fill")} aria-label={t("mask.fill")}><Maximize2 size={17} /></button>
+          </div>
+          {unified && zoomTools}
+        </div>
+  );
   return (
-    <div className="lightbox mask-editor-shell">
-      <button className="lightbox-backdrop" type="button" onClick={onCancel} aria-label={t("mask.cancel")} />
-      <div className="mask-editor-card" role="dialog" aria-modal="true" aria-label={t("mask.title")} tabIndex={-1} ref={dialogRef} onKeyDown={handleKeyDown}>
+    <div className={`lightbox mask-editor-shell${unified ? " unified" : ""}`}>
+      <button className="lightbox-backdrop" type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={t("mask.cancel")} />
+      <div className={`mask-editor-card${unified ? " image-editor" : ""}`} role="dialog" aria-modal="true" aria-label={unified ? words("局部修改", "Local edit") : t("mask.title")} tabIndex={-1} ref={dialogRef} onKeyDown={handleKeyDown}>
         <header className="mask-editor-head">
           <div>
-            <strong>{t("mask.title")}</strong>
+            <>{unified && <button type="button" className="image-editor-back" onClick={() => { if (!exportLock.current) onCancel(); }} disabled={saving}><ArrowLeft size={17} />{words("返回图片", "Back to image")}</button>}<strong>{unified ? words("局部修改", "Local edit") : t("mask.title")}</strong></>
             <span>{file.name}{dimensions.width ? ` · ${dimensions.width} × ${dimensions.height}` : ""}</span>
           </div>
-          <button type="button" onClick={onCancel} aria-label={t("mask.cancel")} title={t("mask.cancel")}><X size={18} /></button>
+          <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={t("mask.cancel")} title={t("mask.cancel")}><X size={18} /></button>
         </header>
 
+        {navigation}
         <div className="mask-editor-guidance" role="note">
           <AlertCircle size={17} />
           <span>{t("mask.paintHint")}</span>
@@ -707,25 +762,15 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
           </span>
         </div>
 
-        <div className="mask-editor-toolbar" aria-label={t("mask.tools")}>
-          <div className="mask-editor-tool-group">
-            <button type="button" className={tool === "brush" ? "active" : ""} onClick={() => setTool("brush")} aria-pressed={tool === "brush"} aria-keyshortcuts="B" title={`${t("mask.brush")} (B)`}><Brush size={17} /><span>{t("mask.brush")}</span></button>
-            <button type="button" className={tool === "eraser" ? "active" : ""} onClick={() => setTool("eraser")} aria-pressed={tool === "eraser"} aria-keyshortcuts="E" title={`${t("mask.eraser")} (E)`}><Eraser size={17} /><span>{t("mask.eraser")}</span></button>
-            <button type="button" className={tool === "move" ? "active" : ""} onClick={() => setTool("move")} aria-pressed={tool === "move"} aria-keyshortcuts="H" title={`${t("mask.move")} (H)`}><Hand size={17} /><span>{t("mask.move")}</span></button>
-          </div>
-          <label className="mask-editor-size">
-            <span>{t("mask.brushSize")}</span>
-            <input type="range" min={8} max={512} step={4} value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} disabled={!ready} aria-keyshortcuts="[ ]" title="[ / ]" />
-            <output>{brushSize}px</output>
-          </label>
-          <div className="mask-editor-tool-group compact">
-            <button type="button" onClick={undo} disabled={!canUndo} title={t("mask.undo")} aria-label={t("mask.undo")}><Undo2 size={17} /></button>
-            <button type="button" onClick={redo} disabled={!canRedo} title={t("mask.redo")} aria-label={t("mask.redo")}><Redo2 size={17} /></button>
-            <button type="button" onClick={clearMask} disabled={!ready} title={t("mask.clear")} aria-label={t("mask.clear")}><Trash2 size={17} /></button>
-            <button type="button" onClick={fillMask} disabled={!ready} title={t("mask.fill")} aria-label={t("mask.fill")}><Maximize2 size={17} /></button>
-          </div>
-        </div>
+        {!unified && toolbar}
 
+        {unified && <div className="local-edit-instructions">
+          <div className="local-edit-intents" role="group" aria-label={words("修改方式", "Edit intent")}>
+            <button type="button" aria-pressed={intent === "local"} disabled={saving} onClick={() => setIntent("local")}>{words("自定义修改", "Custom change")}</button>
+            <button type="button" aria-pressed={intent === "erase"} disabled={saving} onClick={() => setIntent("erase")}>{words("移除内容", "Remove content")}</button>
+          </div>
+          {intent === "local" ? <textarea aria-label={words("局部修改要求", "Local edit instructions")} maxLength={8000} disabled={saving} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder={words("涂出区域，再描述要怎么改…", "Paint an area, then describe the change…")} /> : <p>{words("涂出要移除的内容，发送后由 AI 补全背景。切换修改方式会保留选区。", "Paint content to remove; AI will fill the background. Switching intent preserves the selection.")}</p>}
+        </div>}
         <div ref={stageRef} className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
           {!ready && !error && <div className="mask-editor-loading"><Loader2 className="spin" size={22} /> {t("mask.loading")}</div>}
           {error && <div className="mask-editor-error" role="alert"><AlertCircle size={18} /> {error}</div>}
@@ -757,18 +802,14 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
             />
             <canvas ref={cursorCanvasRef} className="mask-editor-brush-cursor" aria-hidden="true" />
           </div>
-          <div className="mask-editor-zoom-tools" aria-label={t("mask.zoomTools")}>
-            <button type="button" onClick={() => setZoom((value) => clamp(value - 0.25, 0.5, 4))} title={`${t("mask.zoomOut")} (-)`} aria-label={t("mask.zoomOut")} aria-keyshortcuts="-"><ZoomOut size={17} /></button>
-            <button type="button" onClick={() => setZoom((value) => clamp(value + 0.25, 0.5, 4))} title={`${t("mask.zoomIn")} (+)`} aria-label={t("mask.zoomIn")} aria-keyshortcuts="+ ="><ZoomIn size={17} /></button>
-            <button type="button" onClick={resetView} title={`${t("mask.fit")} (0)`} aria-keyshortcuts="0"><RotateCcw size={16} /> {t("mask.fit")}</button>
-            <span>{Math.round(zoom * 100)}%</span>
-          </div>
+          {!unified && zoomTools}
         </div>
 
         <footer className="mask-editor-footer">
+          {unified && toolbar}
           <div className="mask-editor-footer-meta">
             <span>{t("mask.onlyFirst")}</span>
-            <label className="mask-editor-encoding" title={t("mask.encodingHelp")}>
+            <details className="local-edit-advanced" open={unified ? undefined : true}><summary>{words("高级设置", "Advanced")}</summary><label className="mask-editor-encoding" title={t("mask.encodingHelp")}>
               <span>{t("mask.encodingLabel")}</span>
               <select
                 value={encoding}
@@ -779,15 +820,16 @@ export function MaskEditor({ file, initialMaskFile, initialEncoding, t, onCancel
                 <option value="standard">{t("mask.encodingStandard")}</option>
                 <option value="compat">{t("mask.encodingCompat")}</option>
               </select>
-            </label>
+            </label></details>
           </div>
           <div className="mask-editor-footer-actions">
-            {initialMaskFile && onRemove && <button type="button" className="danger-action" onClick={onRemove}>{t("mask.remove")}</button>}
-            <button type="button" onClick={onCancel}>{t("mask.cancel")}</button>
-            <button type="button" className="primary-action" onClick={() => void applyMask()} disabled={!ready || saving}>
+            {initialMaskFile && onRemove && <button type="button" className="danger-action" disabled={saving} onClick={onRemove}>{t("mask.remove")}</button>}
+            <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }}>{t("mask.cancel")}</button>
+            <button type="button" className={unified ? "" : "primary-action"} onClick={() => void applyMask()} disabled={!ready || saving}>
               {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
-              {saving ? t("mask.applying") : t("mask.apply")}
+              {saving ? t("mask.applying") : unified ? words("保存选区到输入区", "Save selection to composer") : t("mask.apply")}
             </button>
+            {unified && onSend && <button type="button" className="primary-action" disabled={!ready || saving || (intent === "local" && !instructions.trim())} onClick={() => void applyMask(true)}><Send size={17} />{words("发送", "Send")}</button>}
           </div>
         </footer>
       </div>

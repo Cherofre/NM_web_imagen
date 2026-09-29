@@ -1,4 +1,32 @@
 /* Neutral surfaces follow the existing image preview, isolated from workspace styles. */
+.image-editor .image-editor-modes { display: flex; gap: 4px; padding: 0 16px 10px; flex-shrink: 0; overflow-x: auto; }
+.image-editor .image-editor-modes button { white-space: nowrap; }
+.mask-editor-shell.unified { padding: 12px; z-index: 90; background: #080808ed; }
+.mask-editor-shell.unified .mask-editor-card { width: min(1760px, 100%); height: 100%; max-height: none; display: flex; flex-direction: column; padding: 0; gap: 0; background: #111; border: 0; border-radius: 16px; }
+.mask-editor-shell.unified .mask-editor-card button { min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: #f1f1f1; font-weight: 500; }
+.mask-editor-shell.unified .mask-editor-card button:hover:not(:disabled) { background: #3b3b3b; }
+.mask-editor-shell.unified .mask-editor-card button.active, .mask-editor-shell.unified .mask-editor-card button[aria-pressed="true"] { background: #454545; color: white; }
+.mask-editor-shell.unified .mask-editor-card .primary-action { border-radius: 20px; background: #f1f1f1; color: #171717; }
+.mask-editor-shell.unified .mask-editor-head { order: 0; padding: 12px 16px; }
+.mask-editor-shell.unified .image-editor-modes { order: 1; }
+.mask-editor-shell.unified .mask-editor-guidance { order: 2; margin: 0 16px 8px; border: 0; background: transparent; color: #b5b5b5; padding: 0; }
+.mask-editor-shell.unified .local-edit-instructions { order: 3; padding: 0 16px 10px; display: flex; align-items: center; gap: 12px; }
+.local-edit-intents { display: flex; flex-shrink: 0; gap: 4px; }
+.local-edit-instructions textarea { min-height: 58px; height: 58px; max-height: 120px; }
+.local-edit-instructions p { margin: 0; color: #b5b5b5; font-size: 12px; }
+.mask-editor-shell.unified .mask-editor-stage { order: 4; flex: 1; min-height: 120px; margin: 0 12px; background: #080808; border: 0; border-radius: 10px; }
+.mask-editor-shell.unified .mask-editor-toolbar { order: 5; align-self: center; justify-content: center; margin: 10px 12px 0; padding: 5px; background: #202020; border: 0; border-radius: 12px; }
+.mask-editor-shell.unified .mask-editor-footer { order: 6; padding: 10px 16px; border: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.mask-editor-shell.unified .mask-editor-footer > .mask-editor-toolbar { order: 0; margin: 0; }
+.mask-editor-shell.unified .mask-editor-zoom-tools { position: static; background: #202020; border: 0; border-radius: 12px; }
+.local-edit-advanced summary { cursor: pointer; font-size: 12px; color: #b5b5b5; }
+.mask-editor-shell:not(.unified) .local-edit-advanced > summary { display: none; }
+@media (max-width: 700px) {
+  .mask-editor-shell.unified { padding: 0; }
+  .mask-editor-shell.unified .mask-editor-card { border-radius: 0; }
+  .mask-editor-shell.unified .local-edit-instructions { flex-direction: column; align-items: stretch; gap: 6px; }
+  .mask-editor-shell.unified .mask-editor-toolbar { flex-wrap: wrap; }
+}
 .image-editor, .lightbox-card .preview-image-edit-tools { --edit-surface: #202020; --edit-raised: #2b2b2b; --edit-hover: #3b3b3b; --edit-text: #f1f1f1; --edit-muted: #b5b5b5; --edit-line: #464646; --edit-focus: #a3bde0; }
 .image-editor-backdrop { position: fixed; inset: 0; z-index: 90; background: #080808ed; display: grid; place-items: center; padding: 12px; }
 .image-editor { width: min(1760px, 100%); height: 100%; display: flex; flex-direction: column; background: #111; color: var(--edit-text); border-radius: 16px; overflow: hidden; outline: none; font-size: 13px; line-height: 1.5; }

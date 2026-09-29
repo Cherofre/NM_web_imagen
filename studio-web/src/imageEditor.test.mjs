@@ -75,6 +75,9 @@ test("background and erasure keep their dedicated intent", () => {
   assert.match(buildImageEditPrompt("background", [], "", 100, 100), /透明/);
   assert.match(buildImageEditPrompt("erase", [], "", 100, 100), /不要添加替代物体/);
   assert.equal(imageEditActionFrom("background"), "background");
+  assert.equal(imageEditActionFrom("local"), "local");
+  assert.equal(buildImageEditPrompt("local", [], " 改为蓝色 ", 100, 100), "改为蓝色");
+  assert.throws(() => buildImageEditPrompt("local", [], "  ", 100, 100));
   assert.equal(imageEditActionFrom("unsupported"), undefined);
 });
 

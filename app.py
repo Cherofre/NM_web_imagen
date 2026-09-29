@@ -5074,11 +5074,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="请填写提示词")
         if n < 1 or n > 10:
             raise HTTPException(status_code=400, detail="GPT Image 的数量只能是 1 到 10")
-        if image_edit_action not in {"", "annotate", "comment", "background", "erase"}:
+        if image_edit_action not in {"", "annotate", "comment", "background", "erase", "local"}:
             raise HTTPException(status_code=400, detail="不支持的图片编辑操作")
         if image_edit_action and api_endpoint not in {"auto", "/v1/images/edits"}:
             raise HTTPException(status_code=400, detail="图片编辑工具需要使用 images/edits 接口")
-        if image_edit_action == "erase" and mask_file is None:
+        if image_edit_action in {"erase", "local"} and mask_file is None:
             raise HTTPException(status_code=400, detail="擦除需要涂抹选区")
 
         try:

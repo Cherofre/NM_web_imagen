@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, ArrowUpRight, Brush, Check, Circle, Download, Eraser, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowLeft, ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint, eraseEditObjects, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import "./imageEditor.css";
 
-export type ImageEditorSubmission = { action: ImageEditAction; prompt: string; references: File[]; maskFile?: File; previewFile?: File };
+export type ImageEditorSubmission = { action: ImageEditAction; prompt: string; references: File[]; maskFile?: File; maskEncoding?: "standard" | "compat"; previewFile?: File };
 type Props = {
+  navigation?: ReactNode;
+  onBusyChange?: (busy: boolean) => void;
   file: File;
   action: ImageEditAction;
   language: string;
@@ -14,14 +16,14 @@ type Props = {
   onSent: () => void;
   onSend: (submission: ImageEditorSubmission) => Promise<boolean>;
 };
-type Tool = "select" | "pen" | "text" | "rect" | "ellipse" | "arrow" | "eraser";
-const labels = { annotate: ["标注", "Annotate"], comment: ["添加评论", "Add comments"], background: ["移除背景", "Remove background"], erase: ["擦除", "Erase"] };
+type Tool = "pan" | "select" | "pen" | "text" | "rect" | "ellipse" | "arrow" | "eraser";
+const labels = { local: ["局部修改", "Local edit"], annotate: ["标注", "Annotate"], comment: ["添加评论", "Add comments"], background: ["移除背景", "Remove background"], erase: ["擦除", "Erase"] };
 
 function blobOf(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("图片导出失败 / Image export failed")), "image/png"));
 }
 
-export function ImageEditor({ file, action, language, draft, onDraft, onClose, onSent, onSend }: Props) {
+export function ImageEditor({ navigation, onBusyChange, file, action, language, draft, onDraft, onClose, onSent, onSend }: Props) {
   const en = language === "en";
   const text = (zh: string, english: string) => en ? english : zh;
   const dialog = useRef<HTMLDivElement>(null);
@@ -42,11 +44,13 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   const [editing, setEditing] = useState(false);
   const [brushPoint, setBrushPoint] = useState<EditPoint | null>(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
   const sending = useRef(false);
   const noteUndoRecorded = useRef(false);
   const [error, setError] = useState("");
   const past = useRef<EditObject[][]>([]);
   const future = useRef<EditObject[][]>([]);
+  const panGesture = useRef<{ pointer: number; x: number; y: number; left: number; top: number } | null>(null);
   const gesture = useRef<{ start: EditPoint; before: EditObject[]; object: EditObject; move: boolean; pointer: number } | null>(null);
   const [, refresh] = useState(0);
   const selectedObject = objects.find((item) => item.id === selected);
@@ -108,9 +112,16 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
   function redo() { const next = future.current.pop(); if (next) { past.current.push(objects); setObjects(next); setSelected(null); } }
   function point(event: ReactPointerEvent<SVGSVGElement>) { return editPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), dimensions.width, dimensions.height); }
   function start(event: ReactPointerEvent<SVGSVGElement>) {
-    if (busy || event.button !== 0 || action === "background" || gesture.current) return;
+    if (busy || event.button !== 0 || gesture.current) return;
     event.preventDefault();
     dialog.current?.focus();
+    if (tool === "pan") {
+      if (!stage.current) return;
+      panGesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, left: stage.current.scrollLeft, top: stage.current.scrollTop };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (action === "background") return;
     const p = point(event);
     const hit = (event.target as Element).closest("[data-object]")?.getAttribute("data-object");
     const existing = objects.find((item) => item.id === hit);
@@ -132,6 +143,8 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function move(event: ReactPointerEvent<SVGSVGElement>) {
+    const pan = panGesture.current;
+    if (pan && pan.pointer === event.pointerId && stage.current) { stage.current.scrollLeft = pan.left - event.clientX + pan.x; stage.current.scrollTop = pan.top - event.clientY + pan.y; return; }
     if (showBrush) setBrushPoint(point(event));
     const g = gesture.current;
     if (!g || g.pointer !== event.pointerId) return;
@@ -143,6 +156,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     }
   }
   function finish(event: ReactPointerEvent<SVGSVGElement>, cancel = false) {
+    if (panGesture.current?.pointer === event.pointerId) { panGesture.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); return; }
     const g = gesture.current;
     if (!g || g.pointer !== event.pointerId) return;
     const movedObject = objects.find((item) => item.id === g.object.id);
@@ -201,7 +215,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
     finally { sending.current = false; setBusy(false); }
   }
   const canSend = Boolean(url) && !busy && (action === "background" || (action === "erase" && objects.length > 0) || (action === "annotate" && objects.some((o) => o.kind !== "eraser") && (prompt.trim() || objects.some((o) => o.text.trim()))) || (action === "comment" && objects.some((o) => o.text.trim())));
-  const tools: [Tool, typeof Brush, string][] = [["select", MousePointer2, text("选择 / 移动", "Select / move")], ["pen", Brush, text("画笔", "Brush")], ["text", Type, text("文字", "Text")], ["rect", Square, text("矩形", "Rectangle")], ["ellipse", Circle, text("椭圆", "Ellipse")], ["arrow", ArrowUpRight, text("箭头", "Arrow")], ["eraser", Eraser, text("局部擦除标注", "Erase annotation area")]];
+  const tools: [Tool, typeof Brush, string][] = [["pan", Hand, text("移动视图 (H)", "Pan (H)")], ["select", MousePointer2, text("选择 / 移动", "Select / move")], ["pen", Brush, text("画笔", "Brush")], ["text", Type, text("文字", "Text")], ["rect", Square, text("矩形", "Rectangle")], ["ellipse", Circle, text("椭圆", "Ellipse")], ["arrow", ArrowUpRight, text("箭头", "Arrow")], ["eraser", Eraser, text("局部擦除标注", "Erase annotation area")]];
   return <div className="image-editor-backdrop">
     <div className="image-editor" role="dialog" aria-modal="true" aria-label={labels[action][en ? 1 : 0]} tabIndex={-1} ref={dialog} onKeyDown={(event) => {
       event.stopPropagation();
@@ -218,10 +232,16 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
         setSize((value) => Math.max(2, Math.min(action === "erase" || tool === "eraser" ? 160 : 20, value + (event.key === "]" ? 8 : -8))));
         return;
       }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.nativeEvent.isComposing && !gesture.current && !panGesture.current) {
+        const key = event.key.toLowerCase();
+        if (["-", "+", "=", "0"].includes(key)) { event.preventDefault(); setZoom((value) => key === "0" ? 1 : Math.max(0.5, Math.min(4, value + (key === "-" ? -0.25 : 0.25)))); return; }
+        if (key === "h" || (action === "annotate" && (key === "b" || key === "e"))) { event.preventDefault(); const next = key === "h" ? "pan" : key === "b" ? "pen" : "eraser"; setTool(next); setSize((value) => Math.min(value, next === "eraser" ? 160 : 20)); closeNote(); return; }
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); commit(objects.filter((o) => o.id !== selected)); closeNote(); }
     }}>
       <header><div><button className="image-editor-back" type="button" onClick={onClose} disabled={busy}><ArrowLeft size={17} />{text("返回图片", "Back to image")}</button><strong>{labels[action][en ? 1 : 0]}</strong><span>{file.name}</span></div><button type="button" onClick={onClose} disabled={busy} title={text("退出编辑，返回图片", "Exit editing and return to image")} aria-label={text("退出编辑，返回图片", "Exit editing and return to image")}><X size={20} /></button></header>
+      {navigation}
       <div className="image-editor-body">
         <div className="image-editor-stage" ref={stage} onScroll={(event) => {
           const el = event.currentTarget;
@@ -232,7 +252,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
           <div className="image-editor-sheet" style={{ width: sheetWidth, height: sheetHeight }}>
             <img src={url} alt={file.name} draggable={false} />
             <canvas ref={canvas} width={dimensions.width} height={dimensions.height} style={{ opacity: action === "erase" ? 0.5 : 1 }} />
-            <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label={text("图片编辑画布", "Image editing canvas")} style={{ cursor: showBrush ? "none" : tool === "select" ? "default" : "crosshair" }} onPointerEnter={(event) => setBrushPoint(point(event))} onPointerLeave={() => setBrushPoint(null)} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={(event) => { finish(event, true); setBrushPoint(null); }}>
+            <svg viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label={text("图片编辑画布", "Image editing canvas")} style={{ cursor: tool === "pan" ? "grab" : showBrush ? "none" : tool === "select" ? "default" : "crosshair" }} onPointerEnter={(event) => setBrushPoint(point(event))} onPointerLeave={() => setBrushPoint(null)} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={(event) => { finish(event, true); setBrushPoint(null); }}>
               {objects.map((o, index) => {
                 if (o.kind === "eraser") return null;
                 const p = o.points[0], q = o.points[o.points.length - 1];
@@ -293,7 +313,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
           {(action === "erase" || action === "annotate") && <label className="image-editor-size">{text("笔刷 [ / ]", "Brush [ / ]")}<input aria-label={text("笔刷大小", "Brush size")} aria-keyshortcuts="[ ]" title={text("[ 缩小笔刷 · ] 放大笔刷", "[ smaller brush · ] larger brush")} type="range" min={2} max={action === "erase" || tool === "eraser" ? 160 : 20} value={size} disabled={busy} onChange={(event) => setSize(Number(event.target.value))} /></label>}
           {action === "erase" && <span>{text("涂蓝要删除的内容，再发送补全背景", "Paint what to remove, then send to fill the background")}</span>}
           {action !== "background" && <><button type="button" aria-label={text("撤销", "Undo")} title={text("撤销", "Undo")} disabled={!past.current.length || busy} onClick={undo}><Undo2 size={18} /></button><button type="button" aria-label={text("重做", "Redo")} title={text("重做", "Redo")} disabled={!future.current.length || busy} onClick={redo}><Redo2 size={18} /></button><button type="button" aria-label={text("清空", "Clear")} title={text("清空", "Clear")} disabled={!objects.length || busy} onClick={() => commit([])}><Trash2 size={18} /></button></>}
-          <button type="button" aria-label={text("缩小视图", "Zoom out")} disabled={zoom <= 1} onClick={() => setZoom((v) => Math.max(1, v - 0.5))}><ZoomOut size={18} /></button><button type="button" aria-label={text("放大视图", "Zoom in")} disabled={zoom >= 4} onClick={() => setZoom((v) => Math.min(4, v + 0.5))}><ZoomIn size={18} /></button>
+          <button type="button" aria-label={text("缩小视图", "Zoom out")} disabled={zoom <= 0.5} onClick={() => setZoom((v) => Math.max(0.5, v - 0.25))}><ZoomOut size={18} /></button><button type="button" aria-label={text("放大视图", "Zoom in")} disabled={zoom >= 4} onClick={() => setZoom((v) => Math.min(4, v + 0.25))}><ZoomIn size={18} /></button>
           <button type="button" title={text("恢复适配视图", "Fit image")} onClick={() => setZoom(1)}>{text("适配", "Fit")} · {Math.round(scale * 100)}%</button>
         </div>
         <div className="image-editor-send">

@@ -1,6 +1,6 @@
-export type ImageEditAction = "annotate" | "comment" | "background" | "erase";
+export type ImageEditAction = "annotate" | "comment" | "background" | "erase" | "local";
 export function imageEditActionFrom(value: unknown): ImageEditAction | undefined {
-  return value === "annotate" || value === "comment" || value === "background" || value === "erase" ? value : undefined;
+  return value === "annotate" || value === "comment" || value === "background" || value === "erase" || value === "local" ? value : undefined;
 }
 export type EditPoint = { x: number; y: number };
 export type EditObject = {
@@ -21,6 +21,7 @@ export const ERASE_PROMPT = "删除遮罩选区内的物体或内容，根据周
 export function buildImageEditPrompt(action: ImageEditAction, objects: EditObject[], prompt: string, width: number, height: number) {
   if (action === "background") return REMOVE_BACKGROUND_PROMPT;
   if (action === "erase") return ERASE_PROMPT;
+  if (action === "local") { if (!prompt.trim()) throw new Error("请填写局部修改要求"); return prompt.trim(); }
   if (action === "annotate") return `第一张是原图，第二张是用户的标注引导图。标注只用于说明修改位置，不是成品内容。按以下要求修改原图，最终结果不要保留引导线、箭头或标注文字：\n${prompt.trim()}\n${objects.filter((o) => o.kind !== "eraser" && o.text.trim()).map((o) => `位置（${Math.round(o.points[0].x / width * 100)}%，${Math.round(o.points[0].y / height * 100)}%）：${o.text.trim()}`).join("\n")}`;
   const comments = objects.filter((item) => item.kind === "comment" && item.text.trim());
   if (!comments.length) throw new Error("请至少填写一条评论");

@@ -194,8 +194,9 @@ import {
 import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
+import { ImageEditorWorkspace } from "./ImageEditorWorkspace";
 import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
-import { ImageEditor, type ImageEditorSubmission } from "./ImageEditor";
+import { type ImageEditorSubmission } from "./ImageEditor";
 import { imageEditActionFrom, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import {
   activeMaskAttachment,
@@ -4327,7 +4328,7 @@ function App() {
     const base = edit.references[0];
     const attachment: MaskAttachment<File> | null = edit.maskFile ? {
       baseFile: base, baseFingerprint: referenceFileFingerprint(base), maskFile: edit.maskFile,
-      previewFile: edit.previewFile, encoding: "standard", coverage: 0,
+      previewFile: edit.previewFile, encoding: edit.maskEncoding || "standard", coverage: 0,
     } : null;
     const queued = await submit(undefined, {
       mode: "generate", engine: "gpt-image-2", prompt: edit.prompt,
@@ -6469,8 +6470,8 @@ function App() {
                               type="button"
                               className="reference-mask-action"
                               onClick={openMaskEditor}
-                              title={activeComposerMask ? t("mask.update") : t("mask.edit")}
-                              aria-label={activeComposerMask ? t("mask.update") : t("mask.edit")}
+                              title={desktopMode ? (activeComposerMask ? t("mask.update") : t("mask.edit")) : t("editor.local")}
+                              aria-label={desktopMode ? (activeComposerMask ? t("mask.update") : t("mask.edit")) : t("editor.local")}
                             >
                               <PencilLine size={13} />
                             </button>
@@ -8025,7 +8026,7 @@ function App() {
         </div>
       )}
 
-      {maskEditorOpen && references[0] && (
+      {maskEditorOpen && references[0] && (desktopMode ? (
         <MaskEditor
           file={references[0]}
           initialMaskFile={activeComposerMask?.maskFile}
@@ -8035,13 +8036,18 @@ function App() {
           onApply={applyMaskResult}
           onRemove={activeComposerMask ? removeMask : undefined}
         />
-      )}
+      ) : <ImageEditorWorkspace file={references[0]} action="local" language={language} t={t}
+        initialMaskFile={activeComposerMask?.maskFile} initialEncoding={activeComposerMask?.encoding}
+        onClose={() => { setMaskEditorOpen(false); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
+        onApply={applyMaskResult} onRemove={activeComposerMask ? removeMask : undefined}
+        onSent={() => { setMaskEditorOpen(false); closePreviewImage(); }} onSend={sendImageEdit} />)}
 
-      {imageEditor && <ImageEditor
+      {imageEditor && <ImageEditorWorkspace
         key={imageEditor.key}
-        file={imageEditor.file} action={imageEditor.action} language={language}
-        draft={imageEditorDrafts.current.get(imageEditor.key)}
-        onDraft={(draft) => { imageEditorDrafts.current.set(imageEditor.key, draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
+        file={imageEditor.file} action={imageEditor.action} language={language} t={t}
+        onApply={(result) => { applyMaskResult(result); setImageEditor(null); }}
+        getDraft={(mode) => imageEditorDrafts.current.get(`${referenceFileFingerprint(imageEditor.file)}:${mode}`)}
+        onDraft={(mode, draft) => { imageEditorDrafts.current.set(`${referenceFileFingerprint(imageEditor.file)}:${mode}`, draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
         onClose={() => { setImageEditor(null); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
         onSent={() => { setImageEditor(null); closePreviewImage(); }} onSend={sendImageEdit}
       />}
@@ -8072,7 +8078,7 @@ function App() {
                     <span>{t("preview.viewHistoryDetails")}</span>
                   </button>
                 )}
-                {!previewImage.isMaskSnapshot && (
+                {desktopMode && !previewImage.isMaskSnapshot && (
                   <button
                     type="button"
                     className="preview-mask-action"
@@ -8124,7 +8130,7 @@ function App() {
             </div>
             <footer className="preview-footer">
             {!desktopMode && !previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
-              {([["annotate", "标注", "Annotate", PencilLine], ["comment", "添加评论", "Add comments", MessageSquarePlus], ["background", "移除背景", "Remove background", ScanLine], ["erase", "擦除", "Erase", Eraser]] as const).map(([action, zh, en, Icon]) =>
+              {([["annotate", "标注", "Annotate", PencilLine], ["comment", "添加评论", "Add comments", MessageSquarePlus], ["background", "移除背景", "Remove background", ScanLine], ["local", "局部修改", "Local edit", Eraser]] as const).map(([action, zh, en, Icon]) =>
                 <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}><Icon size={16} strokeWidth={1.7} /><span>{language === "en" ? en : zh}</span></button>
               )}
             </div>}

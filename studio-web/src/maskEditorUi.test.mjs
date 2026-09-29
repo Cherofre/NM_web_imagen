@@ -101,7 +101,7 @@ test("mask editor provides real canvas drawing, PNG export, undo redo and pan co
   assert.match(editorSource, /mask\.apply/);
   assert.match(editorSource, /event\.key === "Tab"/);
   assert.match(editorSource, /querySelectorAll<HTMLElement>/);
-  assert.match(editorSource, /aria-label=\{t\("mask\.title"\)\}/);
+  assert.match(editorSource, /aria-label=\{unified \? words\("局部修改", "Local edit"\) : t\("mask\.title"\)\}/);
 });
 
 test("mask editor can keep official alpha semantics or opt into a reverse-alpha gateway mode", () => {

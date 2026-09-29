@@ -265,6 +265,24 @@ class ImageSafetyTests(unittest.TestCase):
 
 
 class SecurityBoundaryApiTests(unittest.TestCase):
+    def test_local_edit_submits_one_mask_request_and_preserves_intent(self):
+        from PIL import Image
+        raw = io.BytesIO()
+        Image.new("RGBA", (16, 16), (255, 255, 255, 0)).save(raw, format="PNG")
+        png = raw.getvalue()
+        for intent, encoding in (("local", "standard"), ("local", "compat"), ("erase", "standard")):
+            with self.subTest(intent=intent), patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+                response = self.client.post("/api/generate/gpt-image-2", data={
+                    "api_key": "sk-test", "base_url": "https://example.com/v1", "prompt": "改为蓝色", "image_edit_action": intent, "mask_encoding": encoding,
+                }, files=[("reference_files", ("base.png", png, "image/png")), ("mask_file", ("mask.png", png, "image/png"))])
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertTrue(response.json()["ok"])
+                self.assertEqual(1, upstream.call_count)
+                self.assertTrue(upstream.call_args.args[0].endswith("/images/edits"))
+                self.assertEqual(["image[]", "mask"], [part[0] for part in upstream.call_args.kwargs["files"]])
+                self.assertEqual(intent, response.json()["meta"]["image_edit_action"])
+                self.assertEqual(encoding, response.json()["meta"]["mask_encoding"])
+
     def test_empty_result_diagnostics_do_not_expose_upstream_secrets(self):
         cases = [
             ({"error": {"message": "sk-secret private prompt"}}, "失败状态"),
@@ -293,7 +311,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         self.assertEqual("background", response.json()["meta"]["image_edit_action"])
 
     def test_image_edit_rejects_invalid_or_incomplete_input_before_upstream(self):
-        for extra in ({"image_edit_action": "bad"}, {"image_edit_action": "erase"}, {"image_edit_action": "background"}, {"image_edit_action": "comment", "api_endpoint": "/v1/responses"}):
+        for extra in ({"image_edit_action": "bad"}, {"image_edit_action": "local"}, {"image_edit_action": "erase"}, {"image_edit_action": "background"}, {"image_edit_action": "comment", "api_endpoint": "/v1/responses"}):
             with self.subTest(extra=extra), patch.object(webapp.requests, "post") as upstream:
                 response = self.client.post("/api/generate/gpt-image-2", data={"api_key": "sk-test", "prompt": "edit", **extra})
                 self.assertEqual(400, response.status_code)
