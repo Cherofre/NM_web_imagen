@@ -808,8 +808,8 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
         <footer className="mask-editor-footer">
           {unified && toolbar}
           <div className="mask-editor-footer-meta">
-            <span>{t("mask.onlyFirst")}</span>
-            <details className="local-edit-advanced" open={unified ? undefined : true}><summary>{words("高级设置", "Advanced")}</summary><label className="mask-editor-encoding" title={t("mask.encodingHelp")}>
+            {!unified && <span>{t("mask.onlyFirst")}</span>}
+            <details className="local-edit-advanced" open={unified ? undefined : true}><summary>{words("高级设置", "Advanced")}</summary>{unified && <p>{t("mask.onlyFirst")}</p>}<label className="mask-editor-encoding" title={t("mask.encodingHelp")}>
               <span>{t("mask.encodingLabel")}</span>
               <select
                 value={encoding}
@@ -824,7 +824,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
           </div>
           <div className="mask-editor-footer-actions">
             {initialMaskFile && onRemove && <button type="button" className="danger-action" disabled={saving} onClick={onRemove}>{t("mask.remove")}</button>}
-            <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }}>{t("mask.cancel")}</button>
+            {!unified && <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }}>{t("mask.cancel")}</button>}
             <button type="button" className={unified ? "" : "primary-action"} onClick={() => void applyMask()} disabled={!ready || saving}>
               {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
               {saving ? t("mask.applying") : unified ? words("保存选区到输入区", "Save selection to composer") : t("mask.apply")}

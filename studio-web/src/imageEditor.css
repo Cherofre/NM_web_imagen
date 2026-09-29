@@ -57,9 +57,11 @@
 .image-editor-section-title { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; }
 .image-editor-section-title > span { color: var(--edit-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
 .image-editor .image-comment-add { align-self: flex-start; padding-left: 0; color: var(--edit-muted); }
-.image-editor .image-comment-item { align-items: flex-start; padding: 10px; gap: 10px; border-radius: 10px; min-height: 44px; }
+.image-editor .image-comment-item { display: flex; align-items: flex-start; padding: 3px; gap: 2px; border-radius: 10px; min-height: 44px; }
+.image-editor .image-comment-open { flex: 1; min-width: 0; justify-content: flex-start; align-items: flex-start; text-align: left; gap: 10px; }
+.image-editor .image-comment-delete { flex-shrink: 0; color: var(--edit-muted); }
 .image-editor .image-comment-item.selected { background: var(--edit-raised); }
-.image-comment-item > span:last-child { min-width: 0; white-space: pre-wrap; }
+.image-comment-open > span:last-child { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .image-comment-number { flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center; background: #414141; border-radius: 50%; font-size: 11px; font-variant-numeric: tabular-nums; }
 .image-comment-popover { position: absolute; box-sizing: border-box; z-index: 1; padding: 10px 12px 8px; border: 1px solid var(--edit-line); border-radius: 12px; background: var(--edit-raised); color: var(--edit-text); }
 .image-comment-popover label { display: flex; flex-direction: column; gap: 4px; }
@@ -110,4 +112,27 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .image-editor button, .lightbox-card .preview-image-edit-tools > button { transition: none; }
+}
+
+/* Local editing keeps the image primary; secondary controls stay below the canvas. */
+.mask-editor-shell.unified .local-edit-instructions { flex-direction: column; align-items: stretch; gap: 8px; padding: 0 16px 12px; }
+.mask-editor-shell.unified .local-edit-intents { align-self: flex-start; padding: 3px; border-radius: 10px; background: #202020; }
+.mask-editor-shell.unified .local-edit-intents button { min-height: 30px; padding: 5px 12px; font-size: 12px; }
+.mask-editor-shell.unified .local-edit-instructions textarea { box-sizing: border-box; width: 100%; min-height: 54px; height: 54px; max-height: 100px; padding: 10px 12px; border: 1px solid #383838; background: #191919; font-size: 13px; }
+.mask-editor-shell.unified .mask-editor-guidance { display: none; }
+.mask-editor-shell.unified .mask-editor-footer { justify-content: space-between; gap: 8px; padding: 10px 16px 12px; }
+.mask-editor-shell.unified .mask-editor-footer > .mask-editor-toolbar { width: 100%; flex-wrap: nowrap; justify-content: center; gap: 8px; padding: 5px; overflow-x: auto; }
+.mask-editor-shell.unified .mask-editor-tool-group { flex-shrink: 0; }
+.mask-editor-shell.unified .mask-editor-tool-group:not(.compact) button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.mask-editor-shell.unified .mask-editor-size { display: flex; min-width: 0; flex: 0 0 auto; gap: 8px; }
+.mask-editor-shell.unified .mask-editor-size > span { display: none; }
+.mask-editor-shell.unified .mask-editor-size input { width: 90px; accent-color: #ddd; }
+.mask-editor-shell.unified .mask-editor-size output { min-width: 42px; font-size: 12px; color: #b5b5b5; }
+.mask-editor-shell.unified .mask-editor-zoom-tools { flex-shrink: 0; padding: 0; gap: 2px; }
+.mask-editor-shell.unified .mask-editor-footer-meta { flex: 0 1 auto; min-width: 0; }
+.mask-editor-shell.unified .mask-editor-footer-actions { margin-left: auto; gap: 8px; }
+.mask-editor-shell.unified .local-edit-advanced p { max-width: 460px; color: #b5b5b5; font-size: 12px; }
+@media (max-width: 700px) {
+  .mask-editor-shell.unified .mask-editor-footer > .mask-editor-toolbar { justify-content: flex-start; }
+  .mask-editor-shell.unified .mask-editor-size input { width: 64px; }
 }
