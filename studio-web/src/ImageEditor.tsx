@@ -212,7 +212,12 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
         if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) { event.preventDefault(); first?.focus(); }
       }
-      if ((event.target as HTMLElement).matches("input,textarea") || busy) return;
+      if ((event.target as HTMLElement).matches('input:not([type="range"]),textarea,[contenteditable="true"]') || busy) return;
+      if (showBrush && !gesture.current && !event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "[" || event.key === "]")) {
+        event.preventDefault();
+        setSize((value) => Math.max(2, Math.min(action === "erase" || tool === "eraser" ? 160 : 20, value + (event.key === "]" ? 8 : -8))));
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); commit(objects.filter((o) => o.id !== selected)); closeNote(); }
     }}>
@@ -285,7 +290,7 @@ export function ImageEditor({ file, action, language, draft, onDraft, onClose, o
         <div className="image-editor-toolbar" aria-label={text("编辑工具", "Editing tools")}>
           {action === "annotate" && tools.map(([id, Icon, label]) => <button type="button" key={id} disabled={busy} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { setTool(id); setSize((current) => Math.min(current, id === "eraser" ? 160 : 20)); setSelected(null); setEditing(false); }}><Icon size={18} /></button>)}
           {action === "annotate" && <input aria-label={text("标注颜色", "Annotation color")} type="color" value={color} disabled={busy} onChange={(event) => { setColor(event.target.value); if (tool === "select" && selected) commit(objects.map((o) => o.id === selected ? { ...o, color: event.target.value } : o)); }} />}
-          {(action === "erase" || action === "annotate") && <label className="image-editor-size">{text("笔刷", "Brush")}<input aria-label={text("笔刷大小", "Brush size")} type="range" min={2} max={action === "erase" || tool === "eraser" ? 160 : 20} value={size} disabled={busy} onChange={(event) => setSize(Number(event.target.value))} /></label>}
+          {(action === "erase" || action === "annotate") && <label className="image-editor-size">{text("笔刷 [ / ]", "Brush [ / ]")}<input aria-label={text("笔刷大小", "Brush size")} aria-keyshortcuts="[ ]" title={text("[ 缩小笔刷 · ] 放大笔刷", "[ smaller brush · ] larger brush")} type="range" min={2} max={action === "erase" || tool === "eraser" ? 160 : 20} value={size} disabled={busy} onChange={(event) => setSize(Number(event.target.value))} /></label>}
           {action === "erase" && <span>{text("涂蓝要删除的内容，再发送补全背景", "Paint what to remove, then send to fill the background")}</span>}
           {action !== "background" && <><button type="button" aria-label={text("撤销", "Undo")} title={text("撤销", "Undo")} disabled={!past.current.length || busy} onClick={undo}><Undo2 size={18} /></button><button type="button" aria-label={text("重做", "Redo")} title={text("重做", "Redo")} disabled={!future.current.length || busy} onClick={redo}><Redo2 size={18} /></button><button type="button" aria-label={text("清空", "Clear")} title={text("清空", "Clear")} disabled={!objects.length || busy} onClick={() => commit([])}><Trash2 size={18} /></button></>}
           <button type="button" aria-label={text("缩小视图", "Zoom out")} disabled={zoom <= 1} onClick={() => setZoom((v) => Math.max(1, v - 0.5))}><ZoomOut size={18} /></button><button type="button" aria-label={text("放大视图", "Zoom in")} disabled={zoom >= 4} onClick={() => setZoom((v) => Math.min(4, v + 0.5))}><ZoomIn size={18} /></button>
