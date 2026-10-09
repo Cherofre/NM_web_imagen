@@ -1055,6 +1055,23 @@ def extract_upstream_control_message(response: requests.Response) -> str:
     return compact_text(response_text_utf8_first(response), 1000)
 
 
+def background_rejection_detail(message: str, unknown_parameter: str = "") -> Optional[str]:
+    """Classify explicit transparency rejections without exposing relay error text."""
+    if unknown_parameter.lower() == "background":
+        return "当前渠道不接受 background=transparent 参数，无法请求透明背景。请确认该渠道的图片编辑接口支持透明输出。"
+    if unknown_parameter.lower() == "output_format":
+        return "当前渠道不接受 output_format=png 参数，无法按要求请求透明 PNG。请确认该渠道支持 PNG 格式参数。"
+    if re.search(
+        r"(?:does\s+not|doesn't)\s+support\s+transparent\s+backgrounds?"
+        r"|transparent\s+backgrounds?\s+(?:is|are)\s+(?:currently\s+)?not\s+supported"
+        r"|不支持透明背景|透明背景(?:暂|暂时)?不支持",
+        message,
+        re.IGNORECASE,
+    ):
+        return "当前渠道明确返回不支持透明背景，移除背景请求未完成。请使用已支持透明输出的图片模型或渠道。"
+    return None
+
+
 # 有些渠道一次只允许生成 1 张（真实渠道回应：400「n currently supports 1 only」）。
 # 这类拒绝不该让「生成数量」失效：识别后把 n 降级为 1，再由补齐循环逐张生成。
 _COUNT_LIMIT_ONLY_ONE_PATTERN = re.compile(
@@ -5293,6 +5310,13 @@ def create_app() -> FastAPI:
                 if response.status_code == 400:
                     error_message = extract_upstream_control_message(response)
                     unknown_param = unknown_param_pattern.search(error_message)
+                    if image_edit_action == "background":
+                        detail = background_rejection_detail(
+                            error_message,
+                            unknown_param.group(1) if unknown_param else "",
+                        )
+                        if detail:
+                            raise client_http_error("E_UPSTREAM_REQUEST", status_code=400, detail=detail)
                     if unknown_param:
                         parameter_name = unknown_param.group(1)
                         if parameter_name in current_payload and parameter_name not in {

@@ -630,7 +630,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('"--test"', script)
         self.assertIn('Get-ChildItem -LiteralPath (Join-Path $StudioDir "src") -Filter "*.test.mjs"', script)
         self.assertIn("Sort-Object Name", script)
-        self.assertEqual(28, len(node_modules), node_modules)
+        self.assertGreaterEqual(len(node_modules), 28, node_modules)
         for module in NEW_NODE_GATE_MODULES:
             self.assertIn(module, node_modules)
         self.assertIn('-Command "npm" -Arguments @("run", "test:size")', script)

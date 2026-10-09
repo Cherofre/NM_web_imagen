@@ -1,6 +1,8 @@
 # Next Actions
 
 ## Now — 网页图片编辑
+- [x] 无付费移除背景排查：规范参数及官方预览能力确认，渠道只读令牌历史没有失败原文；增强安全的透明字段/能力拒绝提示，74/302/249 检查通过；docs/background-removal-investigation-2026-10-09.md。
+- [ ] 在用户当前任务空闲时重启后端激活新诊断；本轮未强制重启 7861，不自动刷新页面或追加生图。
 - [x] 用户指定 KB 渠道并新增 3 张额度：移除背景 HTTP 400；自定义局部修改 standard/compat 两张均成功，输出维持原尺寸，视觉与历史检查完成；docs/live-image-edit-test-kb-2026-10-09.md。
 - [x] 2026-10-09 真实限额测试：5 次提交，每次 1 张，3 张返回；擦除/多处评论/文字箭头标注已查看效果和保存历史，默认配置未修改；docs/live-image-edit-test-2026-10-09.md。
 - [ ] 两轮 5+3 次额度均用满，继续付费测试需新预算；透明抠图仍未成功，KB 返回 400 的具体拒绝字段未定位。
@@ -32,7 +34,7 @@
 ### Handoff Notes
 - Start here: codex/web-image-editing、docs/stability-audit-2026-10-09.md、两份 live-image-edit-test 报告（含 KB 追加）；7861 已启动。
 - Do not redo: 本轮两份源码全量测试、Rust、包检查、mock 和临时运行验证；日志 .runtime/audit-20261009-*.log。
-- Verify next: GUI 人工点击、小图/窄屏与模式恢复；KB 透明抠图 400 的具体拒绝原因，新预算后才能重发。不要沿用旧发布授权进行桌面打包或 G 盘同步。
+- Verify next: docs/background-removal-investigation-2026-10-09.md；空闲时重启后端激活新安全诊断。KB 旧 400 的具体原文仍缺，真实重发需要新预算。GUI 小图/窄屏与模式恢复待验收；不要沿用旧发布授权打包或同步 G 盘。
 - Do not claim: 所有真渠道均稳定、透明抠图无损、选区外像素锁定或桌面版已更新；草稿只在当前页面生命周期内保留。
 
 

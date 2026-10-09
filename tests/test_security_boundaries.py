@@ -328,6 +328,47 @@ class SecurityBoundaryApiTests(unittest.TestCase):
         self.assertGreaterEqual(response.status_code, 400)
         self.assertEqual(1, upstream.call_count)
 
+    def test_background_rejection_identifies_transparency_without_exposing_raw_error(self):
+        cases = [
+            ('Unknown parameter: background', 'background=transparent'),
+            ('Unrecognized request argument: output_format', 'output_format=png'),
+            ('This model does not support transparent backgrounds.', '不支持透明背景'),
+            ('Transparent background is not supported.', '不支持透明背景'),
+            ('不支持透明背景', '不支持透明背景'),
+        ]
+        for message, expected in cases:
+            with self.subTest(message=message):
+                raw = message + ' sk-private-key https://private.example/internal private prompt'
+                rejected = type('Rejected', (), {'ok': False, 'status_code': 400, 'headers': {}, 'text': raw, 'json': lambda self: {'error': {'message': raw}}})()
+                with patch.object(webapp.requests, 'post', return_value=rejected) as upstream:
+                    response = self.client.post(
+                        '/api/generate/gpt-image-2',
+                        data={'api_key': 'sk-test', 'base_url': 'https://example.com/v1', 'prompt': 'remove background', 'image_edit_action': 'background'},
+                        files={'reference_files': ('base.png', PNG_RGB_2X2, 'image/png')},
+                    )
+                self.assertEqual(400, response.status_code)
+                self.assertEqual('E_UPSTREAM_REQUEST', response.json()['error_code'])
+                self.assertIn(expected, response.json()['detail'])
+                self.assertNotIn('private', response.text)
+                self.assertNotIn('sk-', response.text)
+                self.assertEqual(1, upstream.call_count)
+                self.assertEqual('transparent', upstream.call_args.kwargs['data']['background'])
+                self.assertEqual('png', upstream.call_args.kwargs['data']['output_format'])
+
+    def test_background_unrelated_rejection_is_not_labeled_as_transparency_failure(self):
+        for message in ['Unsupported model; request background=transparent', 'Unsupported quality high; background=transparent', 'Invalid image content; output_format=png']:
+            with self.subTest(message=message):
+                rejected = type('Rejected', (), {'ok': False, 'status_code': 400, 'headers': {}, 'text': message, 'json': lambda self: {'error': {'message': message}}})()
+                with patch.object(webapp.requests, 'post', return_value=rejected) as upstream:
+                    response = self.client.post(
+                        '/api/generate/gpt-image-2',
+                        data={'api_key': 'sk-test', 'prompt': 'remove background', 'image_edit_action': 'background'},
+                        files={'reference_files': ('base.png', PNG_RGB_2X2, 'image/png')},
+                    )
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(webapp.CLIENT_ERROR_DETAILS['E_UPSTREAM_REQUEST'], response.json()['detail'])
+                self.assertEqual(1, upstream.call_count)
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)

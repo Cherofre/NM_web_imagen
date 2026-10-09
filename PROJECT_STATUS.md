@@ -2,6 +2,8 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-09
+- Background investigation: 排查 KB 移除背景 400，无新生图。参数符合官方 edits 文档，GPT Image 2 透明输出为预览；本地未保留旧错误原文，渠道令牌日志 27 条仅成功消费，具体拒绝项仍未证实。源码新增固定、无密钥泄露的透明参数/能力拒绝提示；不删透明参数或自动换模型。74 安全边界、302 Python、249 Node 和编译/diff 检查通过；另修发布检查写死 28 个前端模块的误报。docs/background-removal-investigation-2026-10-09.md。
+- Runtime activation: 7861 保持运行原已加载后端；本轮未强制重启用户服务，新增诊断需后端重启后生效。没有新透明抠图成功证据，限额仍为已用满的 5+3 次。
 - KB follow-up: 用户截图指定连接/「KB」gpt-image-2 并新增 3 张额度；本轮 3 次提交、2 张返回。移除背景 9.28 秒 HTTP 400；standard 自定义盆栽变小白花 50.63 秒、compat 叶片变紫 48.31 秒均成功，视觉、历史与像素比较检查完成。两张保持 1024×1024，选区外仍有轻微变化。默认配置未写，7861 health 200。报告 docs/live-image-edit-test-kb-2026-10-09.md。
 - Current live boundary: 两轮限额均用满（5+3 次提交，累计 5 张返回），不得沿用旧额度继续生图。透明背景仍未成功，最新 GUI 点击仍被浏览器工具阻断；局部修改 standard/compat 已在 KB 渠道实测通过。
 - Live editing acceptance: 用户限额 5 张，本轮固定 n=1，共提交 5 次，返回/保存 3 张；当前新配置 4 的普通生成 180 秒及移除背景 300 秒超时；请求级改用已有 ai-gateway.local 配置后，擦除、两处评论批量提交、文字箭头标注分别约 21/25/22 秒成功，实际视觉检查和历史再读取通过。默认配置未改，无第 6 次。报告 docs/live-image-edit-test-2026-10-09.md。
