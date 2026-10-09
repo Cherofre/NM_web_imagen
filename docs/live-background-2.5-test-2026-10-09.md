@@ -26,3 +26,11 @@
 本轮仅新增忽略目录内的测试脚本及本报告/项目记录，未改产品源码；不重复已完成的 302 Python、249 Node 回归。未打包、发布、同步 G 盘或新增浏览器交互验收。
 
 脱敏证据：`.runtime/live-background-25-20261009-budget.json`、该测试目录的 `result.json`、`connectivity.json`、`token-log.json`。这些运行资料不进入分发包或 Git。
+
+## 追加只读原因核查
+
+用户追问原因后，未追加图片 POST。带现有令牌 GET `/v1/models` 返回 200（约 0.38 秒），实际列表包含 `「KB」gpt-image-2.5-sunburst` 和 `「KB」gpt-image-2.5-flare`，可以排除本次使用了不在当前列表中的模型名称。测试进程无 HTTP/HTTPS/ALL/NO_PROXY 环境变量，requests 对该地址也没有有效环境代理；不能据此排除网络中的其他代理或转发设备。
+
+源码核查确认本地 502 是 `requests.RequestException` 的统一安全映射，`requests.Timeout` 单独映射为 504。这次没有得到可用的完整上游响应；502 不等于渠道返回了 HTTP 502，也不能从 `requests.post` 抛出异常就判断错误一定发生在收到 HTTP 头之前（响应读取中断也可能触发异常）。现有记录不足以区分连接失败、返回中断或响应解码问题。此次未保存异常子类型是测试诊断遗漏，已经在测试脚本补上，但历史无法反推。
+
+追加只读证据：测试目录的 `read-only-cause-check.json`。未改产品源码、默认配置或服务进程。
