@@ -4708,8 +4708,9 @@ function App() {
         ),
       );
       stickToConversationEndIfNearBottom();
-      setStatus(responsePayload.ok ? t("status.generationReturned", { count: images.length }) : t("status.generationNoImages"));
-      setNotice(responsePayload.ok ? t("status.imagesSaved") : t("status.checkResponse"));
+      const outputError = responsePayload.meta?.empty_result_reason || t("status.noImagesFromResponse");
+      setStatus(responsePayload.ok ? t("status.generationReturned", { count: images.length }) : images.length > 0 ? outputError : t("status.generationNoImages"));
+      setNotice(responsePayload.ok ? t("status.imagesSaved") : images.length > 0 ? outputError : t("status.checkResponse"));
       void notifyDesktopGeneration(
         responsePayload.ok ? t("desktop.notificationSuccessTitle") : t("desktop.notificationFailureTitle"),
         responsePayload.ok ? t("desktop.notificationSuccessBody", { count: images.length }) : t("desktop.notificationFailureBody"),

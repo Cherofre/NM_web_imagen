@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import quote
+from uuid import UUID
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -265,6 +266,119 @@ class ImageSafetyTests(unittest.TestCase):
 
 
 class SecurityBoundaryApiTests(unittest.TestCase):
+    def background_reply(self, mode="RGBA", alpha=0, fmt="PNG", palette=False):
+        image = webapp.Image.new(mode, (16, 16), (100, 120, 140, alpha) if mode == "RGBA" else (100, 120, 140))
+        if mode == "RGBA" and alpha < 255:
+            image.putpixel((8, 8), (100, 120, 140, 255))
+        if palette:
+            image = image.convert("P", palette=webapp.Image.Palette.ADAPTIVE)
+        raw = io.BytesIO()
+        image.save(raw, format=fmt)
+        encoded = base64.b64encode(raw.getvalue()).decode("ascii")
+        reply = FakeGenerationResponse()
+        reply.json = lambda: {"background": "transparent", "output_format": "png", "data": [{"b64_json": encoded}]}
+        return reply
+
+    def post_background(self, **extra):
+        return self.client.post("/api/generate/gpt-image-2", data={
+            "api_key": "sk-test", "base_url": "https://example.com/v1", "prompt": "移除背景",
+            "image_edit_action": "background", **extra,
+        }, files={"reference_files": ("base.png", PNG_RGB_2X2, "image/png")})
+
+    def test_background_uses_only_standard_fields_and_rejects_multiple_images(self):
+        with patch.object(webapp.requests, "post", return_value=self.background_reply()) as upstream:
+            response = self.post_background(enhance_prompt="false", safety_check="false", seed="123", style_preset="anime", negative_prompt="不要文字", response_format="b64_json")
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual({"model", "prompt", "size", "n", "background", "output_format"}, set(upstream.call_args.kwargs["data"]))
+        with patch.object(webapp.requests, "post") as upstream:
+            response = self.post_background(n="2")
+        self.assertEqual(400, response.status_code)
+        upstream.assert_not_called()
+
+    def test_background_accepts_actual_transparency_and_retains_rejected_output(self):
+        for name, reply, valid in [
+            ("transparent", self.background_reply(), True),
+            ("partial", self.background_reply(alpha=100), True),
+            ("palette", self.background_reply(palette=True), True),
+            ("opaque-rgb", self.background_reply(mode="RGB"), False),
+            ("opaque-rgba", self.background_reply(alpha=255), False),
+            ("jpeg", self.background_reply(mode="RGB", fmt="JPEG"), False),
+            ("unreadable", FakeGenerationResponse(), False),
+        ]:
+            with self.subTest(name=name), patch.object(webapp.requests, "post", return_value=reply) as upstream:
+                response = self.post_background()
+                result = response.json()
+                self.assertEqual(200, response.status_code)
+                self.assertEqual(valid, result["ok"])
+                self.assertEqual(1, upstream.call_count)
+                self.assertEqual(1, len(result["images"]))
+                saved = self.client.get(result["images"][0]["saved_url"])
+                self.assertEqual(200, saved.status_code)
+                self.assertEqual(base64.b64decode(reply.json()["data"][0]["b64_json"]), saved.content)
+                self.assertEqual(valid, result["meta"]["background_validation"]["valid"])
+                self.assertEqual(valid, result["history_entry"]["meta"]["background_validation"]["valid"])
+                if not valid:
+                    self.assertEqual("E_BACKGROUND_OUTPUT", result["error_code"])
+                    self.assertTrue(result["meta"]["empty_result_reason"])
+                else:
+                    self.assertNotIn("error_code", result)
+
+    def test_background_rejects_entirely_transparent_empty_output(self):
+        raw = io.BytesIO()
+        webapp.Image.new("RGBA", (16, 16), (0, 0, 0, 0)).save(raw, format="PNG")
+        reply = FakeGenerationResponse()
+        reply.json = lambda: {"data": [{"b64_json": base64.b64encode(raw.getvalue()).decode("ascii")}]}
+        with patch.object(webapp.requests, "post", return_value=reply):
+            result = self.post_background().json()
+        self.assertFalse(result["ok"])
+        self.assertEqual("empty", result["meta"]["background_validation"]["images"][0]["status"])
+
+    def test_background_never_retries_status_or_optional_field_rejection(self):
+        for status, message in [(503, "unavailable"), (429, "rate limit"), (400, "Unknown parameter: quality")]:
+            reply = FakeGenerationResponse()
+            reply.status_code = status
+            reply.json = lambda: {"error": {"message": message}}
+            with self.subTest(status=status), patch.object(webapp.requests, "post", return_value=reply) as upstream:
+                response = self.post_background(quality="high")
+            self.assertGreaterEqual(response.status_code, 400)
+            self.assertEqual(1, upstream.call_count)
+
+    def test_background_transport_errors_are_classified_without_secret_logging(self):
+        errors = [
+            (webapp.requests.ConnectionError, "connection", 502),
+            (webapp.requests.exceptions.ChunkedEncodingError, "response_interrupted", 502),
+            (webapp.requests.exceptions.ContentDecodingError, "response_decode", 502),
+            (webapp.requests.exceptions.ProxyError, "proxy", 502),
+            (webapp.requests.exceptions.SSLError, "tls", 502),
+            (webapp.requests.exceptions.ConnectTimeout, "connect_timeout", 504),
+            (webapp.requests.exceptions.ReadTimeout, "read_timeout", 504),
+        ]
+        for error_type, category, status in errors:
+            exc = error_type("sk-private https://private.example/secret private prompt")
+            with self.subTest(category=category), patch.object(webapp.requests, "post", side_effect=exc) as upstream, self.assertLogs("app", level="WARNING") as logs:
+                response = self.post_background()
+            payload = response.json()
+            self.assertEqual(status, response.status_code)
+            self.assertEqual(category, payload["diagnostics"]["category"])
+            self.assertEqual(1, payload["diagnostics"]["upstream_calls"])
+            self.assertEqual(1, upstream.call_count)
+            self.assertEqual(4, UUID(payload["diagnostics"]["request_id"]).version)
+            for text in [response.text, " ".join(logs.output)]:
+                self.assertNotIn("private", text)
+                self.assertNotIn("sk-", text)
+
+    def test_background_network_cause_chain_is_bounded_and_sanitized(self):
+        nested = ConnectionResetError(10054, "sk-private https://private.example/secret private prompt")
+        nested.winerror = 10054
+        exc = webapp.requests.ConnectionError(nested)
+        nested.__context__ = exc
+        with patch.object(webapp.requests, "post", side_effect=exc), self.assertLogs("app", level="WARNING") as logs:
+            response = self.post_background()
+        causes = response.json()["diagnostics"]["causes"]
+        self.assertEqual(2, len(causes))
+        self.assertEqual({"type": "ConnectionResetError", "errno": 10054, "winerror": 10054}, causes[1])
+        self.assertNotIn("private", response.text + " ".join(logs.output))
+
     def test_local_edit_submits_one_mask_request_and_preserves_intent(self):
         from PIL import Image
         raw = io.BytesIO()
@@ -298,7 +412,7 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 self.assertNotIn("sk-secret", message)
 
     def test_image_edit_background_uses_transparent_png_and_persists_action(self):
-        with patch.object(webapp.requests, "post", return_value=FakeGenerationResponse()) as upstream:
+        with patch.object(webapp.requests, "post", return_value=self.background_reply()) as upstream:
             response = self.client.post(
                 "/api/generate/gpt-image-2",
                 data={"api_key": "sk-test", "base_url": "https://example.com/v1", "prompt": "移除背景", "image_edit_action": "background"},

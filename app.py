@@ -9,6 +9,7 @@ import ipaddress
 import math
 from html import unescape
 import json
+import logging
 import mimetypes
 import os
 import random
@@ -56,6 +57,7 @@ from upstream import (
     normalize_job_id,
 )
 
+LOGGER = logging.getLogger(__name__)
 
 APP_ASSET_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
 ROOT_DIR = Path(os.getenv("IMAGE_TOOL_DATA_ROOT") or APP_ASSET_ROOT).expanduser().resolve()
@@ -221,12 +223,14 @@ class ClientSafeHTTPException(HTTPException):
         status_code: int,
         error_code: str,
         detail: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             status_code=status_code,
             detail=detail or CLIENT_ERROR_DETAILS[error_code],
         )
         self.error_code = error_code
+        self.diagnostics = diagnostics
 
 
 def client_http_error(
@@ -234,12 +238,89 @@ def client_http_error(
     *,
     status_code: int,
     detail: Optional[str] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> ClientSafeHTTPException:
     return ClientSafeHTTPException(
         status_code=status_code,
         error_code=error_code,
         detail=detail,
+        diagnostics=diagnostics,
     )
+
+
+def background_transport_error(exc: requests.RequestException, request_id: str, started_at: float) -> ClientSafeHTTPException:
+    """Keep useful transport categories while never serializing exception text."""
+    category, detail = "request", "图片请求未取得完整响应，移除背景未完成。"
+    for exception_type, label, message in [
+        (requests.exceptions.ConnectTimeout, "connect_timeout", "连接图片服务超时，移除背景未完成。"),
+        (requests.exceptions.ReadTimeout, "read_timeout", "等待图片服务响应超时，移除背景未完成。"),
+        (requests.exceptions.Timeout, "timeout", "图片请求超时，移除背景未完成。"),
+        (requests.exceptions.ProxyError, "proxy", "图片请求的代理连接失败，移除背景未完成。"),
+        (requests.exceptions.SSLError, "tls", "图片请求的 TLS 连接失败，移除背景未完成。"),
+        (requests.exceptions.ChunkedEncodingError, "response_interrupted", "图片响应读取中断，移除背景未完成。"),
+        (requests.exceptions.ContentDecodingError, "response_decode", "图片响应解码失败，移除背景未完成。"),
+        (requests.exceptions.ConnectionError, "connection", "图片请求发生连接异常，移除背景未完成。"),
+    ]:
+        if isinstance(exc, exception_type):
+            category, detail = label, message
+            break
+    # Inspect only bounded, allowlisted cause names and numeric OS codes. Never str(exc).
+    known_names = {"RequestException", "ConnectionError", "ProtocolError", "RemoteDisconnected", "ConnectionResetError", "ConnectionRefusedError", "ConnectionAbortedError", "OSError", "TimeoutError", "ReadTimeoutError", "NewConnectionError", "MaxRetryError", "ProxyError", "SSLError", "gaierror", "ChunkedEncodingError", "ContentDecodingError", "ConnectTimeout", "ReadTimeout", "Timeout"}
+    pending, seen, causes = [exc], set(), []
+    while pending and len(seen) < 8:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        name = type(current).__name__
+        cause = {"type": name if name in known_names else "OtherError"}
+        for field in ("errno", "winerror"):
+            code = getattr(current, field, None)
+            if type(code) is int and -65535 <= code <= 65535:
+                cause[field] = code
+        causes.append(cause)
+        candidates = [current.__cause__, current.__context__, getattr(current, "reason", None), *current.args[:4]]
+        pending.extend(item for item in candidates if isinstance(item, BaseException))
+    diagnostics = {"request_id": request_id, "category": category, "elapsed_seconds": round(time.time() - started_at, 2), "upstream_calls": 1, "causes": causes}
+    LOGGER.warning("background_edit_transport %s", json.dumps(diagnostics, ensure_ascii=True))
+    is_timeout = isinstance(exc, requests.Timeout)
+    return client_http_error("E_UPSTREAM_TIMEOUT" if is_timeout else "E_UPSTREAM_NETWORK", status_code=504 if is_timeout else 502, detail=detail, diagnostics=diagnostics)
+
+
+def validate_background_images(images: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Inspect actual PNG alpha, independently of the relay's declared format."""
+    checks: List[Dict[str, Any]] = []
+    for image in images:
+        check: Dict[str, Any] = {"status": "unreadable"}
+        try:
+            extracted = extract_image_bytes(image.get("src", ""))
+            if extracted:
+                with Image.open(BytesIO(extracted[0])) as decoded:
+                    check["format"] = decoded.format
+                    if decoded.format != "PNG":
+                        check["status"] = "format"
+                    elif decoded.width * decoded.height > MASK_GUIDANCE_MAX_PIXELS:
+                        # Bound decoded memory to the tool's existing image-size budget.
+                        check["status"] = "unreadable"
+                    else:
+                        alpha = decoded.convert("RGBA").getchannel("A").histogram()
+                        transparent = sum(alpha[:255])
+                        visible = sum(alpha[1:])
+                        check.update(transparent_pixels=transparent, visible_pixels=visible)
+                        check["status"] = "empty" if not visible else "opaque" if not transparent else "transparent"
+        except Exception:
+            # Keep malformed returned bytes available, with a fixed failure reason.
+            pass
+        checks.append(check)
+    return {"valid": bool(checks) and all(check["status"] == "transparent" for check in checks), "images": checks}
+
+
+BACKGROUND_OUTPUT_DETAILS = {
+    "opaque": "渠道返回的图片没有透明区域，移除背景未完成。已保留返回图片供查看。",
+    "empty": "渠道返回了全透明的空白图片，移除背景未完成。已保留返回图片供查看。",
+    "format": "渠道未按要求返回 PNG 图片，移除背景未完成。已保留返回图片供查看。",
+    "unreadable": "返回图片无法完成透明度检查，移除背景未完成。已保留返回图片供查看。",
+}
 
 
 def upstream_error_classification(status_code: int) -> Tuple[int, str]:
@@ -4450,6 +4531,7 @@ def create_app() -> FastAPI:
             content={
                 "detail": str(exc.detail),
                 "error_code": exc.error_code,
+                **({"diagnostics": exc.diagnostics} if exc.diagnostics is not None else {}),
             },
             headers=exc.headers,
         )
@@ -5098,6 +5180,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="GPT Image 的数量只能是 1 到 10")
         if image_edit_action not in {"", "annotate", "comment", "background", "erase", "local"}:
             raise HTTPException(status_code=400, detail="不支持的图片编辑操作")
+        if image_edit_action == "background" and n != 1:
+            raise HTTPException(status_code=400, detail="移除背景每次只支持一张图片，请设置 n=1")
         if image_edit_action and api_endpoint not in {"auto", "/v1/images/edits"}:
             raise HTTPException(status_code=400, detail="图片编辑工具需要使用 images/edits 接口")
         if image_edit_action in {"erase", "local"} and mask_file is None:
@@ -5176,7 +5260,7 @@ def create_app() -> FastAPI:
             "size": normalized_size,
             "n": n,
         }
-        if response_format != "auto":
+        if response_format != "auto" and image_edit_action != "background":
             payload["response_format"] = response_format
         if quality != "auto":
             payload["quality"] = quality
@@ -5185,15 +5269,15 @@ def create_app() -> FastAPI:
             payload["background"] = "transparent"
             payload["output_format"] = "png"
 
-        if negative_prompt.strip():
+        if negative_prompt.strip() and image_edit_action != "background":
             payload["negative_prompt"] = negative_prompt
-        if seed != -1:
+        if seed != -1 and image_edit_action != "background":
             payload["seed"] = seed
-        if style_preset != "none":
+        if style_preset != "none" and image_edit_action != "background":
             payload["style_preset"] = style_preset
-        if mask_asset is not None or enhance_prompt is False:
+        if (mask_asset is not None or enhance_prompt is False) and image_edit_action != "background":
             payload["enhance_prompt"] = False
-        if safety_check is False:
+        if safety_check is False and image_edit_action != "background":
             payload["safety_check"] = False
 
         image_data_urls = [asset["data_url"] for asset in request_reference_assets]
@@ -5264,7 +5348,8 @@ def create_app() -> FastAPI:
             r"(?:Unknown parameter|Unrecognized request argument)[^A-Za-z0-9_.]+([A-Za-z_][A-Za-z0-9_.]*)",
             re.IGNORECASE,
         )
-        fallback_api_url = fallback_yuzapi_image_url(api_url)
+        fallback_api_url = fallback_yuzapi_image_url(api_url) if image_edit_action != "background" else ""
+        background_request_id = str(uuid4())
         used_yuzapi_fallback = False
         count_strategy = "single-call"
 
@@ -5287,6 +5372,8 @@ def create_app() -> FastAPI:
                     )
                     JOB_REGISTRY.raise_if_canceled(job_id)
                 except requests.Timeout as exc:
+                    if image_edit_action == "background":
+                        raise background_transport_error(exc, background_request_id, started_at) from exc
                     if fallback_api_url and not used_yuzapi_fallback:
                         JOB_REGISTRY.raise_if_canceled(job_id)
                         api_url = fallback_api_url
@@ -5297,6 +5384,8 @@ def create_app() -> FastAPI:
                         status_code=504,
                     ) from exc
                 except requests.RequestException as exc:
+                    if image_edit_action == "background":
+                        raise background_transport_error(exc, background_request_id, started_at) from exc
                     if fallback_api_url and not used_yuzapi_fallback:
                         JOB_REGISTRY.raise_if_canceled(job_id)
                         api_url = fallback_api_url
@@ -5307,6 +5396,10 @@ def create_app() -> FastAPI:
                         status_code=502,
                     ) from exc
 
+                background_diagnostics = None
+                if image_edit_action == "background" and response.status_code >= 400:
+                    background_diagnostics = {"request_id": background_request_id, "category": "http_response", "upstream_status": response.status_code, "elapsed_seconds": round(time.time() - started_at, 2), "upstream_calls": 1}
+                    LOGGER.warning("background_edit_response %s", json.dumps(background_diagnostics, ensure_ascii=True))
                 if response.status_code == 400:
                     error_message = extract_upstream_control_message(response)
                     unknown_param = unknown_param_pattern.search(error_message)
@@ -5316,8 +5409,8 @@ def create_app() -> FastAPI:
                             unknown_param.group(1) if unknown_param else "",
                         )
                         if detail:
-                            raise client_http_error("E_UPSTREAM_REQUEST", status_code=400, detail=detail)
-                    if unknown_param:
+                            raise client_http_error("E_UPSTREAM_REQUEST", status_code=400, detail=detail, diagnostics=background_diagnostics)
+                    if unknown_param and image_edit_action != "background":
                         parameter_name = unknown_param.group(1)
                         if parameter_name in current_payload and parameter_name not in {
                             "model", "prompt", "image", "input", "tools", "n", "background", "output_format"
@@ -5346,9 +5439,10 @@ def create_app() -> FastAPI:
                     raise client_http_error(
                         "E_UPSTREAM_REQUEST",
                         status_code=400,
+                        diagnostics=background_diagnostics,
                     )
 
-                if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2:
+                if response.status_code in GPT_RETRYABLE_STATUSES and retryable_count < 2 and image_edit_action != "background":
                     retryable_count += 1
                     JOB_REGISTRY.raise_if_canceled(job_id)
                     await asyncio.sleep(retry_delay)
@@ -5363,6 +5457,7 @@ def create_app() -> FastAPI:
                     raise client_http_error(
                         error_code,
                         status_code=public_status,
+                        diagnostics=background_diagnostics,
                     )
 
                 try:
@@ -5425,6 +5520,11 @@ def create_app() -> FastAPI:
             ) from exc
 
         elapsed_seconds = round(time.time() - started_at, 2)
+        background_validation = await asyncio.to_thread(validate_background_images, images) if image_edit_action == "background" and images else None
+        background_error = ""
+        if background_validation and not background_validation["valid"]:
+            rejected = next(check for check in background_validation["images"] if check["status"] != "transparent")
+            background_error = BACKGROUND_OUTPUT_DETAILS[rejected["status"]]
         history_entry: Optional[Dict[str, Any]] = None
         try:
             JOB_REGISTRY.raise_if_canceled(job_id)
@@ -5455,12 +5555,16 @@ def create_app() -> FastAPI:
                 "image_edit_action": image_edit_action,
                 "image_count": len(images),
                 "saved_count": saved_count,
-                "empty_result_reason": describe_empty_gpt_result(response_data) if not images else "",
+                "empty_result_reason": background_error or (describe_empty_gpt_result(response_data) if not images else ""),
                 "output_dir": "outputs",
                 "elapsed_seconds": elapsed_seconds,
                 "tokens_used": total_tokens,
                 "estimated_cost": estimate_cost(total_tokens),
             }
+            if background_validation is not None:
+                meta["background_validation"] = background_validation
+            if background_error:
+                meta["error_code"] = "E_BACKGROUND_OUTPUT"
             form_state = {
                 "prompt": prompt,
                 "context_prompt": compact_text(context_prompt.strip(), 1800),
@@ -5501,12 +5605,13 @@ def create_app() -> FastAPI:
                 meta["history_id"] = history_entry["id"]
 
             return {
-                "ok": bool(images),
+                "ok": bool(images) and not background_error,
                 "engine": "gpt-image-2",
                 "images": images,
                 "messages": [],
                 "meta": meta,
                 "history_entry": history_entry,
+                **({"error_code": "E_BACKGROUND_OUTPUT"} if background_error else {}),
             }
         except JobCancelled:
             if history_entry:
