@@ -1,8 +1,9 @@
 # Next Actions
 
 ## Now — 网页图片编辑
+- [x] 用户指定 KB 渠道并新增 3 张额度：移除背景 HTTP 400；自定义局部修改 standard/compat 两张均成功，输出维持原尺寸，视觉与历史检查完成；docs/live-image-edit-test-kb-2026-10-09.md。
 - [x] 2026-10-09 真实限额测试：5 次提交，每次 1 张，3 张返回；擦除/多处评论/文字箭头标注已查看效果和保存历史，默认配置未修改；docs/live-image-edit-test-2026-10-09.md。
-- [ ] 继续付费测试需新预算，本轮已用满；当前渠道普通生成与移除背景超时，透明抠图、自定义局部修改及 compat 真效果未验收。
+- [ ] 两轮 5+3 次额度均用满，继续付费测试需新预算；透明抠图仍未成功，KB 返回 400 的具体拒绝字段未定位。
 - [x] 2026-10-09 当前分支与原始 v1.1.4 审查及源码修复，报告 docs/stability-audit-2026-10-09.md。
 - [x] 当前 300 Python/249 Node、原始发布 294 Python/229 Node、Rust 6、构建、包校验、冻结 mock、网页包和源码隔离启动通过。
 - [ ] 人工确认最新小图/窄屏、模式恢复、评论删除和真实渠道输出；浏览器工具管理员验证不可用。
@@ -29,9 +30,9 @@
 - [ ] 按反馈完善网页版；用户确认成熟并授权后再打包。
 
 ### Handoff Notes
-- Start here: codex/web-image-editing、docs/stability-audit-2026-10-09.md、docs/live-image-edit-test-2026-10-09.md；7861 已启动。
+- Start here: codex/web-image-editing、docs/stability-audit-2026-10-09.md、两份 live-image-edit-test 报告（含 KB 追加）；7861 已启动。
 - Do not redo: 本轮两份源码全量测试、Rust、包检查、mock 和临时运行验证；日志 .runtime/audit-20261009-*.log。
-- Verify next: GUI 人工点击、小图/窄屏与模式恢复；新预算后才能继续透明抠图/自定义局部修改真请求。不要沿用旧发布授权进行桌面打包或 G 盘同步。
+- Verify next: GUI 人工点击、小图/窄屏与模式恢复；KB 透明抠图 400 的具体拒绝原因，新预算后才能重发。不要沿用旧发布授权进行桌面打包或 G 盘同步。
 - Do not claim: 所有真渠道均稳定、透明抠图无损、选区外像素锁定或桌面版已更新；草稿只在当前页面生命周期内保留。
 
 
