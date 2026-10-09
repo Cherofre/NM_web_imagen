@@ -163,7 +163,8 @@ test('real preview handlers restore comments after downloading the same result a
   Object.assign(ctx, {
     imageEditorDraftKey, referenceFileFingerprint,
     previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
-    imageEditorDrafts: { current: new Map() },
+    editorDrafts: { records: { current: new Map() }, async load() {}, put(record) { this.records.current.set(record.sourceKey, record); } },
+    references: [], activeComposerMask: null,
     setPreviewMaskLoading() {},
     outputReferenceFile: async () => ({ name: 'result.png', type: 'image/png', size: 100, lastModified: ++ctx.counter }),
     setImageEditor(value) { ctx.imageEditor = value; },

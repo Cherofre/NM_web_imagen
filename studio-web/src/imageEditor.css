@@ -84,6 +84,10 @@
 .image-editor .primary-action { background: #f1f1f1; color: #171717; border-radius: 20px; min-height: 38px; padding: 8px 16px; font-weight: 600; }
 .image-editor .primary-action:hover:not(:disabled) { background: #fff; }
 .image-editor-error { margin: 8px 12px 0; padding: 10px 14px; color: #fecaca; background: #451e24; border-radius: 8px; font-size: 13px; }
+.continue-image-edit { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; }
+/* Match actual inset bounds so a narrow-screen details panel cannot steal canvas width. */
+.image-editor-details { box-sizing: border-box; }
+.image-comment-popover { max-height: 150px; overflow: auto; }
 /* Parent-qualified rules protect the dock from the later global lightbox rules. */
 .lightbox-card > .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; overflow-x: auto; padding: 2px; }
 .lightbox-card > .preview-footer > .preview-image-edit-tools { flex-wrap: nowrap; flex-shrink: 0; }
@@ -102,7 +106,7 @@
   .image-editor-backdrop { padding: 0; }
   .image-editor { border-radius: 0; }
   .image-editor-body { flex-direction: column; gap: 0; padding: 0 8px; }
-  .image-editor-stage { min-height: 180px; }
+  .image-editor-stage { min-height: min(180px, 25dvh); }
   .image-editor-details { width: 100%; max-height: 160px; padding: 12px 8px; gap: 8px; }
   .image-editor-details textarea { min-height: 65px; }
   .image-editor footer { padding: 8px; gap: 8px; }

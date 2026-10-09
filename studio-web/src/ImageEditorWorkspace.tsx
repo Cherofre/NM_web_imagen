@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageEditor, type ImageEditorSubmission } from "./ImageEditor";
-import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
+import { MaskEditor, type MaskEditorResult, type MaskEditorDraft } from "./MaskEditor";
 import type { ImageEditAction, ImageEditorDraft } from "./imageEditorModel";
 import type { MaskEncoding } from "./maskEditorModel";
 
@@ -10,10 +10,13 @@ type Props = {
   action: ImageEditAction;
   language: string;
   t: (key: string, params?: Record<string, string | number>) => string;
-  initialMaskFile?: File;
+  initialMaskFile?: Blob;
   initialEncoding?: MaskEncoding;
   getDraft?: (mode: ImageEditAction) => ImageEditorDraft | undefined;
   onDraft?: (mode: ImageEditAction, draft: ImageEditorDraft) => void;
+  maskDraft?: MaskEditorDraft;
+  onMaskDraft?: (draft: MaskEditorDraft) => void;
+  onMode?: (mode: ImageEditAction) => void;
   onApply: (result: MaskEditorResult) => void;
   onRemove?: () => void;
   onClose: () => void;
@@ -28,6 +31,7 @@ export function ImageEditorWorkspace(props: Props) {
   const [busy, setBusy] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const en = props.language === "en";
+  useEffect(() => { props.onMode?.(mode); }, [mode]);
   useEffect(() => {
     const frame = requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[data-active="true"] [role="dialog"]')?.focus());
     return () => cancelAnimationFrame(frame);
@@ -40,6 +44,7 @@ export function ImageEditorWorkspace(props: Props) {
   return <div ref={root}>{visited.map((item) => <div key={item} data-active={item === mode} style={{ display: item === mode ? "contents" : "none" }}>
     {item === "local" ? <MaskEditor unified english={en} navigation={navigation} initialIntent={props.action === "erase" ? "erase" : "local"}
       file={props.file} initialMaskFile={props.initialMaskFile} initialEncoding={props.initialEncoding} t={props.t}
+      draft={props.maskDraft} onDraft={props.onMaskDraft}
       onBusyChange={setBusy} onCancel={props.onClose} onApply={props.onApply} onRemove={props.onRemove}
       onSend={async (result, prompt, intent) => {
         const sent = await props.onSend({ action: intent, prompt, references: [result.baseFile], maskFile: result.maskFile, maskEncoding: result.encoding, previewFile: result.previewFile });

@@ -41,10 +41,12 @@ import {
 type Translator = (key: string, params?: Record<string, string | number>) => string;
 type MaskTool = "brush" | "eraser" | "move";
 type MaskPoint = { x: number; y: number };
-type MaskCommand =
+export type MaskCommand =
   | { kind: "stroke"; tool: "brush" | "eraser"; size: number; points: MaskPoint[] }
   | { kind: "clear" }
   | { kind: "fill" };
+
+export type MaskEditorDraft = { commands: MaskCommand[]; instructions: string; intent: "local" | "erase"; encoding: MaskEncoding };
 
 export type MaskEditorResult = {
   baseFile: File;
@@ -62,8 +64,10 @@ type MaskEditorProps = {
   onSend?: (result: MaskEditorResult, prompt: string, intent: "local" | "erase") => Promise<boolean>;
   onBusyChange?: (busy: boolean) => void;
   file: File;
-  initialMaskFile?: File | null;
+  initialMaskFile?: Blob | null;
   initialEncoding?: MaskEncoding;
+  draft?: MaskEditorDraft;
+  onDraft?: (draft: MaskEditorDraft) => void;
   t: Translator;
   onCancel: () => void;
   onApply: (result: MaskEditorResult) => void;
@@ -150,7 +154,8 @@ function drawCommand(context: CanvasRenderingContext2D, command: MaskCommand) {
   drawStroke(context, command);
 }
 
-export function MaskEditor({ unified = false, english = false, navigation, initialIntent = "local", onSend, onBusyChange, file, initialMaskFile, initialEncoding, t, onCancel, onApply, onRemove }: MaskEditorProps) {
+export function MaskEditor({ unified = false, english = false, navigation, initialIntent = "local", onSend, onBusyChange, file, initialMaskFile, initialEncoding, draft, onDraft, t, onCancel, onApply, onRemove }: MaskEditorProps) {
+  const initialDraft = useRef(draft).current;
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -171,8 +176,8 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
   } | null>(null);
 
   const words = (zh: string, en: string) => english ? en : zh;
-  const [intent, setIntent] = useState(initialIntent);
-  const [instructions, setInstructions] = useState("");
+  const [intent, setIntent] = useState(initialDraft?.intent || initialIntent);
+  const [instructions, setInstructions] = useState(initialDraft?.instructions || "");
   const exportLock = useRef(false);
   const [tool, setTool] = useState<MaskTool>("brush");
   const [brushSize, setBrushSize] = useState(64);
@@ -299,8 +304,8 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setError("");
-    setEncoding(normalizedInitialEncoding);
-    commandsRef.current = [];
+    setEncoding(initialDraft?.encoding || normalizedInitialEncoding);
+    commandsRef.current = structuredClone(initialDraft?.commands || []);
     redoRef.current = [];
     cursorClientRef.current = null;
     clearBrushCursor();
@@ -368,6 +373,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
           overlayContext.drawImage(baseline, 0, 0);
         }
 
+        rebuildOverlay();
         setDimensions({ width, height });
         setBrushSize(clamp(Math.round(Math.min(width, height) * 0.04), 16, 384));
         setReady(true);
@@ -383,7 +389,11 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
     return () => {
       cancelled = true;
     };
-  }, [file, initialMaskFile, initialEncoding, t]);
+  }, [file, initialMaskFile, initialEncoding]);
+
+  useEffect(() => {
+    if (ready) onDraft?.({ commands: structuredClone(commandsRef.current), instructions, intent, encoding });
+  }, [ready, historyVersion, instructions, intent, encoding]);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;

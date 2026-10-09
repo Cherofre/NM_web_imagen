@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-09
+- Editor draft recovery: 用户授权完善后，网页版原图/标注/评论/局部选区和说明写入有界 IndexedDB（20记录/150MiB、增量原子保存）；刷新恢复活动模式，提交独立副本，失败“继续编辑”及旧任务原图/遮罩回退已接通。补浮层短窄视口限位、语言/编码切换不重置选区、背景原尺寸/位置/比例约束。259 Node、308 Python、生产构建通过；7861提供新文件，0付费生成。真实IAB打开仍因管理员策略校验不可用被拒绝，未绕过；最新GUI与提示词保真仍需实际确认。docs/editor-drafts-and-recovery-2026-10-09.md。
 - Live hardened background: 用户新增“你测一次”，c104c13 实际7861 KB 2.5 sunburst 单次 n=1 约31.31秒成功，返回/保存1张1024×1024 RGBA PNG；565338完全透明、483238部分透明，历史/下载/health确认。查看原图与结果后判接口/Alpha通过，但猫被放大重新居中、细节重绘及轮廓光晕，严格保真/边缘验收未通过；不能把本次成功归因于单一参数改动。outputs/20261009-151313-215944-gpt-image-2-01.png；docs/live-background-fixed-test-2026-10-09.md。无重试/源码改动/配置写入，新增单次额度已用。
 - Background hardening: 用户授权实施后，背景请求去扩展字段、n=1 且不自动重试/备用接口；按真实 PNG/Alpha 判透明，不透明/空白/格式坏返回 ok=false 并保留原图与失败历史。新增安全传输分类、有限原因链/数值错误码与日志；网页显示真实失败原因。80 安全、308 Python、249 Node、网页构建、构建后49资源门禁通过。确认无排队/运行会话后重启7861，PID42976/session21131；health/新校验/新JS 200/400/200。0真实上游请求。docs/background-removal-hardening-2026-10-09.md；需保存编辑后刷新网页，真实透明效果/最新GUI/桌面包仍未验收。
 - Background reassessment: 零付费重新评估，10 个离线场景/9 个现状判断、74 安全边界通过。确认不透明 PNG/JPEG 仍判背景移除成功、三类传输异常统一 502、请求包含非标准 enhance_prompt=False、503 可触发 3 次上游调用；这些是缺口，未改产品代码，不能解释历史丢失异常。透明 mock 保存保留 Alpha。docs/background-removal-assessment-2026-10-09.md；透明抠图仍未验收，建议先安全诊断/真实 Alpha 验收再单次实测。

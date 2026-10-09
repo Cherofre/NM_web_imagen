@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, Loader2, MousePointer2, Plus, Redo2, Send, Square, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
-import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint, eraseEditObjects, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
+import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint, editorNoteBounds, eraseEditObjects, moveEditObject, REMOVE_BACKGROUND_PROMPT, type EditObject, type EditPoint, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import "./imageEditor.css";
 
 export type ImageEditorSubmission = { action: ImageEditAction; prompt: string; references: File[]; maskFile?: File; maskEncoding?: "standard" | "compat"; previewFile?: File };
@@ -61,7 +61,6 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
   const sheetHeight = dimensions.height * scale;
   const spaceWidth = Math.max(viewport.width, sheetWidth);
   const spaceHeight = Math.max(viewport.height, sheetHeight);
-  const commentWidth = Math.min(280, viewport.width);
   const inputAnchor = selectedObject?.points[action === "annotate" ? selectedObject.points.length - 1 : 0];
 
   useEffect(() => {
@@ -277,11 +276,7 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
             {editing && selectedObject && selectedObject.kind !== "eraser" && (action === "comment" || action === "annotate") && <div
               key={selectedObject.id}
               className="image-comment-popover"
-              style={{
-                width: commentWidth,
-                left: Math.max(viewport.left, Math.min(viewport.left + viewport.width - commentWidth, (spaceWidth - sheetWidth) / 2 + (inputAnchor?.x || 0) * scale + 18)),
-                top: Math.max(viewport.top, Math.min(viewport.top + viewport.height - 150, (spaceHeight - sheetHeight) / 2 + (inputAnchor?.y || 0) * scale + 18)),
-              }}
+              style={editorNoteBounds(viewport, { x: (spaceWidth - sheetWidth) / 2 + (inputAnchor?.x || 0) * scale, y: (spaceHeight - sheetHeight) / 2 + (inputAnchor?.y || 0) * scale })}
             >
               <label><span className="image-comment-title">{action === "comment" ? text("评论", "Comment") : text("标注说明", "Annotation note")}</span>
                 <textarea autoFocus aria-label={action === "comment" ? text("评论内容", "Comment") : text("标注文字", "Annotation text")} maxLength={2000} disabled={busy}

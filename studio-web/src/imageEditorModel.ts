@@ -2,6 +2,9 @@ export type ImageEditAction = "annotate" | "comment" | "background" | "erase" | 
 export function imageEditActionFrom(value: unknown): ImageEditAction | undefined {
   return value === "annotate" || value === "comment" || value === "background" || value === "erase" || value === "local" ? value : undefined;
 }
+export function recoverableImageEditAction(meta?: Record<string, unknown>): ImageEditAction | undefined {
+  return imageEditActionFrom(meta?.image_edit_action) || (meta?.mask_used === true ? "local" : undefined);
+}
 // Output URLs remain stable when their downloaded File receives a new timestamp.
 export function imageEditorDraftKey(sourceKey: string, action: ImageEditAction) {
   return JSON.stringify([sourceKey, action]);
@@ -20,7 +23,17 @@ export type EditObject = {
 };
 export type ImageEditorDraft = { objects: EditObject[]; prompt: string };
 
-export const REMOVE_BACKGROUND_PROMPT = "移除此图像的背景。保持所有前景主体不变且完整，边缘干净平滑。将背景设为透明。不要重绘或改变主体，不要添加棋盘格、白底或其他背景。";
+export function editorNoteBounds(viewport: { width: number; height: number; left: number; top: number }, anchor: EditPoint) {
+  const width = Math.max(1, Math.min(280, viewport.width));
+  const height = Math.max(1, Math.min(150, viewport.height));
+  return {
+    width, maxHeight: height,
+    left: Math.max(viewport.left, Math.min(viewport.left + viewport.width - width, anchor.x + 18)),
+    top: Math.max(viewport.top, Math.min(viewport.top + viewport.height - height, anchor.y + 18)),
+  };
+}
+
+export const REMOVE_BACKGROUND_PROMPT = "移除此图像的背景，将背景设为透明。保持原始画布尺寸和构图，保留所有前景主体在原图中的位置、大小、比例、朝向和完整轮廓。不要放大、缩小、移动、重新居中或裁切主体。保留主体原有颜色、纹理和细节，不要重绘或改变主体。边缘干净自然，保留毛发等细节，不要添加光晕、描边、阴影、棋盘格、白底或其他背景。";
 export const ERASE_PROMPT = "删除遮罩选区内的物体或内容，根据周围画面自然补全被遮挡的背景、纹理和光影。不要添加替代物体，不要留下涂抹标记，尽量保持其他区域不变。";
 
 export function buildImageEditPrompt(action: ImageEditAction, objects: EditObject[], prompt: string, width: number, height: number) {

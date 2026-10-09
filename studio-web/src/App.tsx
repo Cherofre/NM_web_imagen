@@ -197,7 +197,9 @@ import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, rem
 import { ImageEditorWorkspace } from "./ImageEditorWorkspace";
 import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
 import { type ImageEditorSubmission } from "./ImageEditor";
-import { imageEditActionFrom, imageEditorDraftKey, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
+import { imageEditActionFrom, recoverableImageEditAction, imageEditorDraftKey, type ImageEditAction } from "./imageEditorModel";
+import { editorDraftFile } from "./editorDraftStore";
+import { useEditorDrafts } from "./useEditorDrafts";
 import {
   activeMaskAttachment,
   appendGenerationFiles,
@@ -302,6 +304,7 @@ type ChatMessage = {
 };
 
 type SubmitOverrides = {
+  editorDraftKey?: string;
   imageEditAction?: ImageEditAction;
   mode?: SubmitMode;
   engine?: Engine;
@@ -473,6 +476,7 @@ const bananaAspectOptions = ["Auto", "1:1", "1:4", "1:8", "4:1", "8:1", "9:16", 
 const bananaImageSizeOptions = ["无", "1K", "2K", "4K"];
 
 type PreviewImage = {
+  editorSourceKey?: string;
   src: string;
   name: string;
   dimensions?: { width?: number; height?: number };
@@ -1523,7 +1527,9 @@ function App() {
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
   const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string; sourceKey: string } | null>(null);
-  const imageEditorDrafts = useRef(new Map<string, ImageEditorDraft>());
+  const editorDrafts = useEditorDrafts((record) => {
+    setImageEditor((current) => current || { file: editorDraftFile(record), action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action) });
+  }, () => setNotice(language === "en" ? "Could not save editor drafts locally. Keep this page open to retain your edits." : "编辑草稿暂时无法在本地保存，请保持页面打开以保留编辑内容。"), !desktopMode);
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
@@ -3809,6 +3815,10 @@ function App() {
       setNotice(t(maskCapability.reasonKey || "mask.addBaseFirst"));
       return;
     }
+    if (!desktopMode && references[0]) {
+      void openImageEditor({ src: "", name: references[0].name, sourceFile: references[0] }, "local");
+      return;
+    }
     setMaskEditorOpen(true);
   }
 
@@ -3878,10 +3888,14 @@ function App() {
     appendReferenceFiles(files, t("reference.button"));
   }
 
-  function previewReference(file: File) {
+  function previewReference(file: File, editorSourceKey?: string) {
     const src = URL.createObjectURL(file);
-    openPreviewImage({ src, name: file.name, objectUrl: true, sourceFile: file });
+    openPreviewImage({ src, name: file.name, objectUrl: true, sourceFile: file, editorSourceKey });
   }
+
+  useEffect(() => {
+    if (imageEditor && !previewImage) previewReference(imageEditor.file, imageEditor.sourceKey);
+  }, [imageEditor]);
 
   async function downloadImage(src: string, name: string) {
     try {
@@ -4280,6 +4294,7 @@ function App() {
   }
 
   async function editPreviewMask(preview: PreviewImage) {
+    if (!desktopMode) { await openImageEditor(preview, "local"); return; }
     if (previewMaskLoading) return;
     const requestId = previewMaskRequestRef.current + 1;
     previewMaskRequestRef.current = requestId;
@@ -4313,7 +4328,16 @@ function App() {
     try {
       const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
       if (requestId !== previewMaskRequestRef.current) return;
-      const sourceKey = preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src;
+      const sourceKey = preview.editorSourceKey || (preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src);
+      await editorDrafts.load();
+      if (requestId !== previewMaskRequestRef.current) return;
+      const previous = editorDrafts.records.current.get(sourceKey);
+      const initialMaskFile = references[0] === file ? activeComposerMask?.maskFile : undefined;
+      editorDrafts.put(previous ? { ...previous, action, active: true } : {
+        version: 1, sourceKey, file, name: file.name, lastModified: file.lastModified, action, active: true,
+        updatedAt: Date.now(), drafts: {}, initialMaskFile, initialEncoding: activeComposerMask?.encoding,
+        mask: initialMaskFile ? { commands: [], instructions: "", intent: "local", encoding: activeComposerMask?.encoding || "standard" } : undefined,
+      });
       setImageEditor({ file, action, sourceKey, key: imageEditorDraftKey(sourceKey, action) });
       // Keep the preview and its object URL alive while the editor is open.
       // Cancel returns to the same image, gallery position and zoom.
@@ -4330,12 +4354,63 @@ function App() {
       baseFile: base, baseFingerprint: referenceFileFingerprint(base), maskFile: edit.maskFile,
       previewFile: edit.previewFile, encoding: edit.maskEncoding || "standard", coverage: 0,
     } : null;
+    // A submitted task keeps its own snapshot, so later edits cannot overwrite a failed task's guide.
+    const sourceKey = imageEditor?.sourceKey;
+    const currentDraft = sourceKey ? editorDrafts.records.current.get(sourceKey) : undefined;
+    const submittedKey = currentDraft ? `submitted:${crypto.randomUUID()}` : undefined;
+    if (currentDraft && submittedKey) {
+      editorDrafts.put({ ...structuredClone(currentDraft), sourceKey: submittedKey, action: edit.action, active: false });
+      await editorDrafts.flush();
+    }
     const queued = await submit(undefined, {
+      editorDraftKey: submittedKey,
       mode: "generate", engine: "gpt-image-2", prompt: edit.prompt,
       references: edit.references, maskAttachment: attachment, imageEditAction: edit.action,
       draftOverride: { shared: { fixed_prompt: "" }, gpt: { negative_prompt: "", poster_text: "" } },
     });
     return queued === true;
+  }
+
+  function finishImageEditor() {
+    if (imageEditor) {
+      const record = editorDrafts.records.current.get(imageEditor.sourceKey);
+      if (record) { editorDrafts.put({ ...record, active: false }); void editorDrafts.flush(); }
+    }
+    setImageEditor(null);
+  }
+
+  async function continueImageEdit(turn: ConversationTurn) {
+    const action = recoverableImageEditAction(turn.meta);
+    if (!action) return;
+    const requestId = ++previewMaskRequestRef.current;
+    await editorDrafts.load();
+    if (requestId !== previewMaskRequestRef.current) return;
+    const key = String(turn.meta?.editor_draft_key || "");
+    const record = editorDrafts.records.current.get(key);
+    if (record) {
+      editorDrafts.put({ ...record, active: true });
+      const file = editorDraftFile(record);
+      previewReference(file, record.sourceKey);
+      setImageEditor({ file, action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action) });
+      return;
+    }
+    // Older tasks (or evicted drafts) still offer their original saved image and mask.
+    const base = turn.referenceSnapshots?.[0];
+    const [file, mask] = await Promise.all([
+      base ? referenceSnapshotToFile(base, 0) : Promise.resolve(null),
+      action === "local" || action === "erase" ? loadReusableMaskPayloadFromTurn(turn) : Promise.resolve(null),
+    ]);
+    if (requestId !== previewMaskRequestRef.current) return;
+    if (!file) { setNotice(language === "en" ? "The original image is unavailable. Add it again to continue editing." : "原图暂时无法读取，请重新添加原图后继续编辑。"); return; }
+    const fallbackKey = `restored:${turn.id}`;
+    editorDrafts.put({ version: 1, sourceKey: fallbackKey, file, name: file.name, lastModified: file.lastModified,
+      action, active: true, updatedAt: Date.now(), drafts: action === "annotate" ? { annotate: { objects: [], prompt: turn.prompt } } : {},
+      initialMaskFile: mask?.maskFile, initialEncoding: mask?.encoding,
+      mask: action === "local" || action === "erase" ? { commands: [], instructions: turn.prompt, intent: action, encoding: mask?.encoding || "standard" } : undefined,
+    });
+    previewReference(file, fallbackKey);
+    setImageEditor({ file, action, sourceKey: fallbackKey, key: imageEditorDraftKey(fallbackKey, action) });
+    if (action === "annotate" || action === "comment") setNotice(language === "en" ? "The original image is restored. This older task has no editable guide; add annotations or comments again." : "原图已恢复；该旧任务没有可编辑的引导草稿，请重新添加标注或评论。");
   }
 
   /**
@@ -4553,6 +4628,7 @@ function App() {
       maskSnapshot: turn.maskSnapshot,
       maskFileSnapshot: turn.maskFileSnapshot,
       imageEditAction: imageEditActionFrom(turn.meta?.image_edit_action),
+      editorDraftKey: typeof turn.meta?.editor_draft_key === "string" ? turn.meta.editor_draft_key : undefined,
     });
   }
 
@@ -5010,6 +5086,7 @@ function App() {
         model: currentModel,
         reference_count: submissionReferences.length,
         image_edit_action: overrides.imageEditAction,
+        editor_draft_key: overrides.editorDraftKey,
         mask_used: Boolean(currentMask),
         mask_encoding: currentMask?.encoding || "",
         mask_coverage: currentMask?.coverage,
@@ -6310,6 +6387,7 @@ function App() {
                       </div>
                     )}
                     {turn.error && <div className="error-card">{formatStoredErrorMessage(t, turn.error)}</div>}
+                    {!desktopMode && turn.status === "error" && recoverableImageEditAction(turn.meta) && <button type="button" className="continue-image-edit" onClick={() => void continueImageEdit(turn)}><PencilLine size={15} />{language === "en" ? "Continue editing" : "继续编辑"}</button>}
                     {turn.mode === "chat" && turn.reply && (
                       <div className="chat-reply-card">
                         <p>{turn.reply}</p>
@@ -8046,11 +8124,17 @@ function App() {
       {imageEditor && <ImageEditorWorkspace
         key={imageEditor.key}
         file={imageEditor.file} action={imageEditor.action} language={language} t={t}
-        onApply={(result) => { applyMaskResult(result); setImageEditor(null); }}
-        getDraft={(mode) => imageEditorDrafts.current.get(imageEditorDraftKey(imageEditor.sourceKey, mode))}
-        onDraft={(mode, draft) => { imageEditorDrafts.current.set(imageEditorDraftKey(imageEditor.sourceKey, mode), draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
-        onClose={() => { setImageEditor(null); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
-        onSent={() => { setImageEditor(null); closePreviewImage(); }} onSend={sendImageEdit}
+        onApply={(result) => { applyMaskResult(result); finishImageEditor(); }}
+        onRemove={references[0] === imageEditor.file && activeComposerMask ? () => { removeMask(); finishImageEditor(); } : undefined}
+        initialMaskFile={editorDrafts.records.current.get(imageEditor.sourceKey)?.initialMaskFile}
+        initialEncoding={editorDrafts.records.current.get(imageEditor.sourceKey)?.initialEncoding}
+        maskDraft={editorDrafts.records.current.get(imageEditor.sourceKey)?.mask}
+        onMaskDraft={(mask) => { const record = editorDrafts.records.current.get(imageEditor.sourceKey); if (record) editorDrafts.put({ ...record, mask }); }}
+        getDraft={(mode) => editorDrafts.records.current.get(imageEditor.sourceKey)?.drafts[mode]}
+        onMode={(action) => { const record = editorDrafts.records.current.get(imageEditor.sourceKey); if (record) editorDrafts.put({ ...record, action }); }}
+        onDraft={(mode, draft) => { const record = editorDrafts.records.current.get(imageEditor.sourceKey); if (record) editorDrafts.put({ ...record, drafts: { ...record.drafts, [mode]: draft } }); }}
+        onClose={() => { finishImageEditor(); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
+        onSent={() => { finishImageEditor(); closePreviewImage(); }} onSend={sendImageEdit}
       />}
       {previewImage && !imageEditor && !maskEditorOpen && (
         <div className="lightbox">
