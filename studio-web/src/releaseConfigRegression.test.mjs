@@ -8,7 +8,8 @@ import { buildConfigPayload, profileFormSnapshot, syncActiveProfileForm } from '
 import * as credentials from './sharedCredentials.ts';
 import * as models from './imageModelOptions.ts';
 import { imageEditorDraftKey } from './imageEditorModel.ts';
-import { referenceFileFingerprint } from './maskEditorModel.ts';
+import { editorDraftFile } from './editorDraftStore.ts';
+import { referenceFileFingerprint, referencesWithMaskBase } from './maskEditorModel.ts';
 
 // Execute the actual event handlers, rather than asserting source-code strings.
 const ast = ts.createSourceFile('App.tsx', fs.readFileSync(new URL('./App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -183,4 +184,59 @@ test('real preview handlers restore comments after downloading the same result a
   assert.equal(getDraft('annotate'), undefined);
   await ctx.openImageEditor({ ...preview, src: '/outputs/other/result.png' }, 'comment');
   assert.equal(getDraft('comment'), undefined);
+});
+
+function localEditorContext(references = [], activeComposerMask = null) {
+  const ctx = context();
+  Object.assign(ctx, {
+    imageEditorDraftKey, referenceFileFingerprint, referencesWithMaskBase, editorDraftFile,
+    desktopMode: false, previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
+    references, activeComposerMask, maskAttachment: activeComposerMask,
+    editorDrafts: { records: { current: new Map() }, async load() {}, put(record) { this.records.current.set(record.sourceKey, record); } },
+    setPreviewMaskLoading() {}, setImageEditor(value) { ctx.imageEditor = value; },
+    setReferences(value) { ctx.references = value(ctx.references); },
+    setActiveEngine(value) { ctx.activeEngine = value; }, setSubmitMode(value) { ctx.submitMode = value; },
+    setMaskAttachment(value) { ctx.maskAttachment = value; },
+    outputReferenceFile: async () => new File(['image'], 'result.png', { type: 'image/png', lastModified: ++ctx.counter }),
+  });
+  vm.runInContext(handlers.openImageEditor, ctx);
+  vm.runInContext(handlers.editPreviewMask, ctx);
+  return ctx;
+}
+
+test('actual web result local-edit entry adds the original as reference one before any selection is saved', async () => {
+  const ctx = localEditorContext();
+  ctx.activeEngine = 'banana'; ctx.submitMode = 'chat';
+  await ctx.editPreviewMask({ src: '/outputs/result.png', name: 'result.png' });
+  assert.equal(ctx.references.length, 1);
+  assert.equal(ctx.references[0], ctx.imageEditor.file);
+  assert.equal(ctx.activeEngine, 'gpt-image-2');
+  assert.equal(ctx.submitMode, 'generate');
+  // A fresh download on re-entry must preserve reference identity and avoid duplicates.
+  const original = ctx.references[0];
+  await ctx.editPreviewMask({ src: '/outputs/result.png', name: 'result.png' });
+  assert.equal(ctx.references.length, 1);
+  assert.equal(ctx.references[0], original);
+});
+
+test('actual local edit promotes the selected image, retains other references and clears a mask tied to the old base', async () => {
+  const first = new File(['first'], 'first.png', { type: 'image/png' });
+  const selected = new File(['selected'], 'selected.png', { type: 'image/png' });
+  const other = new File(['other'], 'other.png', { type: 'image/png' });
+  const ctx = localEditorContext([first, selected, other], { baseFile: first, maskFile: new File(['mask'], 'mask.png') });
+  await ctx.openImageEditor({ src: '', name: selected.name, sourceFile: selected }, 'local');
+  assert.deepEqual(ctx.references, [selected, first, other]);
+  assert.equal(ctx.maskAttachment, null);
+});
+
+test('actual local edit preserves the active selection when editing the same first reference', async () => {
+  const file = new File(['selected'], 'selected.png', { type: 'image/png' });
+  const mask = { baseFile: file, maskFile: new File(['mask'], 'mask.png'), encoding: 'compat' };
+  const ctx = localEditorContext([file], mask);
+  await ctx.openImageEditor({ src: '', name: file.name, sourceFile: file }, 'local');
+  assert.equal(ctx.maskAttachment, mask);
+  assert.equal(ctx.references.length, 1);
+  const draft = ctx.editorDrafts.records.current.get(referenceFileFingerprint(file));
+  assert.equal(draft.initialMaskFile, mask.maskFile);
+  assert.equal(draft.initialEncoding, 'compat');
 });

@@ -4326,12 +4326,25 @@ function App() {
     const requestId = ++previewMaskRequestRef.current;
     setPreviewMaskLoading(true);
     try {
-      const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
+      let file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
       if (requestId !== previewMaskRequestRef.current) return;
       const sourceKey = preview.editorSourceKey || (preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src);
       await editorDrafts.load();
       if (requestId !== previewMaskRequestRef.current) return;
       const previous = editorDrafts.records.current.get(sourceKey);
+      if (action === "local" || action === "erase") {
+        // Reuse the source's File identity so reopening an output does not duplicate
+        // a reference or invalidate a selection just because downloading changed its timestamp.
+        if (previous) {
+          const fingerprint = referenceFileFingerprint({ name: previous.name, size: previous.file.size, lastModified: previous.lastModified, type: previous.file.type });
+          file = references.find((reference) => referenceFileFingerprint(reference) === fingerprint) || editorDraftFile(previous);
+        }
+        const keepCurrentMask = references[0] === file && Boolean(activeComposerMask);
+        setActiveEngine("gpt-image-2");
+        setSubmitMode("generate");
+        setReferences((current) => referencesWithMaskBase(current, file, 16));
+        if (!keepCurrentMask) setMaskAttachment(null);
+      }
       const initialMaskFile = references[0] === file ? activeComposerMask?.maskFile : undefined;
       editorDrafts.put(previous ? { ...previous, action, active: true } : {
         version: 1, sourceKey, file, name: file.name, lastModified: file.lastModified, action, active: true,
