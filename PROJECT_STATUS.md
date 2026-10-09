@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-09
+- Background reassessment: 零付费重新评估，10 个离线场景/9 个现状判断、74 安全边界通过。确认不透明 PNG/JPEG 仍判背景移除成功、三类传输异常统一 502、请求包含非标准 enhance_prompt=False、503 可触发 3 次上游调用；这些是缺口，未改产品代码，不能解释历史丢失异常。透明 mock 保存保留 Alpha。docs/background-removal-assessment-2026-10-09.md；透明抠图仍未验收，建议先安全诊断/真实 Alpha 验收再单次实测。
 - 2.5 follow-up: 用户追加“用 2.5 试试”；同连接/原图用「KB」gpt-image-2.5-sunburst，固定 n=1、透明 PNG，独立一次真实上游 POST。当前源码 ASGI 隔离输出实测约 24.28 秒应用 HTTP 502，上游未返回可记录的 HTTP 响应，0 图且无重试。只读状态 200，令牌历史无该次 2.5 记录；透明能力仍未验收，不能把此次网络失败等同旧 KB 2 的 400。配置与 7861 未改。docs/live-background-2.5-test-2026-10-09.md。
 - Background investigation: 排查 KB 移除背景 400，无新生图。参数符合官方 edits 文档，GPT Image 2 透明输出为预览；本地未保留旧错误原文，渠道令牌日志 27 条仅成功消费，具体拒绝项仍未证实。源码新增固定、无密钥泄露的透明参数/能力拒绝提示；不删透明参数或自动换模型。74 安全边界、302 Python、249 Node 和编译/diff 检查通过；另修发布检查写死 28 个前端模块的误报。docs/background-removal-investigation-2026-10-09.md。
 - Runtime activation: 7861 保持运行原已加载后端；本轮未强制重启用户服务，新增诊断需后端重启后生效。没有新透明抠图成功证据，限额仍为已用满的 5+3 次。
