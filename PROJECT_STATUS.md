@@ -2,13 +2,14 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-09
+- Live hardened background: 用户新增“你测一次”，c104c13 实际7861 KB 2.5 sunburst 单次 n=1 约31.31秒成功，返回/保存1张1024×1024 RGBA PNG；565338完全透明、483238部分透明，历史/下载/health确认。查看原图与结果后判接口/Alpha通过，但猫被放大重新居中、细节重绘及轮廓光晕，严格保真/边缘验收未通过；不能把本次成功归因于单一参数改动。outputs/20261009-151313-215944-gpt-image-2-01.png；docs/live-background-fixed-test-2026-10-09.md。无重试/源码改动/配置写入，新增单次额度已用。
 - Background hardening: 用户授权实施后，背景请求去扩展字段、n=1 且不自动重试/备用接口；按真实 PNG/Alpha 判透明，不透明/空白/格式坏返回 ok=false 并保留原图与失败历史。新增安全传输分类、有限原因链/数值错误码与日志；网页显示真实失败原因。80 安全、308 Python、249 Node、网页构建、构建后49资源门禁通过。确认无排队/运行会话后重启7861，PID42976/session21131；health/新校验/新JS 200/400/200。0真实上游请求。docs/background-removal-hardening-2026-10-09.md；需保存编辑后刷新网页，真实透明效果/最新GUI/桌面包仍未验收。
 - Background reassessment: 零付费重新评估，10 个离线场景/9 个现状判断、74 安全边界通过。确认不透明 PNG/JPEG 仍判背景移除成功、三类传输异常统一 502、请求包含非标准 enhance_prompt=False、503 可触发 3 次上游调用；这些是缺口，未改产品代码，不能解释历史丢失异常。透明 mock 保存保留 Alpha。docs/background-removal-assessment-2026-10-09.md；透明抠图仍未验收，建议先安全诊断/真实 Alpha 验收再单次实测。
 - 2.5 follow-up: 用户追加“用 2.5 试试”；同连接/原图用「KB」gpt-image-2.5-sunburst，固定 n=1、透明 PNG，独立一次真实上游 POST。当前源码 ASGI 隔离输出实测约 24.28 秒应用 HTTP 502，上游未返回可记录的 HTTP 响应，0 图且无重试。只读状态 200，令牌历史无该次 2.5 记录；透明能力仍未验收，不能把此次网络失败等同旧 KB 2 的 400。配置与 7861 未改。docs/live-background-2.5-test-2026-10-09.md。
 - Background investigation: 排查 KB 移除背景 400，无新生图。参数符合官方 edits 文档，GPT Image 2 透明输出为预览；本地未保留旧错误原文，渠道令牌日志 27 条仅成功消费，具体拒绝项仍未证实。源码新增固定、无密钥泄露的透明参数/能力拒绝提示；不删透明参数或自动换模型。74 安全边界、302 Python、249 Node 和编译/diff 检查通过；另修发布检查写死 28 个前端模块的误报。docs/background-removal-investigation-2026-10-09.md。
-- Runtime activation: 已在确认无 queued/running 会话后用项目脚本重启 7861，透明校验/诊断修正已加载（PID42976）。没有新增真实透明成功样本，5+3及独立2.5单次额度仍已用完；未自动刷新页面。
+- Runtime activation: 7861 透明校验/诊断修正已加载（PID42976/session21131）；本次 KB 2.5 首次实际返回透明图，但保真/边缘未达标。5+3及两次独立单次额度均已用完；未自动刷新页面。
 - KB follow-up: 用户截图指定连接/「KB」gpt-image-2 并新增 3 张额度；本轮 3 次提交、2 张返回。移除背景 9.28 秒 HTTP 400；standard 自定义盆栽变小白花 50.63 秒、compat 叶片变紫 48.31 秒均成功，视觉、历史与像素比较检查完成。两张保持 1024×1024，选区外仍有轻微变化。默认配置未写，7861 health 200。报告 docs/live-image-edit-test-kb-2026-10-09.md。
-- Current live boundary: 原两轮 5+3 次与本次 2.5 单次实测均已用完，共 9 次提交、累计 5 张返回，不沿用旧额度继续生图。透明背景仍未成功，最新 GUI 点击仍被浏览器工具阻断；局部修改 standard/compat 已在 KB 渠道实测通过。
+- Current live boundary: 原两轮5+3与两次独立单次均用完，共10次应用提交、累计6张返回，不沿用旧额度继续生图。透明图已首次返回，主体保真/边缘效果未达标，最新GUI点击仍未验收；局部修改standard/compat已在KB渠道实测通过。
 - Live editing acceptance: 用户限额 5 张，本轮固定 n=1，共提交 5 次，返回/保存 3 张；当前新配置 4 的普通生成 180 秒及移除背景 300 秒超时；请求级改用已有 ai-gateway.local 配置后，擦除、两处评论批量提交、文字箭头标注分别约 21/25/22 秒成功，实际视觉检查和历史再读取通过。默认配置未改，无第 6 次。报告 docs/live-image-edit-test-2026-10-09.md。
 - Live limits: 最新 GUI 点击仍受浏览器安全验证阻断；透明背景尚未成功。首轮三张编辑输出由 1024×1024 变为 1254×1254，追加 KB 两张保持 1024×1024；选区外细节可变，不能声称像素锁定或全部稳定。7861 已由项目启动脚本成功启动且 health 200，保持供用户测试。
 - Current audit: 当前分支及原始 v1.1.4 审查完成；修复数量错误识别/中文数字边界、结果图重开草稿身份、微小选区漏检、IME Esc、绘制中撤销和隐藏模式 fit/焦点/多指针问题。报告 docs/stability-audit-2026-10-09.md。
