@@ -186,3 +186,13 @@ export function appendGenerationFiles(
   }
   return formData;
 }
+
+/** Count every selected alpha pixel: sampling can miss narrow edits on large images. */
+export function maskSelectionCoverage(pixels: Uint8ClampedArray) {
+  const total = Math.floor(pixels.length / 4);
+  let selected = 0;
+  for (let index = 3; index < pixels.length; index += 4) {
+    if (pixels[index] > 0) selected += 1;
+  }
+  return total ? selected / total : 0;
+}

@@ -1066,8 +1066,13 @@ _COUNT_LIMIT_TERM_PATTERN = re.compile(r"(?:\bn\b|数量|张数|张|count)", re.
 _COUNT_LIMIT_VERB_PATTERN = re.compile(
     r"(?:supports?|allows?|accepts?|requires?|must\s+be|limited\s+to|max(?:imum)?(?:\s+of)?)\s*"
     r"(?:n\s*=\s*)?1\b(?:\s+only)?"
-    r"|(?:最多|只支持|仅支持|只能|仅能)(?:生成|返回|输出|出)?\s*(?:为|是)?\s*1"
-    r"|not\s+support\w*|unsupport\w*|不支持",
+    r"|(?:最多|只支持|仅支持|只能|仅能)(?:生成|返回|输出|出)?\s*(?:为|是)?\s*1(?!\d)",
+    re.IGNORECASE,
+)
+
+
+_COUNT_LIMIT_UNSUPPORTED_VALUE_PATTERN = re.compile(
+    r"\bn\s*=\s*(?:[2-9]\d*|1\d+)\s+(?:is\s+)?(?:not\s+supported|unsupported)\b",
     re.IGNORECASE,
 )
 
@@ -1080,7 +1085,7 @@ def upstream_rejects_multiple_images(message: str) -> bool:
     text = (message or "").strip()
     if not text:
         return False
-    if _COUNT_LIMIT_ONLY_ONE_PATTERN.search(text):
+    if _COUNT_LIMIT_ONLY_ONE_PATTERN.search(text) or _COUNT_LIMIT_UNSUPPORTED_VALUE_PATTERN.search(text):
         return True
     if not _COUNT_LIMIT_TERM_PATTERN.search(text):
         return False
@@ -5079,7 +5084,7 @@ def create_app() -> FastAPI:
         if image_edit_action and api_endpoint not in {"auto", "/v1/images/edits"}:
             raise HTTPException(status_code=400, detail="图片编辑工具需要使用 images/edits 接口")
         if image_edit_action in {"erase", "local"} and mask_file is None:
-            raise HTTPException(status_code=400, detail="擦除需要涂抹选区")
+            raise HTTPException(status_code=400, detail="局部修改需要涂抹选区")
 
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)

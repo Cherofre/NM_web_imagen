@@ -2,6 +2,11 @@ export type ImageEditAction = "annotate" | "comment" | "background" | "erase" | 
 export function imageEditActionFrom(value: unknown): ImageEditAction | undefined {
   return value === "annotate" || value === "comment" || value === "background" || value === "erase" || value === "local" ? value : undefined;
 }
+// Output URLs remain stable when their downloaded File receives a new timestamp.
+export function imageEditorDraftKey(sourceKey: string, action: ImageEditAction) {
+  return JSON.stringify([sourceKey, action]);
+}
+
 export type EditPoint = { x: number; y: number };
 export type EditObject = {
   id: string;

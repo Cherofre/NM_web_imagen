@@ -308,6 +308,11 @@ class UpstreamUnitTests(unittest.IsolatedAsyncioTestCase):
             "image must be a PNG or JPEG",
             "n must be between 1 and 10",
             "unknown parameter: quality",
+            "size is not supported for this model (n=3)",
+            "unsupported model; requested count: 4",
+            "n must be between 1 and 10; unsupported size",
+            "n 最多 10",
+            "一次最多生成 16 张",
         ]
         for message in limited_to_one:
             with self.subTest(message=message):
@@ -1461,6 +1466,19 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(400, response.status_code)
         self.assertEqual("上游服务拒绝了请求，请检查模型与生成参数。", response.json()["detail"])
         self.assertEqual([3], upstream_n)
+
+    async def test_gpt_unrelated_rejection_with_quantity_does_not_submit_again(self) -> None:
+        for message in ["unsupported model; requested count: 4", "size is not supported for this model (n=3)"]:
+            with self.subTest(message=message), patch.object(
+                webapp.requests, "post",
+                return_value=FakeJsonResponse({"error": {"message": message}}, status_code=400),
+            ) as upstream_post:
+                response = await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "model": "gpt-image-2", "n": "3"},
+                )
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(1, upstream_post.call_count)
 
     async def test_gpt_retry_budget_overflow_saves_no_partial_images_or_history(self) -> None:
         with (

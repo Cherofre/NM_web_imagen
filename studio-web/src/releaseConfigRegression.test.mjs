@@ -7,14 +7,23 @@ import { mergeImportedConfig } from './configTransfer.ts';
 import { buildConfigPayload, profileFormSnapshot, syncActiveProfileForm } from './configProfiles.ts';
 import * as credentials from './sharedCredentials.ts';
 import * as models from './imageModelOptions.ts';
+import { imageEditorDraftKey } from './imageEditorModel.ts';
+import { referenceFileFingerprint } from './maskEditorModel.ts';
 
 // Execute the actual event handlers, rather than asserting source-code strings.
 const ast = ts.createSourceFile('App.tsx', fs.readFileSync(new URL('./App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = {};
 let refreshContexts;
+let editorGetDraft;
+let editorOnDraft;
 function visit(node) {
   if (ts.isFunctionDeclaration(node) && node.name) handlers[node.name.text] = ts.transpileModule(node.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   if (ts.isForOfStatement(node) && node.getText(ast).includes('modelRequestContexts.current')) refreshContexts = ts.transpileModule(node.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  if (ts.isJsxAttribute(node) && ['getDraft', 'onDraft'].includes(node.name.text) && node.initializer?.expression) {
+    const expression = ts.transpileModule(`((${node.initializer.expression.getText(ast)}));`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    if (node.name.text === 'getDraft') editorGetDraft = expression;
+    else editorOnDraft = expression;
+  }
   ts.forEachChild(node, visit);
 }
 visit(ast);
@@ -132,3 +141,45 @@ for (const target of ['image', 'chat', 'banana']) {
     }
   });
 }
+
+for (const target of ['image', 'chat', 'banana']) {
+  test(`${target} real refresh drops removed models and preserves configuration on empty or failed fetch`, async () => {
+    for (const outcome of ['success', 'empty', 'failure']) {
+      const ctx = context({ api_key: 'A', model: 'old', chat_model: 'old', model_options: 'old', chat_model_options: 'old' }, { api_key: 'B', model_type: 'old', model_type_options: 'old' });
+      const fresh = target === 'banana' ? 'gemini-new' : 'relay-new';
+      ctx.readError = async () => 'synthetic failure';
+      ctx.apiFetch = async () => ({ ok: outcome !== 'failure', json: async () => ({ ok: true, models: outcome === 'empty' ? [] : [fresh] }) });
+      await ctx.fetchModelListForTarget(target);
+      const form = target === 'banana' ? ctx.bananaForm : ctx.gptForm;
+      assert.equal(form[target === 'banana' ? 'model_type' : target === 'chat' ? 'chat_model' : 'model'], outcome === 'success' ? fresh : 'old');
+      assert.equal(form[target === 'banana' ? 'model_type_options' : target === 'chat' ? 'chat_model_options' : 'model_options'], outcome === 'success' ? fresh : 'old');
+      assert.equal(form.api_key, target === 'banana' ? 'B' : 'A');
+    }
+  });
+}
+
+test('real preview handlers restore comments after downloading the same result again', async () => {
+  const ctx = context();
+  Object.assign(ctx, {
+    imageEditorDraftKey, referenceFileFingerprint,
+    previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
+    imageEditorDrafts: { current: new Map() },
+    setPreviewMaskLoading() {},
+    outputReferenceFile: async () => ({ name: 'result.png', type: 'image/png', size: 100, lastModified: ++ctx.counter }),
+    setImageEditor(value) { ctx.imageEditor = value; },
+  });
+  vm.runInContext(handlers.openImageEditor, ctx);
+  const getDraft = vm.runInContext(editorGetDraft, ctx);
+  const saveDraft = vm.runInContext(editorOnDraft, ctx);
+  const preview = { src: '/outputs/session/result.png', name: 'result.png' };
+  await ctx.openImageEditor(preview, 'comment');
+  const originalFile = ctx.imageEditor.file;
+  const draft = { objects: [{ id: '1', kind: 'comment', text: '变为金色' }], prompt: '' };
+  saveDraft('comment', draft);
+  await ctx.openImageEditor(preview, 'comment');
+  assert.notEqual(ctx.imageEditor.file.lastModified, originalFile.lastModified);
+  assert.equal(getDraft('comment'), draft);
+  assert.equal(getDraft('annotate'), undefined);
+  await ctx.openImageEditor({ ...preview, src: '/outputs/other/result.png' }, 'comment');
+  assert.equal(getDraft('comment'), undefined);
+});

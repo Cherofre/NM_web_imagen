@@ -138,3 +138,13 @@ test("mask canvas fit scale keeps the complete image inside the real stage", () 
   assert.equal(masks.maskCanvasFitScale(300, 240, 64, 64, 12), 216 / 64);
   assert.equal(masks.maskCanvasFitScale(0, 600, 1000, 1000, 12), 1);
 });
+
+test("mask coverage detects a single selected pixel in a large image without sampling gaps", () => {
+  const pixels = new Uint8ClampedArray(1_000_000 * 4);
+  pixels[7] = 255; // Pixel 1 is skipped by the old stride-two sampler.
+  assert.equal(masks.maskSelectionCoverage(pixels), 1 / 1_000_000);
+  pixels[7] = 0;
+  assert.equal(masks.maskSelectionCoverage(pixels), 0);
+  pixels[7] = 1;
+  assert.equal(masks.maskSelectionCoverage(pixels), 1 / 1_000_000);
+});

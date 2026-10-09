@@ -31,6 +31,7 @@ import {
 import { ERASE_PROMPT } from "./imageEditorModel";
 import {
   maskAlphaSelectsPixel,
+  maskSelectionCoverage,
   maskCanvasFitScale,
   maskPreviewDimensions,
   normalizeMaskEncoding,
@@ -370,7 +371,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
         setDimensions({ width, height });
         setBrushSize(clamp(Math.round(Math.min(width, height) * 0.04), 16, 384));
         setReady(true);
-        setTimeout(() => dialogRef.current?.focus(), 0);
+        setTimeout(() => { if (dialogRef.current?.getClientRects().length) dialogRef.current.focus(); }, 0);
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error && cause.message ? cause.message : t("mask.loadFailed"));
@@ -389,6 +390,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
     if (!stage || !ready || !dimensions.width || !dimensions.height) return undefined;
 
     const updateFitScale = () => {
+      if (!stage.clientWidth || !stage.clientHeight) return;
       const nextScale = maskCanvasFitScale(
         stage.clientWidth,
         stage.clientHeight,
@@ -426,7 +428,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
   }
 
   function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
-    if (!ready || saving) return;
+    if (!ready || saving || event.button !== 0 || pointerRef.current) return;
     event.preventDefault();
     syncBrushCursor(event);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -542,15 +544,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
     const context = overlay?.getContext("2d", { willReadFrequently: true });
     if (!overlay || !context) return 0;
     const pixels = context.getImageData(0, 0, overlay.width, overlay.height).data;
-    const totalPixels = overlay.width * overlay.height;
-    const sampleStep = Math.max(1, Math.ceil(totalPixels / 500_000));
-    let selected = 0;
-    let sampled = 0;
-    for (let pixel = 0; pixel < totalPixels; pixel += sampleStep) {
-      sampled += 1;
-      if (pixels[pixel * 4 + 3] > 0) selected += 1;
-    }
-    return sampled ? selected / sampled : 0;
+    return maskSelectionCoverage(pixels);
   }
 
   async function applyMask(send = false) {
@@ -627,7 +621,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     event.stopPropagation();
-    if (saving) return;
+    if (saving || event.nativeEvent.isComposing) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -657,7 +651,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
       }
       return;
     }
-    if (event.nativeEvent.isComposing || (event.target as HTMLElement).matches('textarea,input:not([type="range"]),select,[contenteditable="true"]')) return;
+    if (event.nativeEvent.isComposing || activeStrokeRef.current || pointerRef.current || (event.target as HTMLElement).matches('textarea,input:not([type="range"]),select,[contenteditable="true"]')) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) redo();

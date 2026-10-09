@@ -86,6 +86,7 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
     const el = stage.current;
     if (!el || !dimensions.width) return;
     const resize = () => {
+      if (!el.clientWidth || !el.clientHeight) return; // Hidden modes retain their fit and scroll state.
       const width = Math.max(1, el.clientWidth - 40), height = Math.max(1, el.clientHeight - 40);
       setViewport({ width, height, left: el.scrollLeft, top: el.scrollTop });
       // Enlarge small textures to a useful editing size without changing source pixels.
@@ -112,7 +113,7 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
   function redo() { const next = future.current.pop(); if (next) { past.current.push(objects); setObjects(next); setSelected(null); } }
   function point(event: ReactPointerEvent<SVGSVGElement>) { return editPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), dimensions.width, dimensions.height); }
   function start(event: ReactPointerEvent<SVGSVGElement>) {
-    if (busy || event.button !== 0 || gesture.current) return;
+    if (busy || event.button !== 0 || gesture.current || panGesture.current) return;
     event.preventDefault();
     dialog.current?.focus();
     if (tool === "pan") {
@@ -219,6 +220,7 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
   return <div className="image-editor-backdrop">
     <div className="image-editor" role="dialog" aria-modal="true" aria-label={labels[action][en ? 1 : 0]} tabIndex={-1} ref={dialog} onKeyDown={(event) => {
       event.stopPropagation();
+      if (event.nativeEvent.isComposing) return;
       if (event.key === "Escape" && !busy) { event.preventDefault(); if (editing && selected) closeNote(); else onClose(); }
       if (event.key === "Tab") {
         const nodes = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || [])];
@@ -226,7 +228,7 @@ export function ImageEditor({ navigation, onBusyChange, file, action, language, 
         if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) { event.preventDefault(); first?.focus(); }
       }
-      if ((event.target as HTMLElement).matches('input:not([type="range"]),textarea,[contenteditable="true"]') || busy) return;
+      if ((event.target as HTMLElement).matches('input:not([type="range"]),textarea,[contenteditable="true"]') || busy || event.nativeEvent.isComposing || gesture.current || panGesture.current) return;
       if (showBrush && !gesture.current && !event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "[" || event.key === "]")) {
         event.preventDefault();
         setSize((value) => Math.max(2, Math.min(action === "erase" || tool === "eraser" ? 160 : 20, value + (event.key === "]" ? 8 : -8))));

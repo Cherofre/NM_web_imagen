@@ -92,3 +92,14 @@ test("multiple completed comments are combined into one numbered edit prompt", (
   assert.match(prompt, /3\. 位置（从左到右 60%，从上到下 50%）：移除冰淇淋/);
   assert.doesNotMatch(prompt, /2\. 位置/);
 });
+
+test("reopening a downloaded result uses its source identity to restore each mode draft", async () => {
+  const { imageEditorDraftKey } = await import("./imageEditorModel.ts");
+  const drafts = new Map();
+  const source = "/outputs/session/result.png";
+  const comment = { objects: [{ id: "note", kind: "comment", text: "改为金色" }], prompt: "" };
+  drafts.set(imageEditorDraftKey(source, "comment"), comment);
+  assert.equal(drafts.get(imageEditorDraftKey(source, "comment")), comment);
+  assert.equal(drafts.get(imageEditorDraftKey(source, "annotate")), undefined);
+  assert.equal(drafts.get(imageEditorDraftKey("/outputs/other/result.png", "comment")), undefined);
+});

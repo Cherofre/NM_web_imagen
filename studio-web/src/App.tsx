@@ -197,7 +197,7 @@ import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, rem
 import { ImageEditorWorkspace } from "./ImageEditorWorkspace";
 import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
 import { type ImageEditorSubmission } from "./ImageEditor";
-import { imageEditActionFrom, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
+import { imageEditActionFrom, imageEditorDraftKey, type ImageEditAction, type ImageEditorDraft } from "./imageEditorModel";
 import {
   activeMaskAttachment,
   appendGenerationFiles,
@@ -1522,7 +1522,7 @@ function App() {
   const [desktopOutputsRoot, setDesktopOutputsRoot] = useState(desktopRuntime.outputsRoot);
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
-  const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string } | null>(null);
+  const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string; sourceKey: string } | null>(null);
   const imageEditorDrafts = useRef(new Map<string, ImageEditorDraft>());
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
@@ -4314,7 +4314,7 @@ function App() {
       const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
       if (requestId !== previewMaskRequestRef.current) return;
       const sourceKey = preview.sourceFile ? referenceFileFingerprint(preview.sourceFile) : preview.src;
-      setImageEditor({ file, action, key: `${sourceKey}:${action}` });
+      setImageEditor({ file, action, sourceKey, key: imageEditorDraftKey(sourceKey, action) });
       // Keep the preview and its object URL alive while the editor is open.
       // Cancel returns to the same image, gallery position and zoom.
     } catch (error) {
@@ -8046,8 +8046,8 @@ function App() {
         key={imageEditor.key}
         file={imageEditor.file} action={imageEditor.action} language={language} t={t}
         onApply={(result) => { applyMaskResult(result); setImageEditor(null); }}
-        getDraft={(mode) => imageEditorDrafts.current.get(`${referenceFileFingerprint(imageEditor.file)}:${mode}`)}
-        onDraft={(mode, draft) => { imageEditorDrafts.current.set(`${referenceFileFingerprint(imageEditor.file)}:${mode}`, draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
+        getDraft={(mode) => imageEditorDrafts.current.get(imageEditorDraftKey(imageEditor.sourceKey, mode))}
+        onDraft={(mode, draft) => { imageEditorDrafts.current.set(imageEditorDraftKey(imageEditor.sourceKey, mode), draft); if (imageEditorDrafts.current.size > 20) imageEditorDrafts.current.delete(imageEditorDrafts.current.keys().next().value!); }}
         onClose={() => { setImageEditor(null); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
         onSent={() => { setImageEditor(null); closePreviewImage(); }} onSend={sendImageEdit}
       />}
