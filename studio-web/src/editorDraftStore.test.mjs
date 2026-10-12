@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import vm from "node:vm";
-import { editorDraftFile, validEditorDraft, retainedEditorDrafts, loadEditorDrafts, saveEditorDrafts } from "./editorDraftStore.ts";
+import { editorDraftFile, editorDraftReturnTarget, validEditorDraft, retainedEditorDrafts, loadEditorDrafts, saveEditorDrafts } from "./editorDraftStore.ts";
 import { editorNoteBounds, imageEditorDraftKey, recoverableImageEditAction, REMOVE_BACKGROUND_PROMPT } from "./imageEditorModel.ts";
 import { referenceFileFingerprint } from "./maskEditorModel.ts";
 
@@ -46,10 +46,11 @@ globalThis.indexedDB = { open() {
 test("IDB drafts survive reopening with image bytes, Chinese notes and baseline/compat selection; aborted writes retain old data", async () => {
   failOpen = true;
   await assert.rejects(loadEditorDrafts(), /blocked/);
-  const original = record();
+  const original = { ...record(), returnTo: "conversation" };
   await saveEditorDrafts([original]);
   original.drafts.comment.objects[0].text = "subsequent edit";
   const [restored] = await loadEditorDrafts();
+  assert.equal(editorDraftReturnTarget(restored), "conversation");
   assert.equal(restored.drafts.comment.objects[0].text, "变成金色✨");
   assert.deepEqual(restored.mask, record().mask);
   const file = editorDraftFile(restored);
@@ -92,8 +93,10 @@ test("inline notes remain within scrolled narrow/short viewports even at far ima
 
 const ast = ts.createSourceFile("App.tsx", fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = {};
+let previewEffect;
 function visit(node) {
   if (ts.isFunctionDeclaration(node) && node.name) handlers[node.name.text] = ts.transpileModule(node.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  if (ts.isCallExpression(node) && node.expression.getText(ast) === "useEffect" && node.arguments[0]?.getText(ast).includes("previewReference(imageEditor.file")) previewEffect = ts.transpileModule(`(${node.arguments[0].getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   ts.forEachChild(node, visit);
 }
 visit(ast);
@@ -102,8 +105,11 @@ function appContext() {
     crypto, structuredClone, Date, editorDraftFile, imageEditorDraftKey, referenceFileFingerprint, recoverableImageEditAction,
     language: "zh", configIssues: () => [], gptForm: {}, bananaForm: {}, t: (s) => s,
     previewMaskRequestRef: { current: 0 },
+    editorReturnFocus: { current: null }, document: { activeElement: null },
     editorDrafts: { records: { current: new Map([["original", record()]]) }, async load() {}, async flush() {}, put(r) { this.records.current.set(r.sourceKey, structuredClone(r)); } },
-    imageEditor: { sourceKey: "original" }, submissions: [],
+    imageEditor: { sourceKey: "original", returnTo: "preview" }, submissions: [],
+    window: { requestAnimationFrame(fn) { fn(); } }, promptRef: { current: null }, previewDialogRef: { current: null },
+    closePreviewImage() { ctx.preview = null; },
     setImageEditor(value) { ctx.imageEditor = value; }, setNotice(value) { ctx.notice = value; },
     previewReference(file, key) { ctx.preview = { file, key }; },
     async submit(_event, payload) { ctx.submissions.push(payload); return true; },
@@ -118,14 +124,35 @@ test("actual send and continue handlers keep a frozen guide, reopen failures wit
   const file = editorDraftFile(record());
   assert.equal(await ctx.sendImageEdit({ action: "comment", references: [file], prompt: "edit" }), true);
   const key = ctx.submissions[0].editorDraftKey;
+  ctx.document.activeElement = { isConnected: true, focus(options) { ctx.focusOptions = options; } };
   ctx.editorDrafts.records.current.get("original").drafts.comment.objects[0].text = "changed later";
   await ctx.continueImageEdit({ meta: { image_edit_action: "comment", editor_draft_key: key } });
   assert.equal(ctx.imageEditor.sourceKey, key);
+  assert.equal(ctx.imageEditor.returnTo, "conversation");
+  assert.equal(ctx.preview, null);
+  assert.equal(ctx.editorDrafts.records.current.get(key).returnTo, "conversation");
+  ctx.previewImage = null;
+  vm.runInContext(previewEffect, ctx)();
+  assert.equal(ctx.preview, null);
   assert.equal(ctx.editorDrafts.records.current.get(key).drafts.comment.objects[0].text, "变成金色✨");
   assert.equal(ctx.submissions.length, 1);
   ctx.finishImageEditor();
   assert.equal(ctx.imageEditor, null);
+  assert.equal(ctx.preview, null);
   assert.equal(ctx.editorDrafts.records.current.get(key).active, false);
+  assert.equal(ctx.focusOptions.preventScroll, true);
+});
+
+test("preview-origin edits return to their existing preview while legacy failure drafts restore to the conversation", () => {
+  const ctx = appContext();
+  ctx.previewImage = { src: "existing-preview", zoom: 2 };
+  ctx.preview = ctx.previewImage;
+  ctx.finishImageEditor();
+  assert.equal(ctx.preview, ctx.previewImage);
+  assert.equal(editorDraftReturnTarget(record("/outputs/source.png")), "preview");
+  assert.equal(editorDraftReturnTarget(record("restored:old")), "conversation");
+  assert.equal(editorDraftReturnTarget(record("submitted:old")), "conversation");
+  assert.equal(editorDraftReturnTarget({ ...record("restored:old"), returnTo: "preview" }), "preview");
 });
 
 test("missing draft/original reports recovery failure without charging or submitting", async () => {
@@ -144,6 +171,8 @@ test("older local tasks recover the saved original, selection and instruction be
   ctx.loadReusableMaskPayloadFromTurn = async () => ({ maskFile: new File(["selection"], "mask.png"), encoding: "compat" });
   await ctx.continueImageEdit({ id: "old", prompt: "添加加号", meta: { mask_used: true }, referenceSnapshots: [{ src: "original" }] });
   assert.equal(ctx.imageEditor.sourceKey, "restored:old");
+  assert.equal(ctx.imageEditor.returnTo, "conversation");
+  assert.equal(ctx.preview, null);
   const restored = ctx.editorDrafts.records.current.get("restored:old");
   assert.equal(restored.mask.instructions, "添加加号");
   assert.equal(restored.initialEncoding, "compat");

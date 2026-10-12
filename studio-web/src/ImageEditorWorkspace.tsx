@@ -9,6 +9,7 @@ type Props = {
   file: File;
   action: ImageEditAction;
   language: string;
+  returnToConversation?: boolean;
   t: (key: string, params?: Record<string, string | number>) => string;
   initialMaskFile?: Blob;
   initialEncoding?: MaskEncoding;
@@ -42,7 +43,7 @@ export function ImageEditorWorkspace(props: Props) {
   </nav>;
   // Keep visited canvases mounted: mode switches retain notes, selection, undo and zoom.
   return <div ref={root}>{visited.map((item) => <div key={item} data-active={item === mode} style={{ display: item === mode ? "contents" : "none" }}>
-    {item === "local" ? <MaskEditor unified english={en} navigation={navigation} initialIntent={props.action === "erase" ? "erase" : "local"}
+    {item === "local" ? <MaskEditor unified english={en} navigation={navigation} returnToConversation={props.returnToConversation} initialIntent={props.action === "erase" ? "erase" : "local"}
       file={props.file} initialMaskFile={props.initialMaskFile} initialEncoding={props.initialEncoding} t={props.t}
       draft={props.maskDraft} onDraft={props.onMaskDraft}
       onBusyChange={setBusy} onCancel={props.onClose} onApply={props.onApply} onRemove={props.onRemove}
@@ -50,7 +51,7 @@ export function ImageEditorWorkspace(props: Props) {
         const sent = await props.onSend({ action: intent, prompt, references: [result.baseFile], maskFile: result.maskFile, maskEncoding: result.encoding, previewFile: result.previewFile });
         if (sent) props.onSent();
         return sent;
-      }} /> : <ImageEditor file={props.file} action={item} language={props.language} navigation={navigation} onBusyChange={setBusy}
+      }} /> : <ImageEditor file={props.file} action={item} language={props.language} navigation={navigation} returnToConversation={props.returnToConversation} onBusyChange={setBusy}
       draft={props.getDraft?.(item)} onDraft={(draft) => props.onDraft?.(item, draft)} onClose={props.onClose} onSent={props.onSent} onSend={props.onSend} />}
   </div>)}</div>;
 }

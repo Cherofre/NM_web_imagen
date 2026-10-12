@@ -76,6 +76,7 @@ export function maskCanvasFitScale(
   imageWidth: number,
   imageHeight: number,
   edgePadding = 12,
+  fillStage = false,
 ) {
   const safeStageWidth = Number(stageWidth);
   const safeStageHeight = Number(stageHeight);
@@ -94,7 +95,7 @@ export function maskCanvasFitScale(
   const padding = Math.max(0, Number(edgePadding) || 0) * 2;
   const availableWidth = Math.max(1, safeStageWidth - padding);
   const availableHeight = Math.max(1, safeStageHeight - padding);
-  const preferredScale = Math.max(1, 480 / Math.max(safeImageWidth, safeImageHeight));
+  const preferredScale = fillStage ? Infinity : Math.max(1, 480 / Math.max(safeImageWidth, safeImageHeight));
   return Math.min(preferredScale, availableWidth / safeImageWidth, availableHeight / safeImageHeight);
 }
 

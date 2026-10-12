@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-12
+- Editing interaction follow-up: 失败继续编辑按来源直接退出到会话，返回目标持久化及旧草稿兼容；预览进入仍保留原预览。加大整体/局部说明框和深色滚动条；标注/局部修改统一主动wheel监听、输入区滚动隔离和绘制时禁缩放；移除网页480px默认适配上限，补缩放后范围圈坐标刷新。272 Node及生产构建通过，0生图；IAB管理员策略校验仍不可用，真实视觉未验收。docs/editor-interaction-review-2026-10-12.md。
 - Recovery button appearance: 用户指出失败卡下“继续编辑”为默认长条按钮；确认为主题属性缺失及 response-body grid 默认拉伸。迁移到会话样式、使用主题色/边框/圆角并 justify-self:start、width:fit-content；网页构建通过，未变更超时或恢复逻辑。真实浏览器读取仍因管理员策略校验不可用被拒绝，需刷新后视觉确认。
 - Local edit entry regression: 用户发现无参考图时点击结果图“局部修改”没有加入参考图。确认为统一入口提前返回遗漏 composer 状态同步；修复网页 local/erase 进入时将原图升为第一参考、保留其他参考、相同来源复用 File 避免重复/遮罩失效，换底图清理旧遮罩。新增3项实际入口模拟，262 Node及构建通过；0生图，仅网页更新。
 - Editor draft recovery: 用户授权完善后，网页版原图/标注/评论/局部选区和说明写入有界 IndexedDB（20记录/150MiB、增量原子保存）；刷新恢复活动模式，提交独立副本，失败“继续编辑”及旧任务原图/遮罩回退已接通。补浮层短窄视口限位、语言/编码切换不重置选区、背景原尺寸/位置/比例约束。259 Node、308 Python、生产构建通过；7861提供新文件，0付费生成。真实IAB打开仍因管理员策略校验不可用被拒绝，未绕过；最新GUI与提示词保真仍需实际确认。docs/editor-drafts-and-recovery-2026-10-09.md。

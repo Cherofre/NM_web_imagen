@@ -16,6 +16,7 @@ export type EditorDraftRecord = {
   mask?: MaskEditorDraft;
   initialMaskFile?: Blob;
   initialEncoding?: MaskEncoding;
+  returnTo?: "preview" | "conversation";
 };
 
 export function validEditorDraft(value: unknown): value is EditorDraftRecord {
@@ -27,6 +28,7 @@ export function validEditorDraft(value: unknown): value is EditorDraftRecord {
     && Number.isFinite(r.lastModified) && Number.isFinite(r.updatedAt)
     && ["annotate", "comment", "local", "erase", "background"].includes(r.action)
     && typeof r.active === "boolean" && r.drafts && typeof r.drafts === "object"
+    && (r.returnTo === undefined || r.returnTo === "preview" || r.returnTo === "conversation")
     && Object.values(r.drafts).every((draft) => draft && Array.isArray(draft.objects)
       && typeof draft.prompt === "string" && draft.objects.every((object) => object
         && typeof object.id === "string" && typeof object.text === "string"
@@ -52,6 +54,12 @@ export function retainedEditorDrafts(values: unknown[]) {
 
 export function editorDraftFile(record: EditorDraftRecord) {
   return new File([record.file], record.name, { type: record.file.type, lastModified: record.lastModified });
+}
+
+export function editorDraftReturnTarget(record: EditorDraftRecord): "preview" | "conversation" {
+  if (record.returnTo) return record.returnTo;
+  // Pre-navigation drafts from a failed turn used these stable identifiers.
+  return /^(submitted|restored):/.test(record.sourceKey) ? "conversation" : "preview";
 }
 
 let database: Promise<IDBDatabase> | undefined;

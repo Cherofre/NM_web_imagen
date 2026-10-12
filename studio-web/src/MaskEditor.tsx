@@ -22,13 +22,13 @@ import {
   type ReactNode,
   type KeyboardEvent,
   type PointerEvent,
-  type WheelEvent,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { ERASE_PROMPT } from "./imageEditorModel";
+import { bindEditorWheelZoom } from "./editorViewport";
 import {
   maskAlphaSelectsPixel,
   maskSelectionCoverage,
@@ -57,6 +57,7 @@ export type MaskEditorResult = {
 };
 
 type MaskEditorProps = {
+  returnToConversation?: boolean;
   unified?: boolean;
   english?: boolean;
   navigation?: ReactNode;
@@ -154,7 +155,7 @@ function drawCommand(context: CanvasRenderingContext2D, command: MaskCommand) {
   drawStroke(context, command);
 }
 
-export function MaskEditor({ unified = false, english = false, navigation, initialIntent = "local", onSend, onBusyChange, file, initialMaskFile, initialEncoding, draft, onDraft, t, onCancel, onApply, onRemove }: MaskEditorProps) {
+export function MaskEditor({ returnToConversation = false, unified = false, english = false, navigation, initialIntent = "local", onSend, onBusyChange, file, initialMaskFile, initialEncoding, draft, onDraft, t, onCancel, onApply, onRemove }: MaskEditorProps) {
   const initialDraft = useRef(draft).current;
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -176,6 +177,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
   } | null>(null);
 
   const words = (zh: string, en: string) => english ? en : zh;
+  const exitLabel = unified && returnToConversation ? words("退出编辑，返回会话", "Exit editing and return to conversation") : t("mask.cancel");
   const [intent, setIntent] = useState(initialDraft?.intent || initialIntent);
   const [instructions, setInstructions] = useState(initialDraft?.instructions || "");
   const exportLock = useRef(false);
@@ -407,6 +409,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
         dimensions.width,
         dimensions.height,
         MASK_STAGE_EDGE_PADDING,
+        unified,
       );
       setFitScale((current) => Math.abs(current - nextScale) < 0.0001 ? current : nextScale);
     };
@@ -543,11 +546,11 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
     setPan({ x: 0, y: 0 });
   }
 
-  function onWheel(event: WheelEvent<HTMLDivElement>) {
-    if (!ready) return;
-    event.preventDefault();
-    setZoom((value) => clamp(value * (event.deltaY < 0 ? 1.12 : 0.89), 0.5, 4));
-  }
+  useEffect(() => {
+    if (!stageRef.current) return;
+    return bindEditorWheelZoom(stageRef.current, (factor) => setZoom((value) => clamp(value * factor, 0.5, 4)),
+      () => ready && !saving && !pointerRef.current && !activeStrokeRef.current);
+  }, [ready, saving]);
 
   function coverage() {
     const overlay = overlayCanvasRef.current;
@@ -746,14 +749,14 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
   );
   return (
     <div className={`lightbox mask-editor-shell${unified ? " unified" : ""}`}>
-      <button className="lightbox-backdrop" type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={t("mask.cancel")} />
+      <button className="lightbox-backdrop" type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={exitLabel} />
       <div className={`mask-editor-card${unified ? " image-editor" : ""}`} role="dialog" aria-modal="true" aria-label={unified ? words("局部修改", "Local edit") : t("mask.title")} tabIndex={-1} ref={dialogRef} onKeyDown={handleKeyDown}>
         <header className="mask-editor-head">
           <div>
-            <>{unified && <button type="button" className="image-editor-back" onClick={() => { if (!exportLock.current) onCancel(); }} disabled={saving}><ArrowLeft size={17} />{words("返回图片", "Back to image")}</button>}<strong>{unified ? words("局部修改", "Local edit") : t("mask.title")}</strong></>
+            <>{unified && <button type="button" className="image-editor-back" onClick={() => { if (!exportLock.current) onCancel(); }} disabled={saving}><ArrowLeft size={17} />{returnToConversation ? words("返回会话", "Back to conversation") : words("返回图片", "Back to image")}</button>}<strong>{unified ? words("局部修改", "Local edit") : t("mask.title")}</strong></>
             <span>{file.name}{dimensions.width ? ` · ${dimensions.width} × ${dimensions.height}` : ""}</span>
           </div>
-          <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={t("mask.cancel")} title={t("mask.cancel")}><X size={18} /></button>
+          <button type="button" onClick={() => { if (!exportLock.current) onCancel(); }} aria-label={exitLabel} title={exitLabel}><X size={18} /></button>
         </header>
 
         {navigation}
@@ -775,7 +778,7 @@ export function MaskEditor({ unified = false, english = false, navigation, initi
           </div>
           {intent === "local" ? <textarea aria-label={words("局部修改要求", "Local edit instructions")} maxLength={8000} disabled={saving} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder={words("涂出区域，再描述要怎么改…", "Paint an area, then describe the change…")} /> : <p>{words("涂出要擦除的内容，发送后由 AI 补全背景。切换修改方式会保留选区。", "Paint content to erase; AI will fill the background. Switching intent preserves the selection.")}</p>}
         </div>}
-        <div ref={stageRef} className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`} onWheel={onWheel}>
+        <div ref={stageRef} className={`mask-editor-stage tool-${tool}${ready ? " is-ready" : ""}`}>
           {!ready && !error && <div className="mask-editor-loading"><Loader2 className="spin" size={22} /> {t("mask.loading")}</div>}
           {error && <div className="mask-editor-error" role="alert"><AlertCircle size={18} /> {error}</div>}
           <div

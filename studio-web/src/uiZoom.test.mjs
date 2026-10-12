@@ -116,7 +116,7 @@ test("studio wires the desktop zoom shortcuts and the permission they need", () 
   assert.match(appSource, /t\("status\.uiZoomReset", \{ percent: formatUiZoom\(next\) \}\)/);
   assert.match(
     appSource,
-    /target\.closest\("\.mask-editor-stage, \.lightbox-stage"\)/,
+    /target\.closest\("\.image-editor-stage, \.mask-editor-stage, \.lightbox-stage"\)/,
     "Ctrl+wheel inside the mask editor or the lightbox must keep that stage's own zoom",
   );
   assert.match(

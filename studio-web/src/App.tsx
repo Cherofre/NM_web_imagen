@@ -198,7 +198,7 @@ import { ImageEditorWorkspace } from "./ImageEditorWorkspace";
 import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
 import { type ImageEditorSubmission } from "./ImageEditor";
 import { imageEditActionFrom, recoverableImageEditAction, imageEditorDraftKey, type ImageEditAction } from "./imageEditorModel";
-import { editorDraftFile } from "./editorDraftStore";
+import { editorDraftFile, editorDraftReturnTarget } from "./editorDraftStore";
 import { useEditorDrafts } from "./useEditorDrafts";
 import {
   activeMaskAttachment,
@@ -1526,9 +1526,10 @@ function App() {
   const [desktopOutputsRoot, setDesktopOutputsRoot] = useState(desktopRuntime.outputsRoot);
   const desktopMode = isDesktopRuntime();
   const [language, setLanguage] = useState<AppLanguage>(() => resolveInitialLanguage(typeof localStorage === "undefined" ? null : localStorage));
-  const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string; sourceKey: string } | null>(null);
+  const [imageEditor, setImageEditor] = useState<{ file: File; action: ImageEditAction; key: string; sourceKey: string; returnTo: "preview" | "conversation" } | null>(null);
+  const editorReturnFocus = useRef<HTMLElement | null>(null);
   const editorDrafts = useEditorDrafts((record) => {
-    setImageEditor((current) => current || { file: editorDraftFile(record), action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action) });
+    setImageEditor((current) => current || { file: editorDraftFile(record), action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action), returnTo: editorDraftReturnTarget(record) });
   }, () => setNotice(language === "en" ? "Could not save editor drafts locally. Keep this page open to retain your edits." : "编辑草稿暂时无法在本地保存，请保持页面打开以保留编辑内容。"), !desktopMode);
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
@@ -2422,7 +2423,7 @@ function App() {
       // Ctrl+wheel also rescaled the whole window the two would fight, so the
       // gesture stays with whichever stage the pointer is over.
       const target = event.target as Element | null;
-      if (target && typeof target.closest === "function" && target.closest(".mask-editor-stage, .lightbox-stage")) {
+      if (target && typeof target.closest === "function" && target.closest(".image-editor-stage, .mask-editor-stage, .lightbox-stage")) {
         return;
       }
       event.preventDefault();
@@ -3894,7 +3895,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (imageEditor && !previewImage) previewReference(imageEditor.file, imageEditor.sourceKey);
+    if (imageEditor?.returnTo === "preview" && !previewImage) previewReference(imageEditor.file, imageEditor.sourceKey);
   }, [imageEditor]);
 
   async function downloadImage(src: string, name: string) {
@@ -4346,12 +4347,12 @@ function App() {
         if (!keepCurrentMask) setMaskAttachment(null);
       }
       const initialMaskFile = references[0] === file ? activeComposerMask?.maskFile : undefined;
-      editorDrafts.put(previous ? { ...previous, action, active: true } : {
+      editorDrafts.put(previous ? { ...previous, action, active: true, returnTo: "preview" } : {
         version: 1, sourceKey, file, name: file.name, lastModified: file.lastModified, action, active: true,
-        updatedAt: Date.now(), drafts: {}, initialMaskFile, initialEncoding: activeComposerMask?.encoding,
+        updatedAt: Date.now(), drafts: {}, initialMaskFile, initialEncoding: activeComposerMask?.encoding, returnTo: "preview",
         mask: initialMaskFile ? { commands: [], instructions: "", intent: "local", encoding: activeComposerMask?.encoding || "standard" } : undefined,
       });
-      setImageEditor({ file, action, sourceKey, key: imageEditorDraftKey(sourceKey, action) });
+      setImageEditor({ file, action, sourceKey, key: imageEditorDraftKey(sourceKey, action), returnTo: "preview" });
       // Keep the preview and its object URL alive while the editor is open.
       // Cancel returns to the same image, gallery position and zoom.
     } catch (error) {
@@ -4389,22 +4390,30 @@ function App() {
       const record = editorDrafts.records.current.get(imageEditor.sourceKey);
       if (record) { editorDrafts.put({ ...record, active: false }); void editorDrafts.flush(); }
     }
+    if (imageEditor?.returnTo === "conversation") {
+      closePreviewImage();
+      window.requestAnimationFrame(() => {
+        const target = editorReturnFocus.current?.isConnected ? editorReturnFocus.current : promptRef.current;
+        target?.focus({ preventScroll: true });
+      });
+    } else window.requestAnimationFrame(() => previewDialogRef.current?.focus());
     setImageEditor(null);
   }
 
   async function continueImageEdit(turn: ConversationTurn) {
     const action = recoverableImageEditAction(turn.meta);
     if (!action) return;
+    editorReturnFocus.current = document.activeElement as HTMLElement | null;
     const requestId = ++previewMaskRequestRef.current;
     await editorDrafts.load();
     if (requestId !== previewMaskRequestRef.current) return;
     const key = String(turn.meta?.editor_draft_key || "");
     const record = editorDrafts.records.current.get(key);
     if (record) {
-      editorDrafts.put({ ...record, active: true });
+      editorDrafts.put({ ...record, active: true, returnTo: "conversation" });
       const file = editorDraftFile(record);
-      previewReference(file, record.sourceKey);
-      setImageEditor({ file, action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action) });
+      closePreviewImage();
+      setImageEditor({ file, action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action), returnTo: "conversation" });
       return;
     }
     // Older tasks (or evicted drafts) still offer their original saved image and mask.
@@ -4417,12 +4426,12 @@ function App() {
     if (!file) { setNotice(language === "en" ? "The original image is unavailable. Add it again to continue editing." : "原图暂时无法读取，请重新添加原图后继续编辑。"); return; }
     const fallbackKey = `restored:${turn.id}`;
     editorDrafts.put({ version: 1, sourceKey: fallbackKey, file, name: file.name, lastModified: file.lastModified,
-      action, active: true, updatedAt: Date.now(), drafts: action === "annotate" ? { annotate: { objects: [], prompt: turn.prompt } } : {},
+      action, active: true, returnTo: "conversation", updatedAt: Date.now(), drafts: action === "annotate" ? { annotate: { objects: [], prompt: turn.prompt } } : {},
       initialMaskFile: mask?.maskFile, initialEncoding: mask?.encoding,
       mask: action === "local" || action === "erase" ? { commands: [], instructions: turn.prompt, intent: action, encoding: mask?.encoding || "standard" } : undefined,
     });
-    previewReference(file, fallbackKey);
-    setImageEditor({ file, action, sourceKey: fallbackKey, key: imageEditorDraftKey(fallbackKey, action) });
+    closePreviewImage();
+    setImageEditor({ file, action, sourceKey: fallbackKey, key: imageEditorDraftKey(fallbackKey, action), returnTo: "conversation" });
     if (action === "annotate" || action === "comment") setNotice(language === "en" ? "The original image is restored. This older task has no editable guide; add annotations or comments again." : "原图已恢复；该旧任务没有可编辑的引导草稿，请重新添加标注或评论。");
   }
 
@@ -8137,6 +8146,7 @@ function App() {
       {imageEditor && <ImageEditorWorkspace
         key={imageEditor.key}
         file={imageEditor.file} action={imageEditor.action} language={language} t={t}
+        returnToConversation={imageEditor.returnTo === "conversation"}
         onApply={(result) => { applyMaskResult(result); finishImageEditor(); }}
         onRemove={references[0] === imageEditor.file && activeComposerMask ? () => { removeMask(); finishImageEditor(); } : undefined}
         initialMaskFile={editorDrafts.records.current.get(imageEditor.sourceKey)?.initialMaskFile}
@@ -8146,7 +8156,7 @@ function App() {
         getDraft={(mode) => editorDrafts.records.current.get(imageEditor.sourceKey)?.drafts[mode]}
         onMode={(action) => { const record = editorDrafts.records.current.get(imageEditor.sourceKey); if (record) editorDrafts.put({ ...record, action }); }}
         onDraft={(mode, draft) => { const record = editorDrafts.records.current.get(imageEditor.sourceKey); if (record) editorDrafts.put({ ...record, drafts: { ...record.drafts, [mode]: draft } }); }}
-        onClose={() => { finishImageEditor(); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
+        onClose={finishImageEditor}
         onSent={() => { finishImageEditor(); closePreviewImage(); }} onSend={sendImageEdit}
       />}
       {previewImage && !imageEditor && !maskEditorOpen && (
