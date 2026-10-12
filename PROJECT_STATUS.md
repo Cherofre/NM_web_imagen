@@ -2,6 +2,8 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-12
+- Copy runtime verification: 49项构建后资源检查通过；发现旧7861停止后用源码启动器恢复，PID62752/session30044，health/新JS/复制标签/220px及高亮CSS实际检查通过。没有真实生图或发布。
+- Copy to input: 按用户澄清，成功结果按钮更名“复制到输入区”，复制所选结果及本轮提示词；来源/字节内容去重，已有同图复用并合并该图重复项，保留其他参考顺序/底图对象。失败或切换不覆盖输入，防重复点击，高亮参考+明确新增/复用提示。参考卡片220px及完整文件名tooltip。282 Node及生产构建通过，0生图；视觉待刷新确认。docs/copy-to-input-review-2026-10-12.md。
 - Editing interaction follow-up: 失败继续编辑按来源直接退出到会话，返回目标持久化及旧草稿兼容；预览进入仍保留原预览。加大整体/局部说明框和深色滚动条；标注/局部修改统一主动wheel监听、输入区滚动隔离和绘制时禁缩放；移除网页480px默认适配上限，补缩放后范围圈坐标刷新。272 Node及生产构建通过，0生图；IAB管理员策略校验仍不可用，真实视觉未验收。docs/editor-interaction-review-2026-10-12.md。
 - Recovery button appearance: 用户指出失败卡下“继续编辑”为默认长条按钮；确认为主题属性缺失及 response-body grid 默认拉伸。迁移到会话样式、使用主题色/边框/圆角并 justify-self:start、width:fit-content；网页构建通过，未变更超时或恢复逻辑。真实浏览器读取仍因管理员策略校验不可用被拒绝，需刷新后视觉确认。
 - Local edit entry regression: 用户发现无参考图时点击结果图“局部修改”没有加入参考图。确认为统一入口提前返回遗漏 composer 状态同步；修复网页 local/erase 进入时将原图升为第一参考、保留其他参考、相同来源复用 File 避免重复/遮罩失效，换底图清理旧遮罩。新增3项实际入口模拟，262 Node及构建通过；0生图，仅网页更新。

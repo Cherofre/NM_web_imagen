@@ -554,7 +554,7 @@ test("results actions expose clear labels and output dimensions", () => {
   assert.match(appSource, /function sharedImageDimensionsLabel\(images: GeneratedImage\[\]\)[\s\S]*labels\.every\(\(label\) => label === firstLabel\)/);
   assert.match(appSource, /function requestedSizeLabel\(entry: HistoryEntry\)/);
   assert.match(appSource, /function dimensionMismatchLabel\(entry: HistoryEntry, image\?: GeneratedImage \| null\)/);
-  assert.match(appSource, /<span>\{t\("image\.continueEdit"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\(copyInputSource === src \? "image\.copyingToInput" : copiedReference\?\.source === src \? "image\.copiedToInput" : "image\.continueEdit"\)\}<\/span>/);
   assert.match(appSource, /<span>\{t\(desktopMode \? "preview\.editMask" : "editor\.local"\)\}<\/span>/);
   assert.match(appSource, /className="image-download-action"[\s\S]*aria-label=\{t\("image\.download"\)\}/);
   assert.match(appSource, /<span>\{t\("image\.copyPrompt"\)\}<\/span>/);
@@ -1006,13 +1006,15 @@ test("async reference reuse checks the latest mode and disables every reference 
   const continueEnd = appSource.indexOf("return (", continueStart);
   const continueSource = appSource.slice(continueStart, continueEnd);
   assert.match(continueSource, /referenceUiState\(submitModeRef\.current, references\.length\)/);
-  assert.match(continueSource, /const accepted = await addOutputAsReference/);
-  assert.match(continueSource, /if \(accepted\) \{[\s\S]*t\("reference\.releaseAsContext"\)/);
+  assert.match(continueSource, /referenceImageIdentity\.current\.matches/);
+  assert.match(continueSource, /mergeCopiedReference/);
+  assert.match(continueSource, /if \(!validTarget\(\)\)/);
+  assert.match(continueSource, /applyPrompt\(turn\.prompt, engine\)/);
 
   assert.match(appSource, /const referenceActionsDisabled = !referenceState\.canAdd;/);
   assert.match(appSource, /title=\{t\("history\.useReference"\)\} disabled=\{!src \|\| referenceActionsDisabled\}/);
   assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !turn\.referenceSnapshots\?\.some/);
-  assert.match(appSource, /onClick=\{\(\) => void continueFromTurn\(turn, image, index\)\} disabled=\{referenceActionsDisabled\}/);
+  assert.match(appSource, /onClick=\{\(\) => void continueFromTurn\(turn, image, index\)\} disabled=\{referenceActionsDisabled \|\| Boolean\(copyInputSource\)\}/);
   assert.match(appSource, /onClick=\{\(\) => void addOutputAsReference\(src, name\)\} disabled=\{referenceActionsDisabled\}/);
   assert.match(appSource, /disabled=\{referenceActionsDisabled \|\| !imageSrc\(historyDetail\.images\?\.\[0\]\)\}/);
   assert.match(appSource, /title=\{t\("preview\.useReference"\)\} disabled=\{referenceActionsDisabled\}/);

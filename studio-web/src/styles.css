@@ -2797,6 +2797,7 @@ button.primary-action:focus-visible,
 
 .reference-strip {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 2px;
@@ -2822,7 +2823,10 @@ button.primary-action:focus-visible,
 
 .reference-chip {
   display: grid;
-  grid-template-columns: 18px 38px minmax(80px, 170px) 26px;
+  grid-template-columns: 18px 38px minmax(0, 1fr) 26px;
+  flex: 0 0 220px;
+  width: 220px;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
   min-height: 46px;
@@ -2837,6 +2841,8 @@ button.primary-action:focus-visible,
   opacity: 0.55;
   transform: scale(0.98);
 }
+
+.reference-chip.is-copy-target { border-color: var(--success); background: #f0fdf4; }
 
 .reference-chip.is-drop-target {
   border-color: rgba(17, 17, 17, 0.32);
@@ -6031,6 +6037,8 @@ button.primary-action:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
+  max-width: 100%;
   overflow: visible;
   color: inherit;
   text-overflow: clip;
@@ -6056,6 +6064,7 @@ button.primary-action:focus-visible,
 }
 
 .reference-mask-badge.is-applied {
+  order: 2;
   background: rgba(180, 83, 9, 0.12);
   color: #92400e;
 }

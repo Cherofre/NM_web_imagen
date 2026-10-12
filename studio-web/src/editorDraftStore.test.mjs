@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { editorDraftFile, editorDraftReturnTarget, validEditorDraft, retainedEditorDrafts, loadEditorDrafts, saveEditorDrafts } from "./editorDraftStore.ts";
 import { editorNoteBounds, imageEditorDraftKey, recoverableImageEditAction, REMOVE_BACKGROUND_PROMPT } from "./imageEditorModel.ts";
 import { referenceFileFingerprint } from "./maskEditorModel.ts";
+import { ReferenceImageIdentity } from "./referenceCopyModel.ts";
 
 const record = (sourceKey = "original", updatedAt = 1) => ({
   version: 1, sourceKey, file: new Blob(["原图"], { type: "image/png" }), name: "小图.png", lastModified: 100,
@@ -105,6 +106,7 @@ function appContext() {
     crypto, structuredClone, Date, editorDraftFile, imageEditorDraftKey, referenceFileFingerprint, recoverableImageEditAction,
     language: "zh", configIssues: () => [], gptForm: {}, bananaForm: {}, t: (s) => s,
     previewMaskRequestRef: { current: 0 },
+    referenceImageIdentity: { current: new ReferenceImageIdentity() },
     editorReturnFocus: { current: null }, document: { activeElement: null },
     editorDrafts: { records: { current: new Map([["original", record()]]) }, async load() {}, async flush() {}, put(r) { this.records.current.set(r.sourceKey, structuredClone(r)); } },
     imageEditor: { sourceKey: "original", returnTo: "preview" }, submissions: [],

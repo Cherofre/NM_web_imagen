@@ -200,6 +200,7 @@ import { type ImageEditorSubmission } from "./ImageEditor";
 import { imageEditActionFrom, recoverableImageEditAction, imageEditorDraftKey, type ImageEditAction } from "./imageEditorModel";
 import { editorDraftFile, editorDraftReturnTarget } from "./editorDraftStore";
 import { useEditorDrafts } from "./useEditorDrafts";
+import { ReferenceImageIdentity, mergeCopiedReference } from "./referenceCopyModel";
 import {
   activeMaskAttachment,
   appendGenerationFiles,
@@ -1536,6 +1537,14 @@ function App() {
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
   const [bananaForm, setBananaForm] = useState<BananaForm>(() => normalizeBananaForm(loadSanitizedBrowserForm(bananaStorageKey, defaultBananaForm)));
   const [references, setReferences] = useState<File[]>([]);
+  const referenceFilesRef = useRef(references); referenceFilesRef.current = references;
+  const referenceImageIdentity = useRef(new ReferenceImageIdentity());
+  const copyInputLock = useRef(false);
+  const [copyInputSource, setCopyInputSource] = useState<string | null>(null);
+  const [copiedReference, setCopiedReference] = useState<{ file: File; source: string } | null>(null);
+  const referenceChipNodes = useRef(new WeakMap<File, HTMLDivElement>());
+  const referenceStripRef = useRef<HTMLDivElement | null>(null);
+  const referenceEngineRef = useRef(activeEngine); referenceEngineRef.current = activeEngine;
   const [maskAttachment, setMaskAttachment] = useState<MaskAttachment<File> | null>(null);
   const [maskEditorOpen, setMaskEditorOpen] = useState(false);
   const [sessions, setSessions] = useState<WorkbenchSession[]>(() => initialSessionState.current.sessions);
@@ -3824,6 +3833,7 @@ function App() {
   }
 
   function applyMaskResult(result: MaskEditorResult) {
+    referenceImageIdentity.current.inheritSource(result.baseFile, imageEditor?.file || references[0]);
     const attachment: MaskAttachment<File> = {
       baseFingerprint: referenceFileFingerprint(result.baseFile),
       baseFile: result.baseFile,
@@ -4267,10 +4277,12 @@ function App() {
     const blob = await response.blob();
     const mimeType = blob.type || "image/png";
     if (!mimeType.startsWith("image/")) throw new Error(t("status.noImageFiles"));
-    return new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
+    const file = new File([blob], name.replace(/[\\/:*?"<>|]+/g, "-") || "reference.png", {
       type: mimeType,
       lastModified: Date.now(),
     });
+    referenceImageIdentity.current.setSource(file, src);
+    return file;
   }
 
   async function addOutputAsReference(src: string, name: string) {
@@ -4364,6 +4376,7 @@ function App() {
     const issues = configIssues("gpt-image-2", gptForm, bananaForm, t);
     if (issues.length) return false;
     const base = edit.references[0];
+    referenceImageIdentity.current.inheritSource(base, imageEditor?.file);
     const attachment: MaskAttachment<File> | null = edit.maskFile ? {
       baseFile: base, baseFingerprint: referenceFileFingerprint(base), maskFile: edit.maskFile,
       previewFile: edit.previewFile, encoding: edit.maskEncoding || "standard", coverage: 0,
@@ -5809,22 +5822,57 @@ function App() {
   }
 
   async function continueFromTurn(turn: ConversationTurn, image?: GeneratedImage, index = 0) {
+    if (copyInputLock.current) return;
     if (!referenceUiState(submitModeRef.current, references.length).canAdd) {
       setNotice(t("reference.chatNotSent"));
       return;
     }
     const src = imageSrc(image);
     const name = imageName(image, index);
-    applyPrompt(turn.prompt);
     if (!src) {
+      applyPrompt(turn.prompt);
       setNotice(t("reference.appliedPrompt"));
       return;
     }
-    const accepted = await addOutputAsReference(src, name);
-    if (accepted) {
-      setNotice(t("reference.releaseAsContext"));
-    }
+    copyInputLock.current = true;
+    setCopyInputSource(src);
+    const sessionId = activeSessionIdRef.current, engine = referenceEngineRef.current;
+    const validTarget = () => activeSessionIdRef.current === sessionId && referenceEngineRef.current === engine && submitModeRef.current === "generate";
+    try {
+      const file = await outputReferenceFile(src, name);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (!validTarget()) { setNotice(t("reference.copyTargetChanged")); return; }
+        const current = referenceFilesRef.current;
+        const matches = await referenceImageIdentity.current.matches(file, current, src);
+        if (!validTarget()) { setNotice(t("reference.copyTargetChanged")); return; }
+        if (current !== referenceFilesRef.current) continue;
+        const limit = engine === "banana" ? 14 : 16;
+        const result = mergeCopiedReference(current, file, matches, limit);
+        if (result.blocked) { setNotice(t("status.referenceLimit", { limit })); return; }
+        referenceImageIdentity.current.inheritSource(result.selected, file);
+        referenceFilesRef.current = result.files;
+        setReferences(result.files);
+        applyPrompt(turn.prompt, engine);
+        setCopiedReference({ file: result.selected, source: src });
+        setNotice(t(result.reused ? "reference.copyReused" : "reference.copyAdded")
+          + (result.removed ? t("reference.copyMerged", { count: result.removed }) : ""));
+        return;
+      }
+      setNotice(t("reference.copyTargetChanged"));
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("status.addReferenceFailed")); }
+    finally { copyInputLock.current = false; setCopyInputSource(null); }
   }
+
+  useEffect(() => {
+    if (!copiedReference) return;
+    const node = referenceChipNodes.current.get(copiedReference.file), strip = referenceStripRef.current;
+    if (node && strip) {
+      const left = node.getBoundingClientRect().left - strip.getBoundingClientRect().left + strip.scrollLeft;
+      strip.scrollTo({ left: Math.max(0, left - 8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
+    const timer = window.setTimeout(() => setCopiedReference(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [copiedReference]);
 
   function openHistoryContext(entry: HistoryEntry, origin: HistoryOrigin = "browser") {
     setHistoryActionMenu(null);
@@ -6462,8 +6510,8 @@ function App() {
                                 </figcaption>
                               )}
                               <div className="image-actions">
-                                <button type="button" onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled}>
-                                  <MessageSquarePlus size={14} /> <span>{t("image.continueEdit")}</span>
+                                <button type="button" onClick={() => void continueFromTurn(turn, image, index)} disabled={referenceActionsDisabled || Boolean(copyInputSource)} aria-busy={copyInputSource === src}>
+                                  {copyInputSource === src ? <Loader2 className="spin" size={14} /> : <Copy size={14} />} <span>{t(copyInputSource === src ? "image.copyingToInput" : copiedReference?.source === src ? "image.copiedToInput" : "image.continueEdit")}</span>
                                 </button>
                                 <details className="image-more-actions">
                                   <summary aria-label={t("image.moreActions")} title={t("image.moreActions")}>
@@ -6528,7 +6576,7 @@ function App() {
           <div className="composer-inner">
             <div className="composer-top">
             {references.length > 0 && (
-              <div className="reference-strip">
+              <div className="reference-strip" ref={referenceStripRef}>
                 {references.map((file, index) => {
                   const src = URL.createObjectURL(file);
                   return (
@@ -6537,8 +6585,10 @@ function App() {
                         "reference-chip",
                         draggedReferenceIndex === index ? "is-dragging" : "",
                         referenceDropIndex === index && draggedReferenceIndex !== index ? "is-drop-target" : "",
+                        copiedReference?.file === file ? "is-copy-target" : "",
                       ].filter(Boolean).join(" ")}
                       key={`${file.name}-${index}`}
+                      ref={(node) => { if (node) referenceChipNodes.current.set(file, node); else referenceChipNodes.current.delete(file); }}
                       onDragOver={(event) => onReferenceDragOver(event, index)}
                       onDrop={(event) => onReferenceDrop(event, index)}
                       onDragEnd={onReferenceDragEnd}
@@ -6557,7 +6607,7 @@ function App() {
                         <img src={src} alt={file.name} onLoad={() => URL.revokeObjectURL(src)} />
                       </button>
                       <div className="reference-mask-meta">
-                        <span>{file.name}</span>
+                        <span title={file.name}>{file.name}</span>
                         {index === 0 && maskCapability.available && (
                           <span className="reference-mask-badges">
                             <em className="reference-mask-badge">{t("mask.baseBadge")}</em>
