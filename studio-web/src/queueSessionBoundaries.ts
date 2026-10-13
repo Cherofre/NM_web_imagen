@@ -7,6 +7,7 @@ type QueueJobLike = {
   status: QueueStatus;
   error?: string;
   finishedAt?: string;
+  clientId?: string;
 };
 
 type TurnLike = {
@@ -14,6 +15,7 @@ type TurnLike = {
   status: "queued" | "running" | "success" | "error";
   error?: string;
   finishedAt?: string;
+  meta?: Record<string, unknown>;
 };
 
 type SessionLike<Turn extends TurnLike = TurnLike> = {
@@ -48,34 +50,38 @@ export function queueJobTargetExists(sessions: SessionLike[], job: Pick<QueueJob
   ));
 }
 
-export function reconcileInterruptedQueueTurns<Session extends SessionLike>(sessions: Session[], jobs: QueueJobLike[]) {
+export function reconcileInterruptedQueueTurns<Session extends SessionLike>(sessions: Session[], jobs: QueueJobLike[], clientId?: string, liveTurns?: ReadonlySet<string>) {
   const interruptedByTurn = new Map<string, QueueJobLike>();
   jobs.forEach((job) => {
-    if (job.status === "canceled" && isRefreshInterruptedError(job.error)) {
+    if (job.status === "canceled" && isRefreshInterruptedError(job.error) && (!clientId || job.clientId === clientId)) {
       interruptedByTurn.set(`${job.sessionId}:${job.turnId}`, job);
     }
   });
-  if (!interruptedByTurn.size) return sessions;
+  if (!interruptedByTurn.size && !clientId) return sessions;
 
   return sessions.map((session) => {
     let changed = false;
+    let interruptionTime: string | undefined;
     const turns = session.turns.map((turn) => {
       if (turn.status !== "running" && turn.status !== "queued") return turn;
-      const job = interruptedByTurn.get(`${session.id}:${turn.id}`);
-      if (!job) return turn;
+      const key = `${session.id}:${turn.id}`;
+      if (liveTurns?.has(key)) return turn;
+      if (clientId && turn.meta?.client_id && turn.meta.client_id !== clientId) return turn;
+      const job = interruptedByTurn.get(key);
+      if (!job && (!clientId || turn.meta?.client_id !== clientId)) return turn;
       changed = true;
+      if (job?.finishedAt && (!interruptionTime || job.finishedAt > interruptionTime)) interruptionTime = job.finishedAt;
       return {
         ...turn,
         status: "error" as const,
         error: refreshInterruptedMessage,
-        finishedAt: job.finishedAt,
+        finishedAt: job?.finishedAt || session.updatedAt || new Date().toISOString(),
       };
     });
     if (!changed) return session;
-    const latestInterrupted = turns.find((turn) => isRefreshInterruptedError(turn.error));
     return {
       ...session,
-      updatedAt: latestInterrupted?.finishedAt || session.updatedAt,
+      updatedAt: interruptionTime || session.updatedAt,
       turns,
     };
   });

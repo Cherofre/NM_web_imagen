@@ -112,3 +112,19 @@ test("interrupted queue reconciliation keeps legacy stored Chinese markers compa
   assert.equal(sessions[0].turns[0].status, "error");
   assert.equal(sessions[0].turns[0].error, "__refresh_interrupted__");
 });
+
+test("initial hydration ends only owned or known-interrupted turns and preserves other clients and live local payloads", () => {
+  const sessions = [{ ...baseSession, turns: [
+    { ...baseSession.turns[0], meta: { client_id: "this" } }, { id: "queued", status: "queued", meta: { client_id: "this" } },
+    { id: "chat", status: "running", mode: "chat", meta: { client_id: "this" } },
+    { id: "live", status: "running", meta: { client_id: "this" } }, { id: "foreign", status: "running", meta: { client_id: "other" } },
+    { id: "unknown", status: "queued" }, { id: "done", status: "success" },
+  ] }];
+  const [restored] = reconcileInterruptedQueueTurns(sessions, [], "this", new Set(["session-1:live"]));
+  assert.deepEqual(restored.turns.map((turn) => turn.status), ["error", "error", "error", "running", "running", "queued", "success"]);
+  assert.equal(restored.updatedAt, baseSession.updatedAt);
+  assert.ok(restored.turns.slice(0, 3).every((turn) => turn.error === "__refresh_interrupted__"));
+  assert.equal(reconcileInterruptedQueueTurns(sessions, [])[0].turns[0].status, "running", "normal save/conflict processing must not interrupt live work");
+  const jobs = [{ id: "foreign-job", sessionId: "session-1", turnId: "foreign", clientId: "other", status: "canceled", error: "__refresh_interrupted__" }];
+  assert.equal(reconcileInterruptedQueueTurns(sessions, jobs, "this")[0].turns.find((turn) => turn.id === "foreign").status, "running");
+});

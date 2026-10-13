@@ -10,6 +10,7 @@ import * as models from './imageModelOptions.ts';
 import { imageEditorDraftKey } from './imageEditorModel.ts';
 import { editorDraftFile } from './editorDraftStore.ts';
 import { referenceFileFingerprint, referencesWithMaskBase } from './maskEditorModel.ts';
+import { ReferenceImageIdentity } from './referenceCopyModel.ts';
 
 // Execute the actual event handlers, rather than asserting source-code strings.
 const ast = ts.createSourceFile('App.tsx', fs.readFileSync(new URL('./App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -163,11 +164,16 @@ test('real preview handlers restore comments after downloading the same result a
   const ctx = context();
   Object.assign(ctx, {
     imageEditorDraftKey, referenceFileFingerprint,
+    referenceImageIdentity: { current: new ReferenceImageIdentity() },
     previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
     editorDrafts: { records: { current: new Map() }, async load() {}, put(record) { this.records.current.set(record.sourceKey, record); } },
     references: [], activeComposerMask: null,
     setPreviewMaskLoading() {},
-    outputReferenceFile: async () => ({ name: 'result.png', type: 'image/png', size: 100, lastModified: ++ctx.counter }),
+    async outputReferenceFile(src) {
+      const file = new File(['image'], 'result.png', { type: 'image/png', lastModified: ++ctx.counter });
+      ctx.referenceImageIdentity.current.setSource(file, src);
+      return file;
+    },
     setImageEditor(value) { ctx.imageEditor = value; },
   });
   vm.runInContext(handlers.openImageEditor, ctx);
@@ -175,6 +181,8 @@ test('real preview handlers restore comments after downloading the same result a
   const saveDraft = vm.runInContext(editorOnDraft, ctx);
   const preview = { src: '/outputs/session/result.png', name: 'result.png' };
   await ctx.openImageEditor(preview, 'comment');
+  assert.equal(ctx.notices.length, 0);
+  assert.equal(ctx.imageEditor.sourceKey, preview.src);
   const originalFile = ctx.imageEditor.file;
   const draft = { objects: [{ id: '1', kind: 'comment', text: '变为金色' }], prompt: '' };
   saveDraft('comment', draft);
@@ -190,6 +198,7 @@ function localEditorContext(references = [], activeComposerMask = null) {
   const ctx = context();
   Object.assign(ctx, {
     imageEditorDraftKey, referenceFileFingerprint, referencesWithMaskBase, editorDraftFile,
+    referenceImageIdentity: { current: new ReferenceImageIdentity() },
     desktopMode: false, previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
     references, activeComposerMask, maskAttachment: activeComposerMask,
     editorDrafts: { records: { current: new Map() }, async load() {}, put(record) { this.records.current.set(record.sourceKey, record); } },
@@ -197,7 +206,11 @@ function localEditorContext(references = [], activeComposerMask = null) {
     setReferences(value) { ctx.references = value(ctx.references); },
     setActiveEngine(value) { ctx.activeEngine = value; }, setSubmitMode(value) { ctx.submitMode = value; },
     setMaskAttachment(value) { ctx.maskAttachment = value; },
-    outputReferenceFile: async () => new File(['image'], 'result.png', { type: 'image/png', lastModified: ++ctx.counter }),
+    async outputReferenceFile(src) {
+      const file = new File(['image'], 'result.png', { type: 'image/png', lastModified: ++ctx.counter });
+      ctx.referenceImageIdentity.current.setSource(file, src);
+      return file;
+    },
   });
   vm.runInContext(handlers.openImageEditor, ctx);
   vm.runInContext(handlers.editPreviewMask, ctx);
@@ -236,7 +249,10 @@ test('actual local edit preserves the active selection when editing the same fir
   await ctx.openImageEditor({ src: '', name: file.name, sourceFile: file }, 'local');
   assert.equal(ctx.maskAttachment, mask);
   assert.equal(ctx.references.length, 1);
-  const draft = ctx.editorDrafts.records.current.get(referenceFileFingerprint(file));
+  const contentKey = await ctx.referenceImageIdentity.current.contentKey(file);
+  assert.equal(ctx.imageEditor.sourceKey, contentKey);
+  assert.equal(ctx.editorDrafts.records.current.has(referenceFileFingerprint(file)), false);
+  const draft = ctx.editorDrafts.records.current.get(contentKey);
   assert.equal(draft.initialMaskFile, mask.maskFile);
   assert.equal(draft.initialEncoding, 'compat');
 });

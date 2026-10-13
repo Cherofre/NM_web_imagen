@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-13
+- Release readiness audit complete for source: 用户要求先合并，`codex/web-image-editing` 已快进合并试用分支到9e44695。远端1.1.4已发布，用户选择准备1.1.5；VERSION/Tauri/Cargo/共享UI fallback已同步。修复签名产物覆盖、版本/ZIP新鲜度、异常usage与部分生成、原输入重试/异会话保护、底图/草稿内容身份、队列截断、Web Locks原子窗口归属及迟到聊天保护。最终Python322/Node299/Rust6、生产构建、PS5.1全部21脚本、隔离源码烟测通过。7861确认无活动会话后重启为PID56532/session34055，health与新JS/CSS逐字一致。0付费调用；未构建新发行包、发布、推送或同步G盘。报告docs/release-readiness-audit-2026-10-13.md，中文发行说明docs/release-notes-v1.1.5.md。下一阶段重建候选包并验冻结后端mock、GUI/跨窗口/覆盖升级及干净分发；管理员浏览器安全校验仍阻断实际GUI，网页四模式与桌面旧遮罩入口边界保留。流程ledger-only。
 - Compact controls follow-up: 用户继续调整后，参考卡片恢复文件名/底图+遮罩+编辑两行；删除按钮在上行右侧，状态行借用其下方空间，状态摘要可缩短但不换第三行。宽屏下方固定/负面/画面文字三个等宽入口分别显示值并聚焦对应弹窗字段，<=720px保留单个附加提示词入口。“展开”按最新要求成为框内右下角纯图标，正文右侧54px/触摸64px留白避让。282 Node和TypeScript/Vite构建通过；7861首页及JS/CSS200且与新构建一致。视觉仍待刷新确认，0生图；同一试用分支，未合并/打包/发布。
 - Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出。前两稿曾将附加提示词放参数栏、再与展开共享底行；已按上方最新记录调整为宽屏三个设置入口、窄屏合并和框内展开图标。遮罩说明仍在框上方，拖动高度/弹窗/提交行为保留。初稿282 Node及49资源检查通过；最新证据见上。docs/composer-external-guidance-2026-10-13.md。
 - Superpowers Phase: not used; ledger-only layout trial.

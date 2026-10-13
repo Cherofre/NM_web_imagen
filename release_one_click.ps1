@@ -1,5 +1,7 @@
 ﻿param(
-  [string]$DestinationRoot = ""
+  [string]$DestinationRoot = "",
+  [string]$ZipPath = "",
+  [string]$ExpectedVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,8 +67,13 @@ if (-not (Test-Path -LiteralPath $VersionPath)) {
   throw "VERSION was not found."
 }
 
-$Version = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
-$VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
+. (Join-Path $ScriptDir "scripts\release_validation.ps1")
+$Version = Get-ValidatedReleaseVersion -RepoRoot $ScriptDir -ExpectedVersion $ExpectedVersion
+$VersionedZip = if ([string]::IsNullOrWhiteSpace($ZipPath)) { Join-Path $ScriptDir "..\$AppName-v$Version.zip" } else { $ZipPath }
+$VersionedZip = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($VersionedZip)
+if ([System.IO.Path]::GetExtension($VersionedZip) -ine ".zip" -or (Test-Path -LiteralPath $VersionedZip -PathType Container)) {
+  throw "Output package must be a ZIP file path: $VersionedZip"
+}
 
 Invoke-Step "Frontend tests" {
   Push-Location $StudioDir
@@ -110,7 +117,7 @@ Invoke-Step "Package smoke" {
 }
 
 Invoke-Step "Local release preflight" {
-  Invoke-NativeCommand -Command "powershell" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PreflightScript, "-ExpectedVersion", $Version, "-LocalOnly")
+  Invoke-NativeCommand -Command "powershell" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PreflightScript, "-ExpectedVersion", $Version, "-ZipPath", $VersionedZip, "-LocalOnly")
 }
 
 Invoke-Step "Sync clean package" {
@@ -118,7 +125,7 @@ Invoke-Step "Sync clean package" {
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
-  $Args += "-SkipPackage"
+  $Args += @("-SkipPackage", "-ZipPath", $VersionedZip, "-ExpectedVersion", $Version)
   Invoke-NativeCommand -Command "powershell" -Arguments $Args
 }
 
@@ -127,7 +134,7 @@ Invoke-Step "Destination verification" {
   if (-not [string]::IsNullOrWhiteSpace($DestinationRoot)) {
     $Args += @("-DestinationRoot", $DestinationRoot)
   }
-  $Args += @("-ExpectedVersion", $Version)
+  $Args += @("-ExpectedVersion", $Version, "-ZipPath", $VersionedZip)
   Invoke-NativeCommand -Command "powershell" -Arguments $Args
 }
 

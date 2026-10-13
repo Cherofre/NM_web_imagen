@@ -6,6 +6,7 @@ import type { MaskEncoding } from "./maskEditorModel";
 export type EditorDraftRecord = {
   version: 1;
   sourceKey: string;
+  imageSourceKey?: string;
   file: Blob;
   name: string;
   lastModified: number;
@@ -28,6 +29,7 @@ export function validEditorDraft(value: unknown): value is EditorDraftRecord {
     && Number.isFinite(r.lastModified) && Number.isFinite(r.updatedAt)
     && ["annotate", "comment", "local", "erase", "background"].includes(r.action)
     && typeof r.active === "boolean" && r.drafts && typeof r.drafts === "object"
+    && (r.imageSourceKey === undefined || typeof r.imageSourceKey === "string")
     && (r.returnTo === undefined || r.returnTo === "preview" || r.returnTo === "conversation")
     && Object.values(r.drafts).every((draft) => draft && Array.isArray(draft.objects)
       && typeof draft.prompt === "string" && draft.objects.every((object) => object

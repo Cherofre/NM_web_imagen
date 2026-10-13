@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$OutputPath = "",
   [string]$ReleaseVersion = "",
   [switch]$OfflineWebView2
@@ -16,15 +16,10 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
 $StudioRoot = Join-Path $RepoRoot "studio-web"
 $TauriRoot = Join-Path $StudioRoot "src-tauri"
-$TauriConfigPath = Join-Path $TauriRoot "tauri.conf.json"
 $BundleDir = Join-Path $TauriRoot "target\release\bundle\nsis"
 
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  $ReleaseVersion = ((Get-Content -LiteralPath $TauriConfigPath -Raw -Encoding UTF8) | ConvertFrom-Json).version
-}
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  throw "Release version is empty. Pass -ReleaseVersion explicitly."
-}
+. (Join-Path $ScriptDir "release_validation.ps1")
+$ReleaseVersion = Get-ValidatedReleaseVersion -RepoRoot $RepoRoot -ExpectedVersion $ReleaseVersion
 
 $SafeVersion = $ReleaseVersion -replace '[^A-Za-z0-9._-]', '-'
 $Kind = if ($OfflineWebView2) { "Offline-WebView2-Setup" } else { "Setup" }
@@ -52,7 +47,7 @@ try {
   Pop-Location
 }
 
-$Installer = Get-ChildItem -LiteralPath $BundleDir -Filter "*-setup.exe" -File |
+$Installer = Get-ChildItem -LiteralPath $BundleDir -Filter "*_${ReleaseVersion}_x64-setup.exe" -File |
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1
 if ($null -eq $Installer) {

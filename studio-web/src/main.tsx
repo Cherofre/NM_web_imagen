@@ -3,12 +3,14 @@ import { createRoot } from "react-dom/client";
 
 import App from "./App";
 import { initializeDesktopRuntime } from "./desktopRuntime";
+import { prepareBrowserStudioClientIdentity } from "./studioClientIdentity";
 import "./styles.css";
 
 async function bootstrap() {
   const root = document.getElementById("root")!;
   try {
     await initializeDesktopRuntime();
+    await prepareBrowserStudioClientIdentity();
   } catch (error) {
     root.textContent = error instanceof Error ? error.message : "Desktop runtime initialization failed";
     return;

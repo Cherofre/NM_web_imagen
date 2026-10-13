@@ -1480,6 +1480,184 @@ class UpstreamApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(400, response.status_code)
                 self.assertEqual(1, upstream_post.call_count)
 
+    async def test_gpt_optional_usage_never_discards_a_successful_image(self) -> None:
+        cases = [
+            (None, 0), ("unsupported", 0), ([12], 0), (True, 0),
+            *[({"total_tokens": value}, 0) for value in (
+                None, "N/A", True, False, -1, "-1", 1.5, "1.5",
+                float("nan"), float("inf"), float("-inf"),
+                10 ** 100, "9" * 100, 1_000_000_001, [], {},
+            )],
+            ({"total_tokens": 12}, 12),
+            ({"total_tokens": " 0012 "}, 12),
+            ({"total_tokens": 12.0}, 12),
+            ({"total_tokens": 1_000_000_000}, 1_000_000_000),
+        ]
+        for usage, expected in cases:
+            with self.subTest(usage=usage), patch.object(
+                webapp.requests, "post",
+                return_value=FakeJsonResponse({"data": [{"b64_json": PNG_1X1}], "usage": usage}),
+            ) as upstream_post:
+                response = await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1"},
+                )
+            self.assertEqual(200, response.status_code)
+            body = response.json()
+            self.assertTrue(body["ok"])
+            self.assertEqual(expected, body["meta"]["tokens_used"])
+            self.assertEqual(expected, body["history_entry"]["meta"]["tokens_used"])
+            self.assertEqual(1, body["meta"]["saved_count"])
+            self.assertEqual(1, upstream_post.call_count)
+            saved = await self.client.get(body["images"][0]["saved_url"])
+            self.assertEqual(200, saved.status_code)
+            self.assertEqual(PNG_1X1_RAW, saved.content)
+
+    async def test_gpt_compensation_failures_keep_successful_images_and_history(self) -> None:
+        cases = [
+            (FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=400), "E_UPSTREAM_REQUEST"),
+            (webapp.requests.Timeout(SENSITIVE_ERROR), "E_UPSTREAM_TIMEOUT"),
+            (webapp.requests.ConnectionError(SENSITIVE_ERROR), "E_UPSTREAM_NETWORK"),
+            (FakeJsonResponse({"data": [], "message": SENSITIVE_ERROR}), "E_UPSTREAM_RESPONSE"),
+        ]
+        for endpoint in ("/v1/images/generations", "/v1/images/edits"):
+            for subsequent_result, expected_code in cases:
+                with self.subTest(endpoint=endpoint, error=expected_code), patch.object(
+                    webapp.requests, "post", side_effect=[
+                        FakeJsonResponse({"data": [{"b64_json": PNG_1X1}], "usage": {"total_tokens": "12"}}),
+                        subsequent_result,
+                    ],
+                ) as upstream_post:
+                    kwargs = {}
+                    if endpoint == "/v1/images/edits":
+                        kwargs["files"] = [("reference_files", ("reference.png", PNG_1X1_RAW, "image/png"))]
+                    response = await self.client.post(
+                        "/api/generate/gpt-image-2",
+                        data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "n": "3", "api_endpoint": endpoint},
+                        **kwargs,
+                    )
+                self.assertEqual(200, response.status_code)
+                body = response.json()
+                self.assertTrue(body["ok"])
+                self.assertEqual(1, len(body["images"]))
+                self.assertEqual(2, upstream_post.call_count)
+                for meta in (body["meta"], body["history_entry"]["meta"]):
+                    self.assertTrue(meta["partial_result"])
+                    self.assertEqual(expected_code, meta["partial_error_code"])
+                    self.assertEqual(3, meta["n"])
+                    self.assertEqual(1, meta["image_count"])
+                    self.assertEqual(1, meta["saved_count"])
+                    self.assertEqual(12, meta["tokens_used"])
+                self.assertEqual(1, len(body["history_entry"]["images"]))
+                assert_client_payload_is_sanitized(self, body)
+                saved = await self.client.get(body["images"][0]["saved_url"])
+                self.assertEqual(200, saved.status_code)
+                self.assertEqual(PNG_1X1_RAW, saved.content)
+                entries = webapp.read_history_entries()
+                self.assertEqual(body["history_entry"]["id"], entries[0]["id"])
+
+    async def test_gpt_successful_compensation_is_complete_and_sums_safe_usage(self) -> None:
+        with patch.object(webapp.requests, "post", side_effect=[
+            FakeJsonResponse({"data": [{"b64_json": PNG_1X1}], "usage": {"total_tokens": 4}}),
+            FakeJsonResponse({"data": [{"b64_json": PNG_1X1}], "usage": "unsupported"}),
+            FakeJsonResponse({"data": [{"b64_json": PNG_1X1}], "usage": {"total_tokens": "6"}}),
+        ]) as upstream_post:
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "n": "3"},
+            )
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(3, upstream_post.call_count)
+        self.assertEqual(3, len(body["images"]))
+        self.assertEqual(3, body["meta"]["saved_count"])
+        self.assertEqual(10, body["meta"]["tokens_used"])
+        self.assertNotIn("partial_result", body["meta"])
+        self.assertNotIn("partial_error_code", body["history_entry"]["meta"])
+
+    async def test_gpt_responses_fewer_images_are_partial_without_compensation(self) -> None:
+        with patch.object(webapp.requests, "post", return_value=FakeJsonResponse({
+            "output": [{"type": "image_generation_call", "result": PNG_1X1}],
+            "usage": {"total_tokens": "12"},
+        })) as upstream_post:
+            response = await self.client.post(
+                "/api/generate/gpt-image-2",
+                data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "api_endpoint": "/v1/responses", "n": "3"},
+            )
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(1, upstream_post.call_count)
+        self.assertEqual(1, len(body["images"]))
+        for meta in (body["meta"], body["history_entry"]["meta"]):
+            self.assertTrue(meta["partial_result"])
+            self.assertNotIn("partial_error_code", meta)
+            self.assertEqual(3, meta["n"])
+            self.assertEqual(1, meta["image_count"])
+            self.assertEqual(1, meta["saved_count"])
+            self.assertEqual(12, meta["tokens_used"])
+        saved = await self.client.get(body["images"][0]["saved_url"])
+        self.assertEqual(200, saved.status_code)
+        self.assertEqual(PNG_1X1_RAW, saved.content)
+
+    async def test_gpt_initial_upstream_failure_still_saves_nothing(self) -> None:
+        for initial_result, status, code in (
+            (FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=400), 400, "E_UPSTREAM_REQUEST"),
+            (webapp.requests.Timeout(SENSITIVE_ERROR), 504, "E_UPSTREAM_TIMEOUT"),
+            (webapp.requests.ConnectionError(SENSITIVE_ERROR), 502, "E_UPSTREAM_NETWORK"),
+        ):
+            with self.subTest(code=code), patch.object(webapp.requests, "post", side_effect=[initial_result]) as upstream_post:
+                response = await self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "n": "3"},
+                )
+            assert_stable_http_error(self, response, status, code)
+            self.assertEqual(1, upstream_post.call_count)
+            self.assertEqual([], list(self.outputs.glob("*.png")))
+            self.assertFalse((self.outputs / "history.json").exists())
+
+    async def test_canceled_compensation_failure_does_not_return_partial_images(self) -> None:
+        for subsequent_result in (
+            FakeJsonResponse({"error": {"message": SENSITIVE_ERROR}}, status_code=400),
+            webapp.requests.Timeout(SENSITIVE_ERROR),
+        ):
+            entered = threading.Event()
+            release = threading.Event()
+            calls = 0
+
+            def post(*_args, **_kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return FakeJsonResponse({"data": [{"b64_json": PNG_1X1}]})
+                entered.set()
+                release.wait(2)
+                if isinstance(subsequent_result, Exception):
+                    raise subsequent_result
+                return subsequent_result
+
+            with self.subTest(result=type(subsequent_result).__name__), patch.object(
+                webapp, "JOB_REGISTRY", JobRegistry(),
+            ), patch.object(webapp.requests, "post", side_effect=post):
+                task = asyncio.create_task(self.client.post(
+                    "/api/generate/gpt-image-2",
+                    data={"prompt": "square", "api_key": "sk-test", "base_url": "https://example.com/v1", "n": "3", "job_id": "partial-canceled"},
+                ))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                    cancel = await self.client.post("/api/jobs/partial-canceled/cancel")
+                    self.assertEqual(200, cancel.status_code)
+                finally:
+                    release.set()
+                response = await task
+            self.assertEqual(200, response.status_code)
+            self.assertTrue(response.json()["canceled"])
+            self.assertEqual([], response.json()["images"])
+            self.assertEqual(2, calls)
+            self.assertEqual([], list(self.outputs.glob("*.png")))
+            self.assertFalse((self.outputs / "history.json").exists())
+
     async def test_gpt_retry_budget_overflow_saves_no_partial_images_or_history(self) -> None:
         with (
             patch.object(webapp, "UPSTREAM_RESULT_MAX_BYTES", (len(PNG_1X1_RAW) * 2) - 1, create=True),

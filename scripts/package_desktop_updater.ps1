@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$OutputDirectory = "",
   [string]$ReleaseVersion = "",
   [Parameter(Mandatory = $true)][string]$PrivateKeyPath,
@@ -8,6 +8,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($SkipBuild) {
+  throw "Signed updater -SkipBuild is unsafe: the shared NSIS directory may retain a signature for replaced bytes. Run a fresh signed build."
+}
 try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -19,18 +22,14 @@ $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
 $StudioRoot = Join-Path $RepoRoot "studio-web"
 $TauriRoot = Join-Path $StudioRoot "src-tauri"
 $BundleDir = Join-Path $TauriRoot "target\release\bundle\nsis"
-$TauriConfigPath = Join-Path $TauriRoot "tauri.conf.json"
 $PrivateKeyResolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PrivateKeyPath)
 if (-not (Test-Path -LiteralPath $PrivateKeyResolved -PathType Leaf)) {
   throw "Updater private key was not found: $PrivateKeyResolved"
 }
 
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  $ReleaseVersion = ((Get-Content -LiteralPath $TauriConfigPath -Raw -Encoding UTF8) | ConvertFrom-Json).version
-}
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  throw "Release version is empty. Pass -ReleaseVersion explicitly."
-}
+. (Join-Path $ScriptDir "release_validation.ps1")
+$ReleaseVersion = Get-ValidatedReleaseVersion -RepoRoot $RepoRoot -ExpectedVersion $ReleaseVersion
+
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
   $OutputDirectory = Join-Path $RepoRoot "_release\desktop\updater"
 }
@@ -58,61 +57,80 @@ if (-not $SkipBuild) {
   }
 }
 
-$Installer = Get-ChildItem -LiteralPath $BundleDir -Filter "*-setup.exe" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$Updater = $Installer
-if ($null -eq $Installer) {
-  throw "NSIS setup artifact was not found in $BundleDir"
-}
-$UpdaterSignature = Get-Item -LiteralPath ($Updater.FullName + ".sig") -ErrorAction SilentlyContinue
-if ($null -eq $UpdaterSignature) {
-  throw "Updater signature was not found beside $($Updater.Name)"
-}
-
-$InstallerOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Setup-x64.exe"
-$UpdaterOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Updater-x64.exe"
-$UpdaterSignatureOutput = $UpdaterOutput + ".sig"
-
-# The updater build emits a signed NSIS setup executable. Keep that artifact
-# separate from the ordinary installer package: the ordinary Setup manifest
-# and SHA256 must describe the unsigned online-bootstrapper build, not the
-# updater copy. If the ordinary package is missing, build it explicitly.
-if (-not (Test-Path -LiteralPath $InstallerOutput -PathType Leaf)) {
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\package_desktop_installer.ps1") `
-    -OutputPath $InstallerOutput `
-    -ReleaseVersion $ReleaseVersion
-  if ($LASTEXITCODE -ne 0) {
-    throw "Ordinary desktop Setup package failed with exit code $LASTEXITCODE."
-  }
-}
-Copy-Item -LiteralPath $Updater.FullName -Destination $UpdaterOutput -Force
-Copy-Item -LiteralPath $UpdaterSignature.FullName -Destination $UpdaterSignatureOutput -Force
-
-$PortableOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Portable-x64.zip"
-Push-Location $StudioRoot
+$SnapshotRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("nm_signed_updater_" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $SnapshotRoot | Out-Null
 try {
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\package_desktop_portable.ps1") -OutputPath $PortableOutput -ReleaseVersion $ReleaseVersion -SkipBuild
-  if ($LASTEXITCODE -ne 0) { throw "Portable package failed with exit code $LASTEXITCODE." }
-  $SignerArgs = @("exec", "--offline", "--", "tauri", "signer", "sign", "-f", $PrivateKeyResolved)
-  if ([string]::IsNullOrWhiteSpace($PrivateKeyPassword)) {
-    $SignerArgs += "--password="
-  } else {
-    $SignerArgs += @("-p", $PrivateKeyPassword)
+  $Installer = Get-ChildItem -LiteralPath $BundleDir -Filter "*_${ReleaseVersion}_x64-setup.exe" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $Updater = $Installer
+  if ($null -eq $Installer) {
+    throw "NSIS setup artifact was not found in $BundleDir"
   }
-  $SignerArgs += $PortableOutput
-  & npm @SignerArgs
-  if ($LASTEXITCODE -ne 0) { throw "Portable package signing failed with exit code $LASTEXITCODE." }
+  $UpdaterSignature = Get-Item -LiteralPath ($Updater.FullName + ".sig") -ErrorAction SilentlyContinue
+  if ($null -eq $UpdaterSignature) {
+    throw "Updater signature was not found beside $($Updater.Name)"
+  }
+
+  $InstallerOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Setup-x64.exe"
+  $UpdaterOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Updater-x64.exe"
+  $UpdaterSignatureOutput = $UpdaterOutput + ".sig"
+
+  # Protect the signed bytes before another build replaces the shared NSIS output.
+  $SnapshotUpdater = Join-Path $SnapshotRoot $Updater.Name
+  $SnapshotSignature = $SnapshotUpdater + ".sig"
+  Copy-Item -LiteralPath $Updater.FullName -Destination $SnapshotUpdater
+  Copy-Item -LiteralPath $UpdaterSignature.FullName -Destination $SnapshotSignature
+
+  # The updater build emits a signed NSIS setup executable. Keep that artifact
+  # separate from the ordinary installer package: the ordinary Setup manifest
+  # and SHA256 must describe the unsigned online-bootstrapper build, not the
+  # updater copy. If the ordinary package is missing, build it explicitly.
+  if (-not (Test-Path -LiteralPath $InstallerOutput -PathType Leaf)) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\package_desktop_installer.ps1") `
+      -OutputPath $InstallerOutput `
+      -ReleaseVersion $ReleaseVersion
+    if ($LASTEXITCODE -ne 0) {
+      throw "Ordinary desktop Setup package failed with exit code $LASTEXITCODE."
+    }
+  }
+  Copy-Item -LiteralPath $SnapshotUpdater -Destination $UpdaterOutput -Force
+  Copy-Item -LiteralPath $SnapshotSignature -Destination $UpdaterSignatureOutput -Force
+
+  $PortableOutput = Join-Path $OutputDirectory "NM-Image-Studio-v$ReleaseVersion-Portable-x64.zip"
+  Push-Location $StudioRoot
+  try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\package_desktop_portable.ps1") -OutputPath $PortableOutput -ReleaseVersion $ReleaseVersion -SkipBuild
+    if ($LASTEXITCODE -ne 0) { throw "Portable package failed with exit code $LASTEXITCODE." }
+    $SignerArgs = @("exec", "--offline", "--", "tauri", "signer", "sign", "-f", $PrivateKeyResolved)
+    if ([string]::IsNullOrWhiteSpace($PrivateKeyPassword)) {
+      $SignerArgs += "--password="
+    } else {
+      $SignerArgs += @("-p", $PrivateKeyPassword)
+    }
+    $SignerArgs += $PortableOutput
+    & npm @SignerArgs
+    if ($LASTEXITCODE -ne 0) { throw "Portable package signing failed with exit code $LASTEXITCODE." }
+  } finally {
+    Pop-Location
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\generate_desktop_update_feed.ps1") `
+    -ReleaseVersion $ReleaseVersion `
+    -InstallerUpdaterPath $UpdaterOutput `
+    -InstallerSignaturePath $UpdaterSignatureOutput `
+    -PortablePath $PortableOutput `
+    -PortableSignaturePath ($PortableOutput + ".sig") `
+    -OutputDirectory $OutputDirectory `
+    -Notes $ReleaseNotes
+  if ($LASTEXITCODE -ne 0) { throw "Desktop update feed generation failed with exit code $LASTEXITCODE." }
+
+  Write-Host "Signed desktop update artifacts created in $OutputDirectory"
 } finally {
-  Pop-Location
+  $TempPrefix = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+  $SnapshotRoot = [System.IO.Path]::GetFullPath($SnapshotRoot)
+  if (-not $SnapshotRoot.StartsWith($TempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing snapshot cleanup outside temp: $SnapshotRoot"
+  }
+  if (Test-Path -LiteralPath $SnapshotRoot) {
+    Remove-Item -LiteralPath $SnapshotRoot -Recurse -Force
+  }
 }
-
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "scripts\generate_desktop_update_feed.ps1") `
-  -ReleaseVersion $ReleaseVersion `
-  -InstallerUpdaterPath $UpdaterOutput `
-  -InstallerSignaturePath $UpdaterSignatureOutput `
-  -PortablePath $PortableOutput `
-  -PortableSignaturePath ($PortableOutput + ".sig") `
-  -OutputDirectory $OutputDirectory `
-  -Notes $ReleaseNotes
-if ($LASTEXITCODE -ne 0) { throw "Desktop update feed generation failed with exit code $LASTEXITCODE." }
-
-Write-Host "Signed desktop update artifacts created in $OutputDirectory"

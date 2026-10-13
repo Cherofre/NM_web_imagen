@@ -1,6 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { REFRESH_INTERRUPTED_QUEUE_ERROR, normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence.ts";
+import { MAX_ACTIVE_QUEUE_JOBS } from "./queuePersistence.ts";
+import { appendGenerationQueueJob } from "./generationQueue.ts";
+import { reconcileInterruptedQueueTurns } from "./queueSessionBoundaries.ts";
+
+test("refresh preserves all admitted active tasks beyond 30 and bounds old finished history", () => {
+  let jobs = [];
+  for (let index = 0; index < MAX_ACTIVE_QUEUE_JOBS; index++) jobs = appendGenerationQueueJob(jobs, {
+    id: `job-${index}`, turnId: `turn-${index}`, sessionId: "session", prompt: "synthetic", engine: "gpt-image-2",
+    configName: "test", model: "test", status: index === 0 ? "running" : "queued", createdAt: new Date(index).toISOString(),
+  });
+  const restored = normalizeStoredQueueJobs(JSON.parse(serializeQueueJobs(jobs)));
+  assert.equal(restored.length, MAX_ACTIVE_QUEUE_JOBS);
+  assert.ok(restored.some((job) => job.id === "job-0"));
+  const [session] = reconcileInterruptedQueueTurns([{ id: "session", turns: jobs.map((job) => ({ id: job.turnId, status: job.status })) }], restored);
+  assert.ok(session.turns.every((turn) => turn.status === "error"));
+  assert.ok(restored.every((job) => job.status === "canceled"));
+  assert.equal(normalizeStoredQueueJobs(Array.from({ length: 500 }, (_, i) => ({ ...restored[0], id: `bounded-${i}`, error: undefined, status: "success" }))).length, 30);
+  const oldInterruptions = Array.from({ length: 70 }, (_, i) => ({ ...restored[0], id: `old-${i}` }));
+  const currentJobs = jobs.slice(0, 40);
+  const mixed = JSON.parse(serializeQueueJobs([...oldInterruptions, ...currentJobs]));
+  assert.equal(mixed.length, MAX_ACTIVE_QUEUE_JOBS);
+  assert.ok(currentJobs.every((job) => mixed.some((item) => item.id === job.id)), "old interrupted history must not evict newly active jobs");
+  const foreign = { ...jobs[0], clientId: "other-window" };
+  assert.equal(normalizeStoredQueueJobs([foreign], "this-window").length, 0);
+  assert.equal(normalizeStoredQueueJobs([{ ...foreign, status: "success" }], "this-window").length, 1);
+  assert.equal(normalizeStoredQueueJobs([{ ...jobs[0], clientId: "this-window" }], "this-window")[0].clientId, "this-window");
+});
 
 test("stored queue jobs preserve finished jobs and mark running jobs interrupted", () => {
   const jobs = normalizeStoredQueueJobs([

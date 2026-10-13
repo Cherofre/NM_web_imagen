@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -95,6 +96,7 @@ def run_powershell(
     process_env["PYTHONUTF8"] = "1"
     if env:
         process_env.update(env)
+    process_env["PSModulePath"] = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/Modules")
     return subprocess.run(
         [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", *arguments],
         cwd=cwd,
@@ -164,6 +166,16 @@ Invoke-Expression $env:CODEX_FUNCTION_INVOCATION
     return run_powershell(["-Command", command], env=process_env)
 
 
+def install_release_validation(source: Path, version: str) -> None:
+    scripts = source / "scripts"
+    scripts.mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "scripts" / "release_validation.ps1", scripts / "release_validation.ps1")
+    tauri = source / "studio-web" / "src-tauri"
+    tauri.mkdir(parents=True, exist_ok=True)
+    (tauri / "tauri.conf.json").write_text('{"version":"' + version + '"}', encoding="utf-8")
+    (tauri / "Cargo.toml").write_text('[package]\nversion = "' + version + '"\n', encoding="utf-8")
+
+
 def create_release_source(root: Path) -> Path:
     source = root / "source"
     source.mkdir()
@@ -195,6 +207,7 @@ def create_release_source(root: Path) -> Path:
     wheels_dir.mkdir()
     (python_dir / "python-3.12.10-embed-amd64.zip").write_bytes(b"portable-python")
     (wheels_dir / "demo-py3-none-any.whl").write_bytes(b"wheel")
+    install_release_validation(source, "1.0.5")
     return source
 
 
@@ -449,15 +462,20 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_version_file_exists_for_release_url_cache_busting(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
-        self.assertEqual("1.1.4", version)
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+        config = json.loads((ROOT / "studio-web/src-tauri/tauri.conf.json").read_text(encoding="utf-8-sig"))
+        cargo = (ROOT / "studio-web/src-tauri/Cargo.toml").read_text(encoding="utf-8-sig")
+        self.assertEqual(version, config["version"])
+        self.assertEqual(version, re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.MULTILINE).group(1))
 
     def test_studio_about_pane_fallback_matches_the_release_version(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         app = (ROOT / "studio-web" / "src" / "App.tsx").read_text(encoding="utf-8")
 
-        match = re.search(r'desktopRuntime\.version \|\| "([^"]+)"', app)
-        self.assertIsNotNone(match, "desktop settings About pane lost its version fallback")
+        match = re.search(r'const APP_VERSION_FALLBACK = "([^"]+)"', app)
+        self.assertIsNotNone(match, "desktop settings lost its shared version fallback")
         self.assertEqual(version, match.group(1))
+        self.assertIn('<dd>{desktopRuntime.version || APP_VERSION_FALLBACK}</dd>', app)
 
     def test_start_script_opens_versioned_url(self) -> None:
         script = (ROOT / "start_web.ps1").read_text(encoding="utf-8")
@@ -637,7 +655,8 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
         self.assertIn('-Command "npm" -Arguments @("run", "build")', script)
         self.assertIn('-Command "python" -Arguments @("-m", "py_compile", ".\\app.py")', script)
         self.assertIn('"-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"', script)
-        self.assertEqual(7, len(python_modules), python_modules)
+        self.assertGreaterEqual(len(python_modules), 8, python_modules)
+        self.assertIn("test_release_preparation.py", python_modules)
         for module in NEW_PYTHON_GATE_MODULES:
             self.assertIn(module, python_modules)
         self.assertIn("failed with exit code", script)
@@ -676,6 +695,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
             ):
                 (source / name).write_text("fixture", encoding="utf-8")
             (source / "VERSION").write_text("1.0.5\n", encoding="utf-8")
+            install_release_validation(source, "1.0.5")
 
             (fake_bin / "node.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
             (fake_bin / "npm.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
@@ -732,6 +752,7 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
                 ):
                     (source / name).write_text("fixture", encoding="utf-8")
                 (source / "VERSION").write_text("1.0.6\n", encoding="utf-8")
+                install_release_validation(source, "1.0.6")
                 (source / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
                 for module in all_node_modules:
                     (studio_src / module).write_text("", encoding="utf-8")
@@ -797,7 +818,9 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_preflight_checks_versioned_zip_and_exclusions(self) -> None:
         script = (ROOT / "release_preflight.ps1").read_text(encoding="utf-8")
 
-        self.assertIn('"^\\d+\\.\\d+\\.\\d+$"', script)
+        self.assertIn("Get-ValidatedReleaseVersion", script)
+        helper = (ROOT / "scripts/release_validation.ps1").read_text(encoding="utf-8")
+        self.assertIn("'^\\d+\\.\\d+\\.\\d+$'", helper)
         self.assertIn("$AppName-v$Version.zip", script)
         self.assertIn("Test-ZipClean", script)
         self.assertIn("config\\.local\\.json", script)
@@ -835,21 +858,14 @@ foreach ($Path in $env:CODEX_PARSE_PATHS.Split([System.IO.Path]::PathSeparator))
     def test_local_only_preflight_does_not_resolve_destination(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            app_dir = root / "NM_web_imagen"
-            studio_dir = app_dir / "static" / "studio"
-            assets_dir = studio_dir / "assets"
-            assets_dir.mkdir(parents=True)
+            app_dir = create_release_source(root)
             shutil.copy2(ROOT / "release_preflight.ps1", app_dir / "release_preflight.ps1")
-            (app_dir / "VERSION").write_text("1.0.5\n", encoding="utf-8")
-            (studio_dir / "index.html").write_text(
-                '<link href="./assets/index-test.css" rel="stylesheet">\n'
-                '<script defer src="./assets/index-test.js"></script>\n',
-                encoding="utf-8",
-            )
-            (assets_dir / "index-test.css").write_text("body{}", encoding="utf-8")
-            (assets_dir / "index-test.js").write_text("void 0;", encoding="utf-8")
             package_path = root / "NM_web_imagen-v1.0.5.zip"
-            write_release_zip(package_path)
+            package = run_powershell(
+                ["-File", str(app_dir / "package_web_tool.ps1"), "-OutputPath", str(package_path)],
+                cwd=app_dir,
+            )
+            self.assertEqual(0, package.returncode, package.stdout + package.stderr)
 
             result = run_powershell(
                 [

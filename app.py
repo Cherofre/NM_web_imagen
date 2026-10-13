@@ -4280,6 +4280,26 @@ def estimate_cost(total_tokens: int) -> str:
     return f"${cost:.4f}"
 
 
+def gpt_usage_total_tokens(payload: Dict[str, Any]) -> int:
+    """Treat optional, untrusted usage statistics as zero unless bounded integers."""
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return 0
+    value = usage.get("total_tokens")
+    if type(value) is str:
+        value = value.strip()
+        if not re.fullmatch(r"\+?[0-9]{1,64}", value):
+            return 0
+        value = int(value)
+    elif type(value) is float:
+        if not math.isfinite(value) or not value.is_integer():
+            return 0
+        value = int(value)
+    elif type(value) is not int:
+        return 0
+    return value if 0 <= value <= 1_000_000_000 else 0
+
+
 def extract_gpt_image_values(
     payload: Dict[str, Any],
     *,
@@ -5482,6 +5502,7 @@ def create_app() -> FastAPI:
             return response_data
 
         result_budget = UpstreamImageBudget()
+        partial_error_code = ""
         try:
             response_data = await post_gpt_payload(payload, request_kwargs)
             response_payloads = [response_data]
@@ -5501,7 +5522,17 @@ def create_app() -> FastAPI:
                     next_request_kwargs = {"data": next_payload, "files": files}
                 else:
                     next_request_kwargs = {"json": next_payload}
-                next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
+                try:
+                    next_response_data = await post_gpt_payload(next_payload, next_request_kwargs)
+                except ClientSafeHTTPException as exc:
+                    if exc.error_code not in {
+                        "E_UPSTREAM_AUTH", "E_UPSTREAM_RATE_LIMIT", "E_UPSTREAM_TIMEOUT",
+                        "E_UPSTREAM_NETWORK", "E_UPSTREAM_RESPONSE", "E_UPSTREAM_REQUEST",
+                    }:
+                        raise
+                    JOB_REGISTRY.raise_if_canceled(job_id)
+                    partial_error_code = exc.error_code
+                    break
                 next_images = await build_gpt_images_from_response_async(
                     next_response_data,
                     job_id=job_id,
@@ -5509,6 +5540,7 @@ def create_app() -> FastAPI:
                     budget=result_budget,
                 )
                 if not next_images:
+                    partial_error_code = "E_UPSTREAM_RESPONSE"
                     break
                 response_payloads.append(next_response_data)
                 images.extend(next_images)
@@ -5519,6 +5551,7 @@ def create_app() -> FastAPI:
                 detail=UPSTREAM_RESULT_LIMIT_MESSAGE,
             ) from exc
 
+        total_tokens = sum(gpt_usage_total_tokens(item) for item in response_payloads)
         elapsed_seconds = round(time.time() - started_at, 2)
         background_validation = await asyncio.to_thread(validate_background_images, images) if image_edit_action == "background" and images else None
         background_error = ""
@@ -5535,7 +5568,6 @@ def create_app() -> FastAPI:
                 job_id=job_id,
             )
             JOB_REGISTRY.raise_if_canceled(job_id)
-            total_tokens = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in response_payloads)
             meta = {
                 "model": model,
                 "api_url": public_url_hint(api_url),
@@ -5561,6 +5593,10 @@ def create_app() -> FastAPI:
                 "tokens_used": total_tokens,
                 "estimated_cost": estimate_cost(total_tokens),
             }
+            if 0 < len(images) < n:
+                meta["partial_result"] = True
+            if partial_error_code:
+                meta["partial_error_code"] = partial_error_code
             if background_validation is not None:
                 meta["background_validation"] = background_validation
             if background_error:

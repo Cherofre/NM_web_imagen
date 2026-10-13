@@ -3,10 +3,33 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import { createHash } from "node:crypto";
 import { ReferenceImageIdentity, mergeCopiedReference } from "./referenceCopyModel.ts";
 import { referenceUiState } from "./chatCapabilities.ts";
 
 const file = (bytes, name = "same.png", lastModified = 1) => new File([bytes], name, { type: "image/png", lastModified });
+
+test("editor content keys reject metadata collisions, reuse renamed content and prefer inherited output sources", async () => {
+  const identity = new ReferenceImageIdentity(), original = file("A"), different = file("B");
+  assert.notEqual(await identity.key(original), await identity.key(different));
+  assert.equal(await identity.key(original), await identity.key(file("A", "renamed.png", 999)));
+  identity.setSource(original, "/outputs/known.png?cache=1");
+  const exported = file("re-encoded"); identity.inheritSource(exported, original);
+  assert.equal(await identity.key(exported), "/outputs/known.png");
+});
+
+test("HTTP fallback produces the same SHA-256 content key for empty, multi-block and image-sized data", async () => {
+  const ctx = { exports: {}, URL, Uint8Array, Uint32Array, DataView, crypto: undefined };
+  vm.createContext(ctx);
+  vm.runInContext(ts.transpileModule(fs.readFileSync(new URL("referenceCopyModel.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, ctx);
+  const identity = new ctx.exports.ReferenceImageIdentity();
+  for (const bytes of ["", "abc", "中文".repeat(50), new Uint8Array(1024 * 1024).map((_, i) => i % 251)]) {
+    const blob = new Blob([bytes]);
+    assert.equal(await identity.key(blob), `sha256:${createHash("sha256").update(Buffer.from(await blob.arrayBuffer())).digest("hex")}`);
+  }
+});
 
 test("content identity recognizes different names/timestamps and rejects identical filenames with different bytes", async () => {
   const identity = new ReferenceImageIdentity();

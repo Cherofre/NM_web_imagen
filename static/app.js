@@ -3068,17 +3068,20 @@ async function runQueueJob(job) {
     const preparedImages = prepareImagesForDisplay(payload.images || []);
     appendAssetHistory(preparedImages, payload, job);
     lastMetaPayload = buildDisplayPayload(payload, preparedImages);
+    const partialMessage = payload.meta?.partial_result
+      ? `仅完成 ${preparedImages.length}/${payload.meta.n} 张，已保留成功图片；没有再次提交补齐。`
+      : "";
     job.status = payload.ok ? "done" : "error";
-    job.message = payload.ok ? `返回 ${preparedImages.length} 张图片` : "没有拿到图片";
+    job.message = partialMessage || (payload.ok ? `返回 ${preparedImages.length} 张图片` : "没有拿到图片");
     if (payload.ok) {
       removeSuccessfulQueueJob(job);
     }
-    resultTitle.textContent = payload.ok ? "生成完成" : "请求完成，但没有图片";
+    resultTitle.textContent = partialMessage ? "部分生成完成" : payload.ok ? "生成完成" : "请求完成，但没有图片";
     setStatus(
       payload.ok ? "success" : "error",
-      payload.ok
+      partialMessage || (payload.ok
         ? `成功返回 ${preparedImages.length} 张图片，用时 ${payload.meta?.elapsed_seconds ?? "-"} 秒，已自动保存到 outputs。`
-        : "接口返回了结果，但没有拿到图片，请展开详情查看返回信息。"
+        : "接口返回了结果，但没有拿到图片，请展开详情查看返回信息。")
     );
     finishGenerationProgress(payload.ok ? "success" : "error", payload.ok ? "图片已经保存到 outputs，可以点击预览放大。" : "请求完成但没有拿到图片。");
 

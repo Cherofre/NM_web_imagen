@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$OutputPath = "",
   [string]$ReleaseVersion = "",
   [switch]$SkipBuild
@@ -19,17 +19,9 @@ $TauriRoot = Join-Path $StudioRoot "src-tauri"
 $ReleaseRoot = Join-Path $TauriRoot "target\release"
 $DesktopExe = Join-Path $ReleaseRoot "nm-image-studio-desktop.exe"
 $BackendDir = Join-Path $ReleaseRoot "backend"
-$TauriConfigPath = Join-Path $TauriRoot "tauri.conf.json"
 
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  if (-not (Test-Path -LiteralPath $TauriConfigPath -PathType Leaf)) {
-    throw "Tauri config was not found: $TauriConfigPath"
-  }
-  $ReleaseVersion = ((Get-Content -LiteralPath $TauriConfigPath -Raw -Encoding UTF8) | ConvertFrom-Json).version
-}
-if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-  throw "Release version is empty. Pass -ReleaseVersion explicitly."
-}
+. (Join-Path $ScriptDir "release_validation.ps1")
+$ReleaseVersion = Get-ValidatedReleaseVersion -RepoRoot $RepoRoot -ExpectedVersion $ReleaseVersion
 
 $SafeVersion = $ReleaseVersion -replace '[^A-Za-z0-9._-]', '-'
 $PackageName = "NM-Image-Studio-v$SafeVersion-Portable-x64"
@@ -128,6 +120,10 @@ try {
   }
   if (-not (Test-Path -LiteralPath (Join-Path $BackendDir "nm-image-studio-backend.exe") -PathType Leaf)) {
     throw "Release backend directory is missing or incomplete: $BackendDir"
+  }
+  $BackendVersion = (Get-Content -LiteralPath (Join-Path $BackendDir "VERSION") -Encoding UTF8 -TotalCount 1).Trim()
+  if ($BackendVersion -ne $ReleaseVersion) {
+    throw "Release backend version mismatch: expected $ReleaseVersion, got $BackendVersion. Rebuild the sidecar."
   }
 
   Copy-Item -LiteralPath $DesktopExe -Destination (Join-Path $StageApp "nm-image-studio-desktop.exe") -Force

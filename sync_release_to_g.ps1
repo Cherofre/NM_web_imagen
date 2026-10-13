@@ -1,5 +1,7 @@
 ﻿param(
   [string]$DestinationRoot = "",
+  [string]$ZipPath = "",
+  [string]$ExpectedVersion = "",
   [switch]$SkipPackage
 )
 
@@ -8,6 +10,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VersionPath = Join-Path $ScriptDir "VERSION"
 $PackageScript = Join-Path $ScriptDir "package_web_tool.ps1"
 $AppName = "NM_web_imagen"
+. (Join-Path $ScriptDir "scripts\release_validation.ps1")
 
 try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -305,9 +308,13 @@ $DestinationRoot = Resolve-CompanyShareRoot -RequestedRoot $DestinationRoot
 
 $DestinationAppDir = Join-Path $DestinationRoot $AppName
 
-$Version = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
-if ([string]::IsNullOrWhiteSpace($Version)) {
-  throw "VERSION is empty."
+$Version = Get-ValidatedReleaseVersion -RepoRoot $ScriptDir -ExpectedVersion $ExpectedVersion
+
+$SourceZip = if ([string]::IsNullOrWhiteSpace($ZipPath)) { Join-Path $ScriptDir "..\$AppName-v$Version.zip" } else { $ZipPath }
+$UseExistingPackage = $SkipPackage -or -not [string]::IsNullOrWhiteSpace($ZipPath)
+if ($UseExistingPackage) {
+  $SourceZip = Resolve-ReleaseZipPath -ZipPath $SourceZip
+  Assert-ReleaseZipFreshness -ZipPath $SourceZip -RepoRoot $ScriptDir -Kind "web"
 }
 
 $DestinationRootInfo = Assert-AllowedCompanyShareRoot -DestinationRoot $DestinationRoot
@@ -323,15 +330,13 @@ $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
 try {
   New-Item -ItemType Directory -Path $TempRoot -Force | Out-Null
 
-  if (-not $SkipPackage) {
+  if (-not $UseExistingPackage) {
     powershell -NoProfile -ExecutionPolicy Bypass -File $PackageScript -OutputPath $TempZip
   } else {
-    if (-not (Test-Path -LiteralPath $VersionedZip)) {
-      throw "SkipPackage was set, but versioned package was not found: $VersionedZip"
-    }
-    Copy-Item -LiteralPath $VersionedZip -Destination $TempZip -Force
+    Copy-Item -LiteralPath $SourceZip -Destination $TempZip -Force
   }
   Assert-CleanPackageZip -ZipPath $TempZip
+  Assert-ReleaseZipFreshness -ZipPath $TempZip -RepoRoot $ScriptDir -Kind "web"
 
   if (Test-Path -LiteralPath $TempExtractRoot) {
     Remove-Item -LiteralPath $TempExtractRoot -Recurse -Force

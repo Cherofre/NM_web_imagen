@@ -1,12 +1,14 @@
 ﻿param(
   [string]$DestinationRoot = "",
   [string]$ExpectedVersion = "",
+  [string]$ZipPath = "",
   [switch]$LocalOnly
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppName = "NM_web_imagen"
+. (Join-Path $ScriptDir "scripts\release_validation.ps1")
 $VersionPath = Join-Path $ScriptDir "VERSION"
 $StudioIndexPath = Join-Path $ScriptDir "static\studio\index.html"
 
@@ -489,13 +491,7 @@ Write-Step "Version"
 if (-not (Test-Path -LiteralPath $VersionPath)) {
   throw "VERSION was not found."
 }
-$Version = (Get-Content -LiteralPath $VersionPath -Encoding UTF8 -TotalCount 1).Trim()
-if ($Version -notmatch "^\d+\.\d+\.\d+$") {
-  throw "VERSION must look like semantic version x.y.z, got: $Version"
-}
-if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion) -and $Version -ne $ExpectedVersion) {
-  throw "VERSION expected $ExpectedVersion, got: $Version"
-}
+$Version = Get-ValidatedReleaseVersion -RepoRoot $ScriptDir -ExpectedVersion $ExpectedVersion
 Write-Host "VERSION: $Version"
 
 Write-Step "Studio assets"
@@ -529,15 +525,21 @@ Write-Host "Studio JS: $ExpectedJs"
 Write-Host "Studio CSS: $ExpectedCss"
 
 Write-Step "Local release artifacts"
-$VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version-Web-x64.zip"
-if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
-  $VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version.zip"
+if ([string]::IsNullOrWhiteSpace($ZipPath)) {
+  $VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version-Web-x64.zip"
+  if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
+    $VersionedZip = Join-Path $ScriptDir "_release\web\$AppName-v$Version.zip"
+  }
+  if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
+    # Keep compatibility with the historical one-click web package location.
+    $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
+  }
+} else {
+  $VersionedZip = $ZipPath
 }
-if (-not (Test-Path -LiteralPath $VersionedZip -PathType Leaf)) {
-  # Keep compatibility with the historical one-click web package location.
-  $VersionedZip = Join-Path $ScriptDir "..\$AppName-v$Version.zip"
-}
+$VersionedZip = Resolve-ReleaseZipPath -ZipPath $VersionedZip
 Test-ZipClean -ZipPath $VersionedZip -ExpectedJs $ExpectedJs -ExpectedCss $ExpectedCss
+Assert-ReleaseZipFreshness -ZipPath $VersionedZip -RepoRoot $ScriptDir -Kind "web"
 $LocalZipHash = Get-FileSha256 -Path $VersionedZip
 Write-Host "Local versioned package OK: $VersionedZip"
 Write-Host "Local versioned package SHA256: $LocalZipHash"

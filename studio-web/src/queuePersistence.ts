@@ -1,6 +1,7 @@
 export type QueueJobStatus = "queued" | "running" | "success" | "error" | "canceled";
 export type QueueJobEngine = "gpt-image-2" | "banana";
 export const REFRESH_INTERRUPTED_QUEUE_ERROR = "__refresh_interrupted__";
+export const MAX_ACTIVE_QUEUE_JOBS = 80;
 
 export type PersistentQueueImage = {
   id?: string;
@@ -17,6 +18,7 @@ export type PersistentQueueJob = {
   id: string;
   turnId: string;
   sessionId: string;
+  clientId?: string;
   prompt: string;
   engine: QueueJobEngine;
   configName: string;
@@ -63,6 +65,7 @@ function normalizeQueueJob(value: unknown): PersistentQueueJob | null {
     id,
     turnId,
     sessionId,
+    clientId: typeof item.clientId === "string" ? item.clientId : undefined,
     prompt: String(item.prompt || ""),
     engine,
     configName: String(item.configName || "默认配置"),
@@ -76,12 +79,26 @@ function normalizeQueueJob(value: unknown): PersistentQueueJob | null {
   };
 }
 
-export function normalizeStoredQueueJobs(value: unknown): PersistentQueueJob[] {
+export function normalizeStoredQueueJobs(value: unknown, clientId?: string): PersistentQueueJob[] {
   if (!Array.isArray(value)) return [];
-  return value.map(normalizeQueueJob).filter((job): job is PersistentQueueJob => Boolean(job)).slice(0, maxStoredQueueJobs);
+  const values: unknown[] = clientId ? value.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    const job = item as Record<string, unknown>;
+    return job.clientId === clientId
+      || (!["running", "queued"].includes(String(job.status)) && job.error !== REFRESH_INTERRUPTED_QUEUE_ERROR);
+  }) : value;
+  const isActive = (item: unknown) => Boolean(item && typeof item === "object"
+    && ["running", "queued"].includes(String((item as { status?: unknown }).status)));
+  const normalize = (items: unknown[]) => items.map(normalizeQueueJob).filter((job): job is PersistentQueueJob => Boolean(job));
+  const active = normalize(values.filter(isActive)).slice(0, MAX_ACTIVE_QUEUE_JOBS);
+  const jobs = normalize(values.filter((item) => !isActive(item)));
+  // A refresh must retain every admitted active job, even after marking it canceled.
+  const interrupted = jobs.filter((job) => job.error === REFRESH_INTERRUPTED_QUEUE_ERROR).slice(0, MAX_ACTIVE_QUEUE_JOBS - active.length);
+  const finished = jobs.filter((job) => job.error !== REFRESH_INTERRUPTED_QUEUE_ERROR);
+  return [...active, ...interrupted, ...finished.slice(0, Math.max(0, maxStoredQueueJobs - active.length - interrupted.length))];
 }
 
 export function serializeQueueJobs(jobs: PersistentQueueJob[]): string {
-  const compact = normalizeStoredQueueJobs(jobs).slice(0, maxStoredQueueJobs);
+  const compact = normalizeStoredQueueJobs(jobs);
   return JSON.stringify(compact);
 }

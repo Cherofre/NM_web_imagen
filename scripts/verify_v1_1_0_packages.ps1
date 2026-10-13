@@ -1,4 +1,4 @@
-param()
+﻿param([string]$ExpectedVersion = "")
 
 $ErrorActionPreference = "Stop"
 
@@ -10,16 +10,8 @@ try {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
-$Version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Encoding UTF8 -TotalCount 1).Trim()
-$TauriConfig = (Get-Content -LiteralPath (Join-Path $RepoRoot "studio-web\src-tauri\tauri.conf.json") -Raw -Encoding UTF8) | ConvertFrom-Json
-$CargoText = Get-Content -LiteralPath (Join-Path $RepoRoot "studio-web\src-tauri\Cargo.toml") -Raw -Encoding UTF8
-if ($CargoText -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
-  throw "Cargo package version was not found."
-}
-$CargoVersion = $Matches[1]
-if ($Version -ne "1.1.4" -or $TauriConfig.version -ne $Version -or $CargoVersion -ne $Version) {
-  throw "Release versions are not synchronized: VERSION=$Version, Tauri=$($TauriConfig.version), Cargo=$CargoVersion"
-}
+. (Join-Path $ScriptDir "release_validation.ps1")
+$Version = Get-ValidatedReleaseVersion -RepoRoot $RepoRoot -ExpectedVersion $ExpectedVersion
 
 $Packages = @(
   [ordered]@{ path = "_release\desktop\NM-Image-Studio-v$Version-Setup-x64.exe"; webview2 = "download-bootstrapper" },
@@ -91,5 +83,9 @@ try {
   $WebZip.Dispose()
 }
 
-Write-Host "v$Version package verification passed."
-Write-Host "Normal Setup, offline WebView2 Setup, portable desktop and portable web artifacts are version-aligned and isolated."
+Assert-ReleaseZipFreshness -ZipPath $WebZipPath -RepoRoot $RepoRoot -Kind "web"
+Assert-ReleaseZipFreshness -ZipPath $PortableZipPath -RepoRoot $RepoRoot -Kind "desktop-portable"
+
+Write-Host "v$Version package hashes and current visible source/resources verified."
+Write-Host "Frozen backend identity and behavior still require a fresh build and packaged mock acceptance; this check does not prove them."
+Write-Host "Manifest labels and package boundaries checked; installer payload/runtime acceptance remains a separate gate."

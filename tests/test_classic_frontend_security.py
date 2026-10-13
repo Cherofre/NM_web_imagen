@@ -1,4 +1,7 @@
 import re
+import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -47,6 +50,29 @@ class ClassicFrontendSecurityTests(unittest.TestCase):
     def test_classic_hides_unsupported_edit_controls(self) -> None:
         self.assertNotIn('name="edit_mode"', self.html_source)
         self.assertNotIn('name="reference_strength"', self.html_source)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is required for the classic result handler simulation")
+    def test_classic_partial_results_keep_images_and_report_actual_count(self) -> None:
+        block = re.search(r"lastMetaPayload = buildDisplayPayload\([\s\S]*?\n    finishGenerationProgress\([^\n]+;", self.app_source).group(0)
+        script = """
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const source = CODE;
+for (const partial of [true, false]) {
+  let removed = false;
+  let status = '';
+  const ctx = { payload: {ok:true, meta:{partial_result:partial, n:3}}, preparedImages:[{}], job:{},
+    buildDisplayPayload: p => p, removeSuccessfulQueueJob: () => {removed=true;},
+    resultTitle:{textContent:''}, setStatus: (_kind, text) => {status=text;}, finishGenerationProgress: () => {} };
+  vm.runInNewContext(source, ctx);
+  assert.equal(ctx.job.status, 'done');
+  assert.equal(removed, true);
+  assert.equal(ctx.resultTitle.textContent, partial ? '部分生成完成' : '生成完成');
+  if (partial) {assert(status.includes('1/3'));assert(ctx.job.message.includes('已保留成功图片'));}
+}
+""".replace("CODE", json.dumps(block, ensure_ascii=False))
+        result = subprocess.run([shutil.which("node"), "-e", script], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 if __name__ == "__main__":

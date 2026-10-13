@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { MAX_ACTIVE_QUEUE_JOBS, REFRESH_INTERRUPTED_QUEUE_ERROR, normalizeStoredQueueJobs, serializeQueueJobs } from "./queuePersistence.ts";
 
 const css = fs.readFileSync(path.resolve("src/styles.css"), "utf8");
 const appSource = fs.readFileSync(path.resolve("src/App.tsx"), "utf8");
@@ -82,13 +83,15 @@ test("reference switch cancel uses the same dismiss path as backdrop and close",
 test("turn deletion is guarded, explicit, and visually secondary until hover", () => {
   assert.match(appSource, /function deleteTurn\(sessionId: string, turn: ConversationTurn\)/);
   assert.match(appSource, /hasActiveQueueJobForTurn\(queueJobs, sessionId, turn\.id\)/);
-  assert.match(appSource, /confirm\(t\("turn\.deleteConfirm"\)\)/);
+  assert.match(appSource, /const hasActiveRecord = turn\.status === "queued" \|\| turn\.status === "running";/);
+  assert.match(appSource, /confirm\(t\(hasActiveRecord \? "turn\.deleteActiveConfirm" : "turn\.deleteConfirm"\)\)/);
   assert.match(appSource, /resolveTurnDeletion\(current, sessionId, turn\.id, updatedAt\)/);
   assert.match(appSource, /turnMaskPayloadsRef\.current\.delete\(turn\.id\)/);
   assert.match(appSource, /className="danger-action"[\s\S]*onClick=\{\(\) => deleteTurn\(activeSession\.id, turn\)\}/);
   assert.match(cssBlock(".turn-user-actions button.danger-action"), /background:\s*rgba\(255, 255, 255, 0\.72\);[\s\S]*color:\s*var\(--muted-strong\);/);
   assert.match(css, /\.turn-user-actions button\.danger-action:hover:not\(:disabled\),[\s\S]*color:\s*var\(--danger\);/);
   assert.match(i18nSource, /"turn\.deleteConfirm": "删除这一轮对话？生成图片仍保留在历史和输出文件夹中。"/);
+  assert.match(i18nSource, /"turn\.deleteActiveConfirm": "此任务可能仍在其他窗口或上游运行。仅删除记录不能保证取消上游任务或计费。仍要删除这一轮吗？"/);
   assert.match(i18nSource, /"status\.turnBusy"/);
 });
 
@@ -122,9 +125,10 @@ test("session cards keep text selection and dead padding from swallowing clicks"
 });
 
 test("session deletion requires confirmation and explains what remains", () => {
-  assert.match(appSource, /function deleteSession\(sessionId: string\)[\s\S]*hasActiveQueueJobForSession\(queueJobs, sessionId\)[\s\S]*confirm\(t\("session\.deleteConfirm", \{ title: localizeSessionTitle\(session\.title, t\) \}\)\)/);
+  assert.match(appSource, /function deleteSession\(sessionId: string\)[\s\S]*hasActiveQueueJobForSession\(queueJobs, sessionId\)[\s\S]*const hasActiveRecord = session\.turns\.some\(\(turn\) => turn\.status === "queued" \|\| turn\.status === "running"\);[\s\S]*confirm\(t\(hasActiveRecord \? "session\.deleteActiveConfirm" : "session\.deleteConfirm", \{ title: localizeSessionTitle\(session\.title, t\) \}\)\)/);
   assert.match(i18nSource, /"session\.deleteConfirm": "删除会话「\{title\}」？其中的对话会被删除，生成图片仍保留在历史和存图夹中。"/);
   assert.match(i18nSource, /"session\.deleteConfirm": "Delete chat \\\"\{title\}\\\"\? Its messages will be deleted, but generated images will remain in history and the output folder\."/);
+  assert.match(i18nSource, /"session\.deleteActiveConfirm": "会话「\{title\}」含有运行中记录，任务可能仍在其他窗口或上游运行。仅删除会话记录不能保证取消上游任务或计费。仍要删除吗？"/);
 });
 
 test("advanced parameter toggles align to input height without stretching", () => {
@@ -173,7 +177,8 @@ test("queue entry stays compact and uses neutral status styling", () => {
   assert.ok(appSource.includes('const jobMeta = [job.configName, job.model].filter(Boolean).join(" / ");'));
   assert.match(appSource, /const jobElapsed = job\.elapsedSeconds \? \(language === "en" \? `\$\{Math\.round\(job\.elapsedSeconds\)\}s` : `\$\{Math\.round\(job\.elapsedSeconds\)\} 秒`\) : "";/);
   assert.match(appSource, /<strong>\{jobTitle\}<\/strong>/);
-  assert.ok(appSource.includes('<span>{job.status === "queued" ? `${jobMeta} · ${t("queue.queued")}` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta}</span>'));
+  assert.match(appSource, /const partialMessage = partialGenerationMessage\(jobTurn\?\.meta, jobImages\.length, t\);/);
+  assert.ok(appSource.includes('<span>{partialMessage || (job.status === "queued" ? `${jobMeta} · ${t("queue.queued")}` : jobElapsed ? `${jobMeta} · ${jobElapsed}` : jobMeta)}</span>'));
   assert.match(appSource, /t\("queue\.waiting"\)/);
   assert.match(appSource, /compactInlineText\(job\.prompt, 24\) \|\| fallback/);
   assert.match(appSource, /className=\{jobImages\.length > 1 \? "queue-job-thumb multi" : "queue-job-thumb"\}/);
@@ -291,9 +296,19 @@ test("queue jobs persist in browser storage across refreshes", () => {
   assert.match(appSource, /queueStorageKey/);
   assert.match(appSource, /if \(Array\.isArray\(fallback\)\) \{/);
   assert.match(appSource, /return \(Array\.isArray\(parsed\) \? parsed : fallback\) as T;/);
-  assert.match(appSource, /normalizeStoredQueueJobs\(loadJson\(queueStorageKey, \[\]\)\)/);
+  assert.match(appSource, /normalizeStoredQueueJobs\(loadJson\(queueStorageKey, \[\]\), clientId\)/);
   assert.match(appSource, /serializeQueueJobs\(queueJobs\)/);
   assert.match(appSource, /localStorage\.setItem\(queueStorageKey, serializeQueueJobs\(queueJobs\)\)/);
+  const active = Array.from({ length: 31 }, (_, index) => ({ id: `job-${index}`, turnId: `turn-${index}`, sessionId: "test",
+    clientId: "own", engine: "gpt-image-2", status: index === 0 ? "running" : "queued", createdAt: new Date(index).toISOString() }));
+  const persisted = JSON.parse(serializeQueueJobs(active));
+  assert.equal(persisted.length, 31, "active queue entries must not be cut to the finished-history limit of 30");
+  assert.ok(persisted.every((job) => job.status === "canceled" && job.error === REFRESH_INTERRUPTED_QUEUE_ERROR));
+  assert.equal(normalizeStoredQueueJobs(persisted, "own").length, 31);
+  assert.equal(normalizeStoredQueueJobs(persisted, "other").length, 0, "another document must not consume local interrupted evidence");
+  assert.equal(JSON.parse(serializeQueueJobs(active.map((job) => ({ ...job, status: "success" })))).length, 30);
+  assert.equal(MAX_ACTIVE_QUEUE_JOBS, 80);
+  assert.match(appSource, /Object\.keys\(queuePayloadsRef\.current\)\.length >= MAX_ACTIVE_QUEUE_JOBS/);
 });
 
 test("session persistence defers heavy storage work while typing", () => {

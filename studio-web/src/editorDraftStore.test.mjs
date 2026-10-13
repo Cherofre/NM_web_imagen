@@ -5,7 +5,10 @@ import ts from "typescript";
 import vm from "node:vm";
 import { editorDraftFile, editorDraftReturnTarget, validEditorDraft, retainedEditorDrafts, loadEditorDrafts, saveEditorDrafts } from "./editorDraftStore.ts";
 import { editorNoteBounds, imageEditorDraftKey, recoverableImageEditAction, REMOVE_BACKGROUND_PROMPT } from "./imageEditorModel.ts";
-import { referenceFileFingerprint } from "./maskEditorModel.ts";
+import { referenceFileFingerprint, referencesWithMaskBase, activeMaskAttachment, restoreReusableMaskAttachment } from "./maskEditorModel.ts";
+import { imageEditActionFrom } from "./imageEditorModel.ts";
+import { hasActiveQueueJobForTurn } from "./queueSessionBoundaries.ts";
+import { resolveTurnDeletion } from "./sessionDrafts.ts";
 import { ReferenceImageIdentity } from "./referenceCopyModel.ts";
 
 const record = (sourceKey = "original", updatedAt = 1) => ({
@@ -47,11 +50,12 @@ globalThis.indexedDB = { open() {
 test("IDB drafts survive reopening with image bytes, Chinese notes and baseline/compat selection; aborted writes retain old data", async () => {
   failOpen = true;
   await assert.rejects(loadEditorDrafts(), /blocked/);
-  const original = { ...record(), returnTo: "conversation" };
+  const original = { ...record(), returnTo: "conversation", imageSourceKey: "/outputs/original.png" };
   await saveEditorDrafts([original]);
   original.drafts.comment.objects[0].text = "subsequent edit";
   const [restored] = await loadEditorDrafts();
   assert.equal(editorDraftReturnTarget(restored), "conversation");
+  assert.equal(restored.imageSourceKey, "/outputs/original.png");
   assert.equal(restored.drafts.comment.objects[0].text, "变成金色✨");
   assert.deepEqual(restored.mask, record().mask);
   const file = editorDraftFile(restored);
@@ -282,4 +286,116 @@ test("actual persistence hook restores only the active draft and serializes newe
   assert.equal(failed, 1);
   assert.ok(hook.records.current.has("new"));
   cleanup();
+});
+
+test("actual save-selection event restores an empty composer and retains unrelated references without mutating old attachments", () => {
+  for (const existing of [[], [new File(["other"], "other.png")]]) {
+    const ctx = appContext(), base = new File(["base"], "base.png"), old = { marker: "old attachment" };
+    Object.assign(ctx, { references: existing, referencesWithMaskBase, imageEditor: { file: base }, maskAttachment: old, previewImage: null,
+      setReferences(fn) { ctx.references = fn(ctx.references); }, setMaskAttachment(value) { ctx.maskAttachment = value; },
+      setMaskEditorOpen() {}, setActiveEngine(value) { ctx.engine = value; }, setSubmitMode(value) { ctx.mode = value; },
+    });
+    vm.runInContext(handlers.applyMaskResult, ctx);
+    const result = { baseFile: new File(["exported"], "base.png"), maskFile: new File(["mask"], "mask.png"), coverage: 0.5, encoding: "compat" };
+    ctx.applyMaskResult(result);
+    assert.equal(ctx.references[0], result.baseFile);
+    assert.deepEqual(ctx.references.slice(1), existing);
+    assert.equal(activeMaskAttachment(ctx.maskAttachment, ctx.references), ctx.maskAttachment);
+    assert.deepEqual(old, { marker: "old attachment" });
+    assert.equal(ctx.engine, "gpt-image-2"); assert.equal(ctx.mode, "generate");
+  }
+});
+
+test("actual local editor opening distinguishes equal metadata and retains the matching original object for existing masks", async () => {
+  const identity = new ReferenceImageIdentity();
+  const original = new File(["A"], "same.png", { type: "image/png", lastModified: 1 });
+  const different = new File(["B"], "same.png", { type: "image/png", lastModified: 1 });
+  const sourceKey = await identity.key(original);
+  const saved = { ...record(sourceKey), file: original, name: original.name, lastModified: 1 };
+  const ctx = appContext();
+  Object.assign(ctx, { references: [different], activeComposerMask: null, previewMaskLoading: false,
+    referenceImageIdentity: { current: identity }, referencesWithMaskBase,
+    editorDrafts: { records: { current: new Map([[sourceKey, saved]]) }, async load() {}, put(r) { this.records.current.set(r.sourceKey, r); } },
+    setPreviewMaskLoading() {}, setActiveEngine() {}, setSubmitMode() {}, setMaskAttachment() {},
+    setReferences(fn) { ctx.references = fn(ctx.references); },
+  });
+  vm.runInContext(handlers.openImageEditor, ctx);
+  await ctx.openImageEditor({ sourceFile: different, src: "", name: different.name }, "local");
+  assert.notEqual(ctx.imageEditor.sourceKey, sourceKey);
+  assert.equal(ctx.imageEditor.file, different);
+  assert.equal(Object.keys(ctx.editorDrafts.records.current.get(ctx.imageEditor.sourceKey).drafts).length, 0);
+  ctx.references = [original]; ctx.activeComposerMask = { maskFile: new File(["mask"], "mask.png"), encoding: "standard" };
+  let cleared = 0; ctx.setMaskAttachment = () => { cleared++; };
+  await ctx.openImageEditor({ sourceFile: original, src: "", name: original.name }, "local");
+  assert.equal(ctx.imageEditor.file, original); assert.equal(cleared, 0);
+  const oldKey = referenceFileFingerprint(original);
+  ctx.editorDrafts.records.current = new Map([[oldKey, { ...saved, sourceKey: oldKey }]]);
+  await ctx.openImageEditor({ sourceFile: different, src: "", name: different.name }, "comment");
+  assert.equal(Object.keys(ctx.editorDrafts.records.current.get(ctx.imageEditor.sourceKey).drafts).length, 0);
+  assert.ok(ctx.editorDrafts.records.current.has(oldKey), "metadata collision must not consume another image's legacy draft");
+  await ctx.openImageEditor({ sourceFile: original, src: "", name: original.name }, "comment");
+  assert.equal(ctx.imageEditor.sourceKey, sourceKey);
+  assert.equal(ctx.editorDrafts.records.current.has(oldKey), false);
+  assert.equal(ctx.editorDrafts.records.current.get(sourceKey).drafts.comment.objects[0].text, "变成金色✨");
+  // The old stored Blob has no weak-map source. A freshly downloaded File may
+  // already carry its output URL; migration must compare their content hashes.
+  const downloaded = new File(["A"], "downloaded.png", { type: "image/png", lastModified: 999 });
+  identity.setSource(downloaded, "/outputs/original-A.png");
+  assert.notEqual(await identity.key(saved.file), await identity.key(downloaded));
+  ctx.references = [downloaded];
+  ctx.editorDrafts.records.current = new Map([[oldKey, { ...saved, sourceKey: oldKey }]]);
+  await ctx.openImageEditor({ sourceFile: downloaded, src: "/outputs/original-A.png", name: downloaded.name }, "comment");
+  assert.equal(ctx.imageEditor.sourceKey, "/outputs/original-A.png");
+  assert.equal(ctx.editorDrafts.records.current.has(oldKey), false);
+  const migrated = ctx.editorDrafts.records.current.get("/outputs/original-A.png");
+  assert.equal(migrated.drafts.comment.objects[0].text, "变成金色✨");
+  assert.equal(migrated.imageSourceKey, "/outputs/original-A.png");
+});
+
+test("actual queue retry restores original references, legacy masks and text fields without overwriting another session's draft", async () => {
+  for (const masked of [false, true]) {
+    const ctx = appContext(), base = new File(["base"], "base.png"), guide = new File(["guide"], "guide.png");
+    const turn = { id: "turn-A", engine: "gpt-image-2", prompt: "original A prompt", negativePrompt: "A negative", posterText: "A poster",
+      referenceSnapshots: [{ src: "base" }, { src: "guide" }], maskFileSnapshot: masked ? { src: "mask" } : undefined,
+      meta: { context_prompt: "A fixed", mask_used: masked } };
+    Object.assign(ctx, { activeSessionId: "B", sessions: [{ id: "A", turns: [turn] }, { id: "B", turns: [] }],
+      imageEditActionFrom, restoreReusableMaskAttachment, turnUsesMaskGuidance: (item) => Boolean(item.meta.mask_used),
+      turnMaskPayloadsRef: { current: new Map() }, referenceSnapshotToFile: async (snapshot) => snapshot.src === "base" ? base : guide,
+      loadReusableMaskPayloadFromTurn: async () => ({ maskFile: new File(["mask"], "mask.png"), encoding: "compat" }),
+      setQueueOpen() {}, setActiveEngine() {}, setSubmitMode() {},
+      updateActiveSessionDrafts() { throw new Error("must preserve B's unsent draft"); },
+    });
+    for (const name of ["regenerateFromTurn", "retryQueueJob"]) vm.runInContext(handlers[name], ctx);
+    ctx.retryQueueJob({ id: "job", sessionId: "A", turnId: turn.id, prompt: turn.prompt, engine: turn.engine });
+    await new Promise(setImmediate);
+    assert.equal(ctx.submissions.length, 1);
+    const payload = ctx.submissions[0];
+    assert.equal(payload.sessionId, "A"); assert.deepEqual(Array.from(payload.references), [base, guide]);
+    assert.equal(payload.draftOverride.shared.fixed_prompt, "A fixed");
+    assert.equal(payload.draftOverride.gpt.negative_prompt, "A negative"); assert.equal(payload.draftOverride.gpt.poster_text, "A poster");
+    assert.equal(Boolean(payload.maskAttachment), masked);
+    if (masked) assert.equal(payload.maskAttachment.baseFile, base);
+    ctx.referenceSnapshotToFile = async () => null;
+    await ctx.regenerateFromTurn(turn, "A");
+    assert.equal(ctx.submissions.length, 1, "missing attachments must not silently generate using current inputs");
+  }
+});
+
+test("actual deletion of unknown active records requires an explicit warning confirmation and cannot cancel upstream work", () => {
+  const ctx = appContext(), turn = { id: "unknown", status: "running" };
+  Object.assign(ctx, { queueJobs: [], sessions: [{ id: "session", updatedAt: "old", turns: [turn] }], hasActiveQueueJobForTurn,
+    resolveTurnDeletion, turnMaskPayloadsRef: { current: new Map() },
+    setQueueJobs(fn) { ctx.queueJobs = fn(ctx.queueJobs); }, setExpandedTurns() {}, setSessions(fn) { ctx.sessions = fn(ctx.sessions); },
+    clearQueueJobRuntime() { throw new Error("no local job should be canceled"); },
+    confirm(message) { ctx.warning = message; return false; },
+  });
+  vm.runInContext(handlers.deleteTurn, ctx);
+  ctx.deleteTurn("session", turn);
+  assert.equal(ctx.warning, "turn.deleteActiveConfirm"); assert.equal(ctx.sessions[0].turns.length, 1);
+  ctx.confirm = () => true; ctx.deleteTurn("session", turn);
+  assert.equal(ctx.sessions[0].turns.length, 0);
+  ctx.sessions[0].turns = [turn]; ctx.queueJobs = [{ id: "local", sessionId: "session", turnId: turn.id, status: "running" }];
+  ctx.confirm = () => { throw new Error("a live local job remains protected"); };
+  ctx.deleteTurn("session", turn);
+  assert.equal(ctx.sessions[0].turns.length, 1); assert.equal(ctx.notice, "status.turnBusy");
 });
