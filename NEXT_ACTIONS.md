@@ -1,18 +1,20 @@
 # Next Actions
 
-## Now — 合并后的全功能与发布前审查
+## Now — 1.1.5已正式发布
 - [x] 用户要求的本地合并：codex/web-image-editing快进到9e44695，保留未跟踪用户文件。
 - [x] 完成源码审查与具体问题修复，用户确认准备1.1.5；Python322/Node299/Rust6、构建、PS5.1/版本及隔离烟测通过，7861最新后端和资源生效。
 - [x] 形成docs/release-readiness-audit-2026-10-13.md和中文1.1.5发行说明，不覆盖已发布1.1.4，0付费调用。
-- [ ] 重建1.1.5 Web、Portable、在线/离线安装候选包，对同一份实际ZIP运行预检和内容/hash检查。
-- [ ] 用本机mock验新冻结后端与源码行为一致，再确认新包启动、数据保留及1.1.3/1.1.4覆盖升级。
+- [x] 重建四类1.1.5包，修复Portable旧资源残留；同一份ZIP的本地/两处G盘预检、四包内容/hash通过。
+- [x] 实际解压Portable并以本机mock验冻结后端、旧配置、GPT/Banana/聊天/取消/局部和透明判断；两种NSIS实际payload/嵌入前端与版本核验通过。临时1.1.3/1.1.4便携覆盖保留data通过，真实安装版覆盖升级尚未验收。
 - [ ] 按报告人工点击新旧功能、小图/窄屏、并发标签页/BFCache和聊天迟到响应；浏览器安全校验不可绕过。
-- [ ] 发布前核对手动升级/签名策略和最新feed，完成G盘干净分发同步与最终Release标签/实际包对应。
+- [x] 手动升级策略、两处G盘干净分发、main/60a2252/v1.1.5与正式latest Release完成，12附件远端大小和SHA256全部匹配；未沿用旧签名feed。
+- [ ] 用户手动下载安装1.1.5，确认真实安装版升级与原生窗口体验；便携升级保留data。
+- [ ] 如未来要求应用内直装，先恢复匹配内置公钥的私钥，再对新payload真实验签并生成feed，保持现有验签保护。
 
 ### 当前交接
-- Start here: `codex/web-image-editing`；docs/release-readiness-audit-2026-10-13.md的“发布前剩余门禁”。
-- Verify next: 重建后以1.1.5运行release_preflight.ps1、verify_v1_1_0_packages.ps1和冻结后端mock；现有1.1.4包不作为本次通过证据。
-- Keep: 未跟踪的.impeccable/、PRODUCT.md、config.local.json.bak为用户文件，不提交/打包。7861后台session34055/PID56532，退出时不要终止它；不自动刷新用户输入。
+- Start here: `main`，https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.5 ，产品/标签60a2252；docs/release-readiness-audit-2026-10-13.md的正式发布结果。
+- Verify next: 用户实际1.1.5界面与旧安装版升级反馈；无需重做已通过的四包/冻结mock/G盘同步。未来有产品源码变动才重建产物。
+- Keep: 未跟踪的.impeccable/、PRODUCT.md、config.local.json.bak为用户文件，不提交/打包。7861隐藏启动器PID29296/后端PID20224，收尾健康和当前资源逐字核验；不要终止或自动刷新用户输入。
 
 ## Previous — 网页图片编辑
 - [x] 用户三项追加反馈：参考图恢复两行、宽屏三个等宽附加设置/窄屏单入口、框内右下展开图标并预留正文空间。282 Node和构建通过，7861新资源200且一致。
