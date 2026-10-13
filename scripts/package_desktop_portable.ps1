@@ -18,7 +18,9 @@ $StudioRoot = Join-Path $RepoRoot "studio-web"
 $TauriRoot = Join-Path $StudioRoot "src-tauri"
 $ReleaseRoot = Join-Path $TauriRoot "target\release"
 $DesktopExe = Join-Path $ReleaseRoot "nm-image-studio-desktop.exe"
-$BackendDir = Join-Path $ReleaseRoot "backend"
+# Tauri's resource copy can retain files from earlier builds in target/release.
+# The freshly prepared source resource directory contains only this build.
+$BackendDir = Join-Path $TauriRoot "backend"
 
 . (Join-Path $ScriptDir "release_validation.ps1")
 $ReleaseVersion = Get-ValidatedReleaseVersion -RepoRoot $RepoRoot -ExpectedVersion $ReleaseVersion

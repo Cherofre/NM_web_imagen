@@ -88,9 +88,11 @@ class ReleasePreparationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             tauri = fixture(root)
-            backend = tauri / "target/release/backend"
+            backend = tauri / "backend"
             backend.mkdir(parents=True)
-            (backend.parent / "nm-image-studio-desktop.exe").write_bytes(b"fake shell")
+            release = tauri / "target/release"
+            release.mkdir(parents=True)
+            (release / "nm-image-studio-desktop.exe").write_bytes(b"fake shell")
             (backend / "nm-image-studio-backend.exe").write_bytes(b"old sidecar")
             (backend / "VERSION").write_text("9.8.6", encoding="utf-8")
             output = root / "keep.zip"
@@ -99,6 +101,26 @@ class ReleasePreparationTests(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Release backend version mismatch", result.stderr)
             self.assertEqual(b"keep existing artifact", output.read_bytes())
+
+    def test_portable_excludes_stale_tauri_resource_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tauri = fixture(root)
+            release = tauri / "target/release"
+            stale_backend = release / "backend"
+            stale_backend.mkdir(parents=True)
+            (stale_backend / "old-chunk.js").write_bytes(b"stale resource")
+            (release / "nm-image-studio-desktop.exe").write_bytes(b"current shell")
+            backend = tauri / "backend"
+            backend.mkdir()
+            (backend / "nm-image-studio-backend.exe").write_bytes(b"current sidecar")
+            (backend / "VERSION").write_text("9.8.7", encoding="utf-8")
+            result = run_ps("& ./scripts/package_desktop_portable.ps1 -SkipBuild -OutputPath ./fresh.zip", root)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            with zipfile.ZipFile(root / "fresh.zip") as archive:
+                self.assertNotIn("NM Image Studio/backend/old-chunk.js", archive.namelist())
+                self.assertEqual(b"current sidecar", archive.read("NM Image Studio/backend/nm-image-studio-backend.exe"))
+                self.assertEqual(b"current shell", archive.read("NM Image Studio/nm-image-studio-desktop.exe"))
 
     def test_one_click_passes_the_same_selected_zip_to_every_release_step(self):
         with tempfile.TemporaryDirectory() as temp:
