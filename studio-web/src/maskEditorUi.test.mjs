@@ -121,8 +121,9 @@ test("mask editor can keep official alpha semantics or opt into a reverse-alpha 
 test("masked submissions use model-side guidance and keep broad prompts non-blocking", () => {
   assert.match(appSource, /maskPromptNeedsSoftGuidance/);
   assert.match(appSource, /mask\.promptBroadGuidance/);
-  assert.match(appSource, /composer-textarea-wrap has-mask-guidance/);
-  assert.match(appSource, /className="mask-prompt-guidance-inline"/);
+  assert.match(appSource, /className="composer-prompt-guidance"/);
+  assert.match(appSource, /aria-describedby=\{maskPromptNeedsGuidance \? "composer-prompt-guidance" : undefined\}/);
+  assert.doesNotMatch(appSource, /composer-textarea-wrap has-mask-guidance|mask-prompt-guidance-inline/);
   assert.doesNotMatch(appSource, /className=\{`mask-prompt-guidance\$\{/);
   assert.match(appSource, /<Info size=\{11\} aria-hidden="true" \/>/);
   assert.doesNotMatch(appSource, /mask\.promptTargetRequired/);
@@ -138,9 +139,12 @@ test("masked submissions use model-side guidance and keep broad prompts non-bloc
   assert.match(i18nSource, /未指定具体结果，将由模型结合画面自行选择/);
   assert.match(i18nSource, /No specific result was provided; the model will choose from the image context/);
   assert.match(i18nSource, /不做本地硬切拼接/);
-  assert.match(styleSource, /\.mask-prompt-guidance-inline/);
-  assert.match(styleSource, /\.composer-textarea-wrap\.has-mask-guidance textarea/);
-  assert.match(styleSource, /@media \(max-width: 560px\)[\s\S]*\.mask-prompt-guidance-inline\s*\{[\s\S]*display: none;/);
+  const guidanceStyle = styleSource.match(/\.composer-prompt-guidance\s*\{([^}]*)\}/)?.[1];
+  assert.ok(guidanceStyle);
+  assert.doesNotMatch(guidanceStyle, /position:\s*absolute|bottom:|pointer-events:\s*none/);
+  assert.match(styleSource, /\.composer-prompt-guidance span\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.doesNotMatch(styleSource, /mask-prompt-guidance-inline|has-mask-guidance textarea/);
+  assert.doesNotMatch(styleSource, /\.composer-prompt-guidance\s*\{[^}]*display:\s*none;/);
   assert.doesNotMatch(styleSource, /\.mask-prompt-guidance\s*\{/);
 });
 

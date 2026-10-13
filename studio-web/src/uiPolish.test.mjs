@@ -36,7 +36,7 @@ function cssBlockIn(source, selector) {
 
 test("text settings actions keep their button on one line and expose focus styling", () => {
   assert.match(cssBlock(".composer"), /--composer-prompt-height:\s*148px;/);
-  assert.match(cssBlock(".composer-inner"), /display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\);[\s\S]*width:\s*100%;[\s\S]*margin-inline:\s*0;/);
+  assert.match(cssBlock(".composer-inner"), /display:\s*grid;[\s\S]*grid-template-rows:\s*auto minmax\(0, var\(--composer-prompt-height\)\) auto;[\s\S]*width:\s*100%;[\s\S]*margin-inline:\s*0;/);
   assert.match(cssBlock(".composer-top"), /display:\s*grid;[\s\S]*gap:\s*8px;[\s\S]*min-height:\s*0;/);
   assert.match(appSource, /<button\s+type="button"\s+className="composer-resize-handle"[\s\S]*?<div className="composer-inner">\s*<div className="composer-top">\s*\{references\.length > 0 && \(/);
   assert.doesNotMatch(appSource, /<div className="composer-input">\s*<button\s+type="button"\s+className="composer-resize-handle"/);
@@ -47,8 +47,11 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.match(css, /\.composer-resize-handle:hover::before,[\s\S]*\.composer-resize-handle:focus-visible::before,[\s\S]*\.composer-resize-handle:active::before\s*\{[^}]*background:\s*rgba\(28, 25, 23, 0\.12\);/);
   assert.match(cssBlock(".composer-textarea-wrap"), /height:\s*100%;[\s\S]*min-height:\s*118px;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /max-height:/);
-  assert.match(cssBlock(".composer-prompt-actions"), /position:\s*absolute;[\s\S]*bottom:\s*12px;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
-  assert.match(cssBlock(".session-prompt-button"), /grid-template-columns:\s*auto minmax\(0, 1fr\);[\s\S]*min-height:\s*36px;/);
+  assert.match(cssBlock(".composer-prompt-actions"), /display:\s*flex;[\s\S]*justify-content:\s*flex-end;/);
+  assert.doesNotMatch(cssBlock(".composer-prompt-actions"), /position:\s*absolute|bottom:|pointer-events:\s*none/);
+  assert.match(cssBlock(".composer-toolbar button.session-prompt-button"), /grid-template-columns:\s*auto minmax\(0, 1fr\);[\s\S]*width:\s*auto;[\s\S]*max-width:\s*min\(300px, 100%\);[\s\S]*min-height:\s*36px;/);
+  assert.match(cssBlock(".composer-toolbar"), /flex-wrap:\s*wrap;/);
+  assert.match(appSource, /<div className="composer-textarea-wrap" ref=\{promptWrapRef\}>\s*<textarea[\s\S]*?onKeyDown=\{submitFromComposerKey\}\s*\/>\s*<\/div>/);
   assert.match(cssBlock(".session-prompt-button-summary"), /text-overflow:\s*ellipsis;[\s\S]*white-space:\s*nowrap;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /resize:\s*vertical;/);
   assert.match(cssBlock(".composer-input textarea"), /width:\s*100%;/);
@@ -938,9 +941,10 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlockIn(phone, ".mode-tabs button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;/);
   assert.match(cssBlockIn(phone, ".connection-button"), /justify-self:\s*stretch;[\s\S]*max-width:\s*none;/);
   assert.doesNotMatch(phone, /\.history-tools\s*\{[^}]*grid-template-columns:\s*1fr;/);
-  assert.match(cssBlockIn(phone, ".composer-input textarea"), /padding-bottom:\s*98px;/);
-  assert.match(cssBlockIn(phone, ".composer-prompt-actions"), /grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*gap:\s*6px;[\s\S]*align-items:\s*stretch;/);
-  assert.match(cssBlockIn(phone, ".prompt-expand-button"), /justify-self:\s*end;[\s\S]*min-height:\s*32px;/);
+  assert.match(cssBlock(".composer-input textarea"), /padding:\s*16px;/);
+  assert.doesNotMatch(phone, /\.composer-input textarea\s*\{[^}]*padding-bottom:/);
+  assert.match(cssBlockIn(phone, ".composer-prompt-actions"), /justify-content:\s*flex-end;/);
+  assert.match(cssBlockIn(phone, ".prompt-expand-button"), /min-height:\s*32px;/);
   assert.match(appSource, /className="session-prompt-label-full">\{t\("composer\.sessionPrompt"\)\}/);
   assert.match(appSource, /className="session-prompt-label-short">\{t\("composer\.sessionPromptShort"\)\}/);
   assert.match(appSource, /className="session-prompt-summary-full">\{sessionPromptSummary \|\| t\("composer\.sessionPromptUnset"\)\}/);

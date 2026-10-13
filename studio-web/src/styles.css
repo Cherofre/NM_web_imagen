@@ -2066,7 +2066,7 @@ button.primary-action:focus-visible,
 .composer-inner {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, var(--composer-prompt-height));
+  grid-template-rows: auto minmax(0, var(--composer-prompt-height)) auto;
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -2090,7 +2090,7 @@ button.primary-action:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -2635,37 +2635,27 @@ button.primary-action:focus-visible,
   grid-column: 1;
 }
 
-.composer-textarea-wrap.has-mask-guidance textarea {
-  padding-bottom: 82px;
-}
-
-.mask-prompt-guidance-inline {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 58px;
-  z-index: 2;
+.composer-prompt-guidance {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
+  padding-inline: 2px;
   color: var(--muted-strong);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.35;
-  pointer-events: none;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
-.mask-prompt-guidance-inline svg {
+.composer-prompt-guidance svg {
   flex: 0 0 auto;
+  margin-top: 2px;
   color: var(--muted);
 }
 
-.mask-prompt-guidance-inline span {
+.composer-prompt-guidance span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .composer-input textarea {
@@ -2673,7 +2663,7 @@ button.primary-action:focus-visible,
   height: 100%;
   min-height: 78px;
   resize: none;
-  padding: 16px 54px 58px 16px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   outline: none;
@@ -2684,21 +2674,14 @@ button.primary-action:focus-visible,
 }
 
 .composer-prompt-actions {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  z-index: 3;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-end;
   align-items: center;
-  pointer-events: none;
+  padding-right: 62px;
 }
 
 .session-prompt-button,
 .prompt-expand-button {
-  pointer-events: auto;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -2709,21 +2692,25 @@ button.primary-action:focus-visible,
   white-space: nowrap;
 }
 
-.session-prompt-button {
+.composer-toolbar button.session-prompt-button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  flex: 0 1 auto;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: auto;
+  max-width: min(300px, 100%);
   min-width: 0;
   min-height: 36px;
   padding: 0 13px;
+  margin-left: auto;
   text-align: left;
-  backdrop-filter: blur(10px);
 }
 
 .session-prompt-button-title {
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 800;
 }
@@ -2739,9 +2726,12 @@ button.primary-action:focus-visible,
 }
 
 .prompt-expand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 34px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 10px 26px -22px rgba(15, 23, 42, 0.5);
+  background: transparent;
+  border-color: transparent;
 }
 
 .prompt-expand-label-short {
@@ -6471,26 +6461,11 @@ button.primary-action:focus-visible,
     padding: 6px;
   }
 
-  .composer-input textarea {
-    padding-bottom: 98px;
-  }
-
-  .composer-textarea-wrap.has-mask-guidance textarea {
-    padding-bottom: 98px;
-  }
-
-  .mask-prompt-guidance-inline {
-    display: none;
-  }
-
   .composer-prompt-actions {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-    align-items: stretch;
+    justify-content: flex-end;
   }
 
   .prompt-expand-button {
-    justify-self: end;
     min-height: 32px;
   }
 

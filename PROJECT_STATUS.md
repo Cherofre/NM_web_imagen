@@ -1,7 +1,11 @@
 # Project Status
 
 ## Current Snapshot
-- Last Updated: 2026-10-12
+- Last Updated: 2026-10-13
+- Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出，按用户选中的“外置提示条”实施。附加提示词移到参数栏并限制摘要宽度，遮罩提示为文本框上方普通流节点，展开入口在独立底行；取消正文为浮层预留的内边距，保留拖动高度/原有提示词编辑弹窗/提交行为。282 Node、TypeScript/Vite构建、49构建后资源检查通过；7861首页及新JS/CSS均200且内容与当前构建一致。浏览器策略校验仍不可用，真实视觉待刷新确认。0生图/未打包发布；docs/composer-external-guidance-2026-10-13.md。
+- Superpowers Phase: not used; ledger-only layout trial.
+- Superpowers Spec: not used for this trial; existing specs are historical.
+- Superpowers Plan: not used for this trial; existing plans are historical.
 - Copy runtime verification: 49项构建后资源检查通过；发现旧7861停止后用源码启动器恢复，PID62752/session30044，health/新JS/复制标签/220px及高亮CSS实际检查通过。没有真实生图或发布。
 - Copy to input: 按用户澄清，成功结果按钮更名“复制到输入区”，复制所选结果及本轮提示词；来源/字节内容去重，已有同图复用并合并该图重复项，保留其他参考顺序/底图对象。失败或切换不覆盖输入，防重复点击，高亮参考+明确新增/复用提示。参考卡片220px及完整文件名tooltip。282 Node及生产构建通过，0生图；视觉待刷新确认。docs/copy-to-input-review-2026-10-12.md。
 - Editing interaction follow-up: 失败继续编辑按来源直接退出到会话，返回目标持久化及旧草稿兼容；预览进入仍保留原预览。加大整体/局部说明框和深色滚动条；标注/局部修改统一主动wheel监听、输入区滚动隔离和绘制时禁缩放；移除网页480px默认适配上限，补缩放后范围圈坐标刷新。272 Node及生产构建通过，0生图；IAB管理员策略校验仍不可用，真实视觉未验收。docs/editor-interaction-review-2026-10-12.md。
@@ -40,7 +44,7 @@
 - UI polish: 按用户截图统一图片编辑视觉：中性黑灰主题、居中自适应宽度图标工具条、轻量评论浮层/完成勾选、编号评论列表、统一按钮/侧栏/发送态与窄屏样式。TypeScript/Vite 构建及 5 项编辑逻辑测试通过；浏览器策略校验仍阻断访问，未做本轮视觉验收、未刷新用户页面。
 - Comment follow-up: 改为标点旁浮动输入，Enter/完成此条仅收起输入；可继续添加多个点，底部显示“发送全部 N 条评论”统一提交。擦除提示明确涂蓝内容后发送补全背景。构建与评论逻辑测试验证；当前浏览器视觉复核待用户刷新。
 - Follow-up: 用户截图指出预览底部工具栏白底白字。已提高工具栏容器/按钮选择器优先级，使用固定深色配色隔离旧 lightbox 样式；本轮构建验证，浏览器工具因安全策略校验不可用未能读取用户标签页，显示效果待刷新复核。
-- Current task: codex/web-image-editing 分支实现网页版标注、位置评论、移除背景、擦除。
+- Current task: `codex/composer-external-guidance` 试用输入区外置提示条；保留父分支已有图片编辑功能。
 - Boundary: 仅源码与网页资源，不调整大小、不打包、不发布、不同步 G 盘。
 - Workflow: ledger-only，沿用现有 React Studio 与单次图片调用。
 - Verification: Python 297/297、Node 233/233、TypeScript/Vite 构建通过；浏览器完成四模式操作、标注导出、草稿恢复、390px 擦除界面、模拟请求与重试检查。擦除上传遮罩已解码验证透明/不透明区域。

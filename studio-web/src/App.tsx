@@ -6922,13 +6922,35 @@ function App() {
             <button type="button" onClick={() => { hideTooltip(); setAdvancedOpen(true); }} {...tooltipProps(t("composer.advancedTooltip"))}>
               {t("composer.advanced")}
             </button>
+            <button
+              type="button"
+              className={sessionPromptSummary ? "session-prompt-button has-content" : "session-prompt-button"}
+              onClick={openSessionPromptEditor}
+              aria-label={t("composer.openSessionPrompt")}
+              aria-haspopup="dialog"
+              aria-expanded={sessionPromptOpen}
+              title={sessionPromptSummary || t("composer.sessionPromptEmptyTitle")}
+            >
+              <span className="session-prompt-button-title">
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                <span className="session-prompt-label-full">{t("composer.sessionPrompt")}</span>
+                <span className="session-prompt-label-short">{t("composer.sessionPromptShort")}</span>
+              </span>
+              <span className="session-prompt-button-summary">
+                <span className="session-prompt-summary-full">{sessionPromptSummary || t("composer.sessionPromptUnset")}</span>
+                <span className="session-prompt-summary-short">{sessionPromptSummary || t("composer.sessionPromptUnsetShort")}</span>
+              </span>
+            </button>
             </div>
+            {maskPromptNeedsGuidance && (
+              <div id="composer-prompt-guidance" className="composer-prompt-guidance" role="note">
+                <Sparkles size={13} aria-hidden="true" />
+                <span>{t("mask.promptBroadGuidance")}</span>
+              </div>
+            )}
           </div>
           <div className="composer-input">
-            <div
-              className={maskPromptNeedsGuidance ? "composer-textarea-wrap has-mask-guidance" : "composer-textarea-wrap"}
-              ref={promptWrapRef}
-            >
+            <div className="composer-textarea-wrap" ref={promptWrapRef}>
               <textarea
                 ref={promptRef}
                 rows={3}
@@ -6938,44 +6960,10 @@ function App() {
                   : activeComposerMask
                   ? t("mask.promptPlaceholder")
                   : t("composer.generatePlaceholder")}
-                aria-describedby={maskPromptNeedsGuidance ? "mask-prompt-guidance-inline" : undefined}
+                aria-describedby={maskPromptNeedsGuidance ? "composer-prompt-guidance" : undefined}
                 onChange={(event) => applyPrompt(event.target.value, activeEngine)}
                 onKeyDown={submitFromComposerKey}
               />
-              {maskPromptNeedsGuidance && (
-                <div id="mask-prompt-guidance-inline" className="mask-prompt-guidance-inline" role="note">
-                  <Sparkles size={13} aria-hidden="true" />
-                  <span>{t("mask.promptBroadGuidance")}</span>
-                </div>
-              )}
-              <div className="composer-prompt-actions">
-                <button
-                  type="button"
-                  className={sessionPromptSummary ? "session-prompt-button has-content" : "session-prompt-button"}
-                  onClick={openSessionPromptEditor}
-                  aria-label={t("composer.openSessionPrompt")}
-                  title={sessionPromptSummary || t("composer.sessionPromptEmptyTitle")}
-                >
-                  <span className="session-prompt-button-title">
-                    <span className="session-prompt-label-full">{t("composer.sessionPrompt")}</span>
-                    <span className="session-prompt-label-short">{t("composer.sessionPromptShort")}</span>
-                  </span>
-                  <span className="session-prompt-button-summary">
-                    <span className="session-prompt-summary-full">{sessionPromptSummary || t("composer.sessionPromptUnset")}</span>
-                    <span className="session-prompt-summary-short">{sessionPromptSummary || t("composer.sessionPromptUnsetShort")}</span>
-                  </span>
-                </button>
-                <button
-                  className="prompt-expand-button"
-                  type="button"
-                  onClick={openPromptEditor}
-                  title={t("composer.expandPrompt")}
-                  aria-label={t("composer.expandPrompt")}
-                >
-                  <span className="prompt-expand-label-full">{t("composer.expandPromptShort")}</span>
-                  <span className="prompt-expand-label-short">{t("composer.expandPromptShort")}</span>
-                </button>
-              </div>
             </div>
             <button
               className="submit-button"
@@ -6985,6 +6973,19 @@ function App() {
               aria-label={submitMode === "chat" ? t("submit.chatTooltip") : t("submit.startGenerate")}
             >
               {busy ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
+            </button>
+          </div>
+          <div className="composer-prompt-actions">
+            <button
+              className="prompt-expand-button"
+              type="button"
+              onClick={openPromptEditor}
+              title={t("composer.expandPrompt")}
+              aria-label={t("composer.expandPrompt")}
+            >
+              <Maximize2 size={13} aria-hidden="true" />
+              <span className="prompt-expand-label-full">{t("composer.expandPromptShort")}</span>
+              <span className="prompt-expand-label-short">{t("composer.expandPromptShort")}</span>
             </button>
           </div>
           </div>
