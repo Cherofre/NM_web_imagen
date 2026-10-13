@@ -2,7 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-13
-- Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出，按用户选中的“外置提示条”实施。附加提示词移到参数栏并限制摘要宽度，遮罩提示为文本框上方普通流节点，展开入口在独立底行；取消正文为浮层预留的内边距，保留拖动高度/原有提示词编辑弹窗/提交行为。282 Node、TypeScript/Vite构建、49构建后资源检查通过；7861首页及新JS/CSS均200且内容与当前构建一致。浏览器策略校验仍不可用，真实视觉待刷新确认。0生图/未打包发布；docs/composer-external-guidance-2026-10-13.md。
+- Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出。按用户最新截图反馈，附加提示词从参数栏移到正文正下方左侧，与展开共享框外底行；普通流Grid在窄屏压缩摘要而不覆盖正文。遮罩说明仍在框上方，拖动高度/弹窗/提交行为保留。最新63项相关Node检查和TypeScript/Vite构建通过；7861首页/新JS/CSS均200且与构建逐字一致。初稿全量282 Node及49资源检查已通过；本次视觉待用户刷新确认。0生图/未打包发布；docs/composer-external-guidance-2026-10-13.md。
 - Superpowers Phase: not used; ledger-only layout trial.
 - Superpowers Spec: not used for this trial; existing specs are historical.
 - Superpowers Plan: not used for this trial; existing plans are historical.

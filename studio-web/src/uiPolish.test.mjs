@@ -47,9 +47,9 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.match(css, /\.composer-resize-handle:hover::before,[\s\S]*\.composer-resize-handle:focus-visible::before,[\s\S]*\.composer-resize-handle:active::before\s*\{[^}]*background:\s*rgba\(28, 25, 23, 0\.12\);/);
   assert.match(cssBlock(".composer-textarea-wrap"), /height:\s*100%;[\s\S]*min-height:\s*118px;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /max-height:/);
-  assert.match(cssBlock(".composer-prompt-actions"), /display:\s*flex;[\s\S]*justify-content:\s*flex-end;/);
+  assert.match(cssBlock(".composer-prompt-actions"), /display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
   assert.doesNotMatch(cssBlock(".composer-prompt-actions"), /position:\s*absolute|bottom:|pointer-events:\s*none/);
-  assert.match(cssBlock(".composer-toolbar button.session-prompt-button"), /grid-template-columns:\s*auto minmax\(0, 1fr\);[\s\S]*width:\s*auto;[\s\S]*max-width:\s*min\(300px, 100%\);[\s\S]*min-height:\s*36px;/);
+  assert.match(cssBlock(".composer-prompt-actions .session-prompt-button"), /grid-template-columns:\s*auto minmax\(0, 1fr\);[\s\S]*width:\s*auto;[\s\S]*max-width:\s*min\(300px, 100%\);[\s\S]*min-height:\s*36px;/);
   assert.match(cssBlock(".composer-toolbar"), /flex-wrap:\s*wrap;/);
   assert.match(appSource, /<div className="composer-textarea-wrap" ref=\{promptWrapRef\}>\s*<textarea[\s\S]*?onKeyDown=\{submitFromComposerKey\}\s*\/>\s*<\/div>/);
   assert.match(cssBlock(".session-prompt-button-summary"), /text-overflow:\s*ellipsis;[\s\S]*white-space:\s*nowrap;/);
@@ -943,7 +943,7 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.doesNotMatch(phone, /\.history-tools\s*\{[^}]*grid-template-columns:\s*1fr;/);
   assert.match(cssBlock(".composer-input textarea"), /padding:\s*16px;/);
   assert.doesNotMatch(phone, /\.composer-input textarea\s*\{[^}]*padding-bottom:/);
-  assert.match(cssBlockIn(phone, ".composer-prompt-actions"), /justify-content:\s*flex-end;/);
+  assert.doesNotMatch(phone, /\.composer-prompt-actions\s*\{[^}]*grid-template-columns:/);
   assert.match(cssBlockIn(phone, ".prompt-expand-button"), /min-height:\s*32px;/);
   assert.match(appSource, /className="session-prompt-label-full">\{t\("composer\.sessionPrompt"\)\}/);
   assert.match(appSource, /className="session-prompt-label-short">\{t\("composer\.sessionPromptShort"\)\}/);

@@ -2674,9 +2674,10 @@ button.primary-action:focus-visible,
 }
 
 .composer-prompt-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  gap: 8px;
   padding-right: 62px;
 }
 
@@ -2692,7 +2693,7 @@ button.primary-action:focus-visible,
   white-space: nowrap;
 }
 
-.composer-toolbar button.session-prompt-button {
+.composer-prompt-actions .session-prompt-button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   flex: 0 1 auto;
@@ -2703,7 +2704,7 @@ button.primary-action:focus-visible,
   min-width: 0;
   min-height: 36px;
   padding: 0 13px;
-  margin-left: auto;
+  justify-self: start;
   text-align: left;
 }
 
@@ -6459,10 +6460,6 @@ button.primary-action:focus-visible,
     min-width: 48px;
     height: calc(100dvh - 12px);
     padding: 6px;
-  }
-
-  .composer-prompt-actions {
-    justify-content: flex-end;
   }
 
   .prompt-expand-button {
