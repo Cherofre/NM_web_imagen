@@ -1624,6 +1624,7 @@ function App() {
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorDraft, setPromptEditorDraft] = useState("");
   const [sessionPromptOpen, setSessionPromptOpen] = useState(false);
+  const [sessionPromptField, setSessionPromptField] = useState<keyof SessionPromptEditorDraft>("fixed_prompt");
   const [sessionPromptDraft, setSessionPromptDraft] = useState<SessionPromptEditorDraft>(() => createSessionPromptEditorDraft(initialSessionState.current.sessions[0]?.drafts || emptySessionDrafts()));
   const [composerPromptHeightPreference, setComposerPromptHeightPreference] = useState(() => initialComposerPromptHeight.current);
   const [composerViewportHeight, setComposerViewportHeight] = useState(() => typeof window === "undefined" ? 0 : window.innerHeight);
@@ -3582,8 +3583,9 @@ function App() {
     setTimeout(() => promptRef.current?.focus(), 0);
   }
 
-  function openSessionPromptEditor() {
+  function openSessionPromptEditor(field: keyof SessionPromptEditorDraft = "fixed_prompt") {
     hideTooltip();
+    setSessionPromptField(field);
     setSessionPromptDraft(createSessionPromptEditorDraft(activeDrafts));
     setSessionPromptOpen(true);
   }
@@ -6613,7 +6615,7 @@ function App() {
                             <em className="reference-mask-badge">{t("mask.baseBadge")}</em>
                             {activeComposerMask && (
                               <em className="reference-mask-badge is-applied" title={t("mask.strictProtection")}>
-                                {t(activeComposerMask.encoding === "compat" ? "mask.compatBadge" : "mask.appliedBadge")}
+                                <span>{t(activeComposerMask.encoding === "compat" ? "mask.compatBadge" : "mask.appliedBadge")}</span>
                                 <Info size={11} aria-hidden="true" />
                               </em>
                             )}
@@ -6945,6 +6947,15 @@ function App() {
                 onChange={(event) => applyPrompt(event.target.value, activeEngine)}
                 onKeyDown={submitFromComposerKey}
               />
+              <button
+                className="prompt-expand-button"
+                type="button"
+                onClick={openPromptEditor}
+                title={t("composer.expandPrompt")}
+                aria-label={t("composer.expandPrompt")}
+              >
+                <Maximize2 size={14} aria-hidden="true" />
+              </button>
             </div>
             <button
               className="submit-button"
@@ -6957,10 +6968,31 @@ function App() {
             </button>
           </div>
           <div className="composer-prompt-actions">
+            <div className="session-prompt-split">
+              {([
+                { field: "fixed_prompt", label: "sessionPrompt.fixed", value: activeDrafts.shared.fixed_prompt },
+                { field: "negative_prompt", label: "sessionPrompt.negative", value: activeDrafts.gpt.negative_prompt },
+                { field: "poster_text", label: "sessionPrompt.posterText", value: activeDrafts.gpt.poster_text },
+              ] as const).map((item) => (
+                <button
+                  key={item.field}
+                  type="button"
+                  className={item.value.trim() ? "session-prompt-button has-content" : "session-prompt-button"}
+                  onClick={() => openSessionPromptEditor(item.field)}
+                  aria-label={`${t(item.label)}: ${item.value.trim() || t("composer.sessionPromptUnset")}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={sessionPromptOpen && sessionPromptField === item.field}
+                  title={`${t(item.label)}: ${item.value.trim() || t("composer.sessionPromptUnset")}`}
+                >
+                  <span className="session-prompt-button-title">{t(item.label)}</span>
+                  <span className="session-prompt-button-summary">{item.value.trim() || t("composer.sessionPromptUnset")}</span>
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               className={sessionPromptSummary ? "session-prompt-button has-content" : "session-prompt-button"}
-              onClick={openSessionPromptEditor}
+              onClick={() => openSessionPromptEditor()}
               aria-label={t("composer.openSessionPrompt")}
               aria-haspopup="dialog"
               aria-expanded={sessionPromptOpen}
@@ -6975,17 +7007,6 @@ function App() {
                 <span className="session-prompt-summary-full">{sessionPromptSummary || t("composer.sessionPromptUnset")}</span>
                 <span className="session-prompt-summary-short">{sessionPromptSummary || t("composer.sessionPromptUnsetShort")}</span>
               </span>
-            </button>
-            <button
-              className="prompt-expand-button"
-              type="button"
-              onClick={openPromptEditor}
-              title={t("composer.expandPrompt")}
-              aria-label={t("composer.expandPrompt")}
-            >
-              <Maximize2 size={13} aria-hidden="true" />
-              <span className="prompt-expand-label-full">{t("composer.expandPromptShort")}</span>
-              <span className="prompt-expand-label-short">{t("composer.expandPromptShort")}</span>
             </button>
           </div>
           </div>
@@ -7538,13 +7559,13 @@ function App() {
             </div>
             <div className="session-prompt-fields">
               <Field label={t("sessionPrompt.fixed")} help={t("sessionPrompt.fixedHelp")}>
-                <textarea value={sessionPromptDraft.fixed_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: event.target.value }))} />
+                <textarea autoFocus={sessionPromptField === "fixed_prompt"} value={sessionPromptDraft.fixed_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, fixed_prompt: event.target.value }))} />
               </Field>
               <Field label={t("sessionPrompt.negative")} help={t("sessionPrompt.negativeHelp")}>
-                <textarea value={sessionPromptDraft.negative_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, negative_prompt: event.target.value }))} />
+                <textarea autoFocus={sessionPromptField === "negative_prompt"} value={sessionPromptDraft.negative_prompt} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, negative_prompt: event.target.value }))} />
               </Field>
               <Field label={t("sessionPrompt.posterText")} help={t("sessionPrompt.posterTextHelp")}>
-                <input value={sessionPromptDraft.poster_text} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, poster_text: event.target.value }))} />
+                <input autoFocus={sessionPromptField === "poster_text"} value={sessionPromptDraft.poster_text} onChange={(event) => setSessionPromptDraft((current) => ({ ...current, poster_text: event.target.value }))} />
               </Field>
             </div>
             <div className="drawer-actions session-prompt-actions">

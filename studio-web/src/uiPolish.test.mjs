@@ -47,11 +47,18 @@ test("text settings actions keep their button on one line and expose focus styli
   assert.match(css, /\.composer-resize-handle:hover::before,[\s\S]*\.composer-resize-handle:focus-visible::before,[\s\S]*\.composer-resize-handle:active::before\s*\{[^}]*background:\s*rgba\(28, 25, 23, 0\.12\);/);
   assert.match(cssBlock(".composer-textarea-wrap"), /height:\s*100%;[\s\S]*min-height:\s*118px;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /max-height:/);
-  assert.match(cssBlock(".composer-prompt-actions"), /display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
+  assert.match(cssBlock(".composer-prompt-actions"), /display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/);
   assert.doesNotMatch(cssBlock(".composer-prompt-actions"), /position:\s*absolute|bottom:|pointer-events:\s*none/);
   assert.match(cssBlock(".composer-prompt-actions .session-prompt-button"), /grid-template-columns:\s*auto minmax\(0, 1fr\);[\s\S]*width:\s*auto;[\s\S]*max-width:\s*min\(300px, 100%\);[\s\S]*min-height:\s*36px;/);
   assert.match(cssBlock(".composer-toolbar"), /flex-wrap:\s*wrap;/);
-  assert.match(appSource, /<div className="composer-textarea-wrap" ref=\{promptWrapRef\}>\s*<textarea[\s\S]*?onKeyDown=\{submitFromComposerKey\}\s*\/>\s*<\/div>/);
+  assert.match(appSource, /<div className="composer-textarea-wrap" ref=\{promptWrapRef\}>\s*<textarea[\s\S]*?onKeyDown=\{submitFromComposerKey\}\s*\/>\s*<button\s+className="prompt-expand-button"[\s\S]*?aria-label=\{t\("composer\.expandPrompt"\)\}\s*>\s*<Maximize2 size=\{14\} aria-hidden="true" \/>\s*<\/button>\s*<\/div>/);
+  assert.match(cssBlock(".session-prompt-split"), /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/);
+  assert.match(cssBlock(".session-prompt-split .session-prompt-button"), /width:\s*100%;[\s\S]*max-width:\s*none;/);
+  assert.match(cssBlock(".composer-prompt-actions > .session-prompt-button"), /display:\s*none;/);
+  assert.match(appSource, /onClick=\{\(\) => openSessionPromptEditor\(item\.field\)\}/);
+  for (const field of ["fixed_prompt", "negative_prompt", "poster_text"]) {
+    assert.ok(appSource.includes(`autoFocus={sessionPromptField === "${field}"}`));
+  }
   assert.match(cssBlock(".session-prompt-button-summary"), /text-overflow:\s*ellipsis;[\s\S]*white-space:\s*nowrap;/);
   assert.doesNotMatch(cssBlock(".composer-textarea-wrap"), /resize:\s*vertical;/);
   assert.match(cssBlock(".composer-input textarea"), /width:\s*100%;/);
@@ -749,10 +756,10 @@ test("header distinguishes image and chat models with current reasoning controls
   assert.match(i18nSource, /"option\.max": "Max"/);
 });
 
-test("composer labels clarify custom size apply and keep expand copy short", () => {
+test("composer labels clarify custom size apply and name the icon-only expand action", () => {
   assert.match(appSource, /\{t\("composer\.applyCustomSize"\)\}/);
-  assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPromptShort"\)\}/);
-  assert.doesNotMatch(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPrompt"\)\}/);
+  assert.match(appSource, /className="prompt-expand-button"[\s\S]*?aria-label=\{t\("composer\.expandPrompt"\)\}/);
+  assert.doesNotMatch(appSource, /className="prompt-expand-label-full"/);
 });
 
 test("history uses one compact and full surface with an in-window detail", () => {
@@ -941,10 +948,13 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlockIn(phone, ".mode-tabs button"), /flex:\s*1 1 0;[\s\S]*min-width:\s*0;/);
   assert.match(cssBlockIn(phone, ".connection-button"), /justify-self:\s*stretch;[\s\S]*max-width:\s*none;/);
   assert.doesNotMatch(phone, /\.history-tools\s*\{[^}]*grid-template-columns:\s*1fr;/);
-  assert.match(cssBlock(".composer-input textarea"), /padding:\s*16px;/);
+  assert.match(cssBlock(".composer-input textarea"), /padding:\s*16px 54px 16px 16px;/);
   assert.doesNotMatch(phone, /\.composer-input textarea\s*\{[^}]*padding-bottom:/);
   assert.doesNotMatch(phone, /\.composer-prompt-actions\s*\{[^}]*grid-template-columns:/);
-  assert.match(cssBlockIn(phone, ".prompt-expand-button"), /min-height:\s*32px;/);
+  assert.match(css, /\n\.prompt-expand-button\s*\{\s*position:\s*absolute;[\s\S]*?right:\s*12px;[\s\S]*?bottom:\s*10px;[\s\S]*?width:\s*30px;[\s\S]*?height:\s*30px;/);
+  const mobileSettings = mediaBlock("max-width: 720px");
+  assert.match(cssBlockIn(mobileSettings, ".session-prompt-split"), /display:\s*none;/);
+  assert.match(cssBlockIn(mobileSettings, ".composer-prompt-actions > .session-prompt-button"), /display:\s*grid;/);
   assert.match(appSource, /className="session-prompt-label-full">\{t\("composer\.sessionPrompt"\)\}/);
   assert.match(appSource, /className="session-prompt-label-short">\{t\("composer\.sessionPromptShort"\)\}/);
   assert.match(appSource, /className="session-prompt-summary-full">\{sessionPromptSummary \|\| t\("composer\.sessionPromptUnset"\)\}/);
@@ -952,11 +962,7 @@ test("narrow layout keeps sessions as a left drawer and pins composer to the bot
   assert.match(cssBlock(".session-prompt-label-short,\n.session-prompt-summary-short"), /display:\s*none;/);
   assert.match(cssBlockIn(phone, ".session-prompt-label-full,\n  .session-prompt-summary-full"), /display:\s*none;/);
   assert.match(cssBlockIn(phone, ".session-prompt-label-short,\n  .session-prompt-summary-short"), /display:\s*inline;/);
-  assert.match(appSource, /className="prompt-expand-label-full">\{t\("composer\.expandPromptShort"\)\}/);
-  assert.match(appSource, /className="prompt-expand-label-short">\{t\("composer\.expandPromptShort"\)\}/);
-  assert.match(cssBlock(".prompt-expand-label-short"), /display:\s*none;/);
-  assert.match(cssBlockIn(phone, ".prompt-expand-label-full"), /display:\s*none;/);
-  assert.match(cssBlockIn(phone, ".prompt-expand-label-short"), /display:\s*inline;/);
+  assert.doesNotMatch(appSource, /className="prompt-expand-label-(?:full|short)"/);
   assert.match(cssBlockIn(phone, ".composer-input"), /grid-template-columns:\s*minmax\(0, 1fr\) 52px;/);
   assert.match(cssBlockIn(phone, ".submit-button"), /grid-column:\s*2;[\s\S]*width:\s*52px;/);
 });

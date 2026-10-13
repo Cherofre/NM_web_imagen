@@ -2663,7 +2663,7 @@ button.primary-action:focus-visible,
   height: 100%;
   min-height: 78px;
   resize: none;
-  padding: 16px;
+  padding: 16px 54px 16px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   outline: none;
@@ -2675,10 +2675,17 @@ button.primary-action:focus-visible,
 
 .composer-prompt-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding-right: 62px;
+}
+
+.session-prompt-split {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .session-prompt-button,
@@ -2708,6 +2715,16 @@ button.primary-action:focus-visible,
   text-align: left;
 }
 
+.session-prompt-split .session-prompt-button {
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.composer-prompt-actions > .session-prompt-button {
+  display: none;
+}
+
 .session-prompt-button-title {
   display: inline-flex;
   align-items: center;
@@ -2727,16 +2744,23 @@ button.primary-action:focus-visible,
 }
 
 .prompt-expand-button {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 34px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
   background: transparent;
   border-color: transparent;
 }
 
-.prompt-expand-label-short {
-  display: none;
+@media (pointer: coarse) {
+  .composer-input textarea { padding-right: 64px; }
+  .prompt-expand-button { width: 44px; height: 44px; min-height: 44px; right: 8px; bottom: 8px; }
 }
 
 .session-prompt-label-short,
@@ -2841,6 +2865,8 @@ button.primary-action:focus-visible,
 }
 
 .reference-drag-handle {
+  grid-column: 1;
+  grid-row: 1;
   display: grid;
   place-items: center;
   width: 18px;
@@ -2856,6 +2882,8 @@ button.primary-action:focus-visible,
 }
 
 .reference-preview {
+  grid-column: 2;
+  grid-row: 1;
   width: 38px;
   height: 38px;
   overflow: hidden;
@@ -2880,6 +2908,9 @@ button.primary-action:focus-visible,
 }
 
 .reference-remove {
+  grid-column: 4;
+  grid-row: 1;
+  align-self: start;
   display: grid;
   place-items: center;
   width: 26px;
@@ -6012,6 +6043,8 @@ button.primary-action:focus-visible,
 }
 
 .reference-mask-meta {
+  grid-column: 3 / -1;
+  grid-row: 1;
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -6022,13 +6055,15 @@ button.primary-action:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-right: 34px;
+  line-height: 26px;
 }
 
 .reference-chip .reference-mask-badges {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: 3px;
+  flex-wrap: nowrap;
   max-width: 100%;
   overflow: visible;
   color: inherit;
@@ -6039,7 +6074,8 @@ button.primary-action:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px;
+  padding: 2px 4px;
+  flex: 0 0 auto;
   border-radius: var(--radius-sm);
   background: rgba(17, 17, 17, 0.08);
   color: var(--muted-strong);
@@ -6055,16 +6091,24 @@ button.primary-action:focus-visible,
 }
 
 .reference-mask-badge.is-applied {
-  order: 2;
+  flex: 0 1 auto;
+  min-width: 0;
   background: rgba(180, 83, 9, 0.12);
   color: #92400e;
+}
+
+.reference-chip .reference-mask-badge.is-applied span {
+  min-width: 0;
+  font-size: inherit;
+  color: inherit;
 }
 
 .reference-mask-action {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -6079,6 +6123,13 @@ button.primary-action:focus-visible,
 }
 
 @media (max-width: 720px) {
+  .session-prompt-split {
+    display: none;
+  }
+
+  .composer-prompt-actions > .session-prompt-button {
+    display: grid;
+  }
   .lightbox-card .preview-mask-action,
   .lightbox-card .preview-history-action {
     padding: 0;
@@ -6462,9 +6513,6 @@ button.primary-action:focus-visible,
     padding: 6px;
   }
 
-  .prompt-expand-button {
-    min-height: 32px;
-  }
 
   .session-prompt-label-full,
   .session-prompt-summary-full {
@@ -6473,14 +6521,6 @@ button.primary-action:focus-visible,
 
   .session-prompt-label-short,
   .session-prompt-summary-short {
-    display: inline;
-  }
-
-  .prompt-expand-label-full {
-    display: none;
-  }
-
-  .prompt-expand-label-short {
     display: inline;
   }
 

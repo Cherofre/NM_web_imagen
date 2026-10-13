@@ -2,7 +2,8 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-13
-- Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出。按用户最新截图反馈，附加提示词从参数栏移到正文正下方左侧，与展开共享框外底行；普通流Grid在窄屏压缩摘要而不覆盖正文。遮罩说明仍在框上方，拖动高度/弹窗/提交行为保留。最新63项相关Node检查和TypeScript/Vite构建通过；7861首页/新JS/CSS均200且与构建逐字一致。初稿全量282 Node及49资源检查已通过；本次视觉待用户刷新确认。0生图/未打包发布；docs/composer-external-guidance-2026-10-13.md。
+- Compact controls follow-up: 用户继续调整后，参考卡片恢复文件名/底图+遮罩+编辑两行；删除按钮在上行右侧，状态行借用其下方空间，状态摘要可缩短但不换第三行。宽屏下方固定/负面/画面文字三个等宽入口分别显示值并聚焦对应弹窗字段，<=720px保留单个附加提示词入口。“展开”按最新要求成为框内右下角纯图标，正文右侧54px/触摸64px留白避让。282 Node和TypeScript/Vite构建通过；7861首页及JS/CSS200且与新构建一致。视觉仍待刷新确认，0生图；同一试用分支，未合并/打包/发布。
+- Current branch trial: `codex/composer-external-guidance` 从 `codex/web-image-editing` / `c3d6d5a` 分出。前两稿曾将附加提示词放参数栏、再与展开共享底行；已按上方最新记录调整为宽屏三个设置入口、窄屏合并和框内展开图标。遮罩说明仍在框上方，拖动高度/弹窗/提交行为保留。初稿282 Node及49资源检查通过；最新证据见上。docs/composer-external-guidance-2026-10-13.md。
 - Superpowers Phase: not used; ledger-only layout trial.
 - Superpowers Spec: not used for this trial; existing specs are historical.
 - Superpowers Plan: not used for this trial; existing plans are historical.
