@@ -2,6 +2,7 @@
 
 ## Current Snapshot
 - Last Updated: 2026-10-14
+- Current task complete: 用户要求按G公司目录现状同步，固定桌面三包+说明、不创建便携展开目录/.sha256/manifest、不恢复已删旧包；新增scripts/sync_desktop_release_to_g.ps1与docs/g-share-layout.md。5项临时目录实际PS5.1测试通过，实跑G同步前后恰好四文件且内容hash完全不变；根目录Web历史包/说明/素材保留，未动另一处G分发。用户追问1.1.5自动检查：实际旧标签调度/检查处理器执行验证24h成功检查节流、启动7s与静默失败；1.1.6附件缺签名feed/包，fallback下载页。未读取旧实例实际检查记录，未更改产品更新策略或签名，详见docs/update-check-1.1.5-diagnosis.md。
 - 1.1.6 formally published: https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.6 ，正式/latest，12附件远端大小/SHA256逐个匹配本地；产品提交/标签77602f3，main已合并。补齐桌面四入口/草稿恢复/失败继续、退出前flush和原生标注PNG保存，以及参考卡片两行统一高度。Python323/Node311/Rust7、构建、四包hash/资源、Web实际离线启动、Portable实际冻结mock、两NSIS嵌入资源核验均通过；两处G盘Web与桌面包/新建干净展开目录全部文件核验通过，旧包保留。7861版本及当前资源逐字匹配1.1.6。0付费调用；原生GUI/保存对话框/真实覆盖安装未验，不绕过浏览器限制。报告docs/desktop-editor-v1.1.6-review.md。
 - Last Updated: 2026-10-13
 - 1.1.5 formally published: 2026-10-13 17:06（Asia/Shanghai），用户追加“那就做，做完正式发布”后完成。`main`已快进合并，产品提交及v1.1.5标签为60a2252；GitHub正式非预发布、latest：https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.5 。四类包共12附件，GitHub返回的uploaded状态/大小/SHA256逐个与本地一致。两处G盘Web干净目录、版本ZIP、桌面三包与新建干净便携展开目录均同步，目标预检通过；保留旧包、分享素材和用户数据。便携资源残留修复后Python323通过，Node299/Rust6和生产构建通过；Web离线启动、实际Portable冻结后端GPT/Banana/聊天/取消/局部/透明校验、两种NSIS实际内容/嵌入资源验证通过。真实GUI访问仍因管理员安全校验拒绝，未绕过；只验证临时1.1.3/1.1.4便携文件覆盖保留data，不宣称真实安装版升级或原生窗口通过。0付费调用，采用手动升级，无新签名feed。记录docs/release-readiness-audit-2026-10-13.md和docs/release-notes-v1.1.5.md。收尾发现旧7861不再监听，未归因；按项目启动器恢复为隐藏launcher29296/backend20224，1.1.5健康与HTML/JS/CSS/boot guard逐字核对通过，继续保留服务。
