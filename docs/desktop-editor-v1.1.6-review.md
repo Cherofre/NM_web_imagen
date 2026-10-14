@@ -23,4 +23,6 @@
 - Web ZIP完整解压后用随包离线Python准备依赖并实际启动，版本1.1.6通过。
 - 实际Portable ZIP解压后启动冻结exe：桌面鉴权/旧配置/当前资源、GPT多张补齐/部分完成/异常usage/Responses、standard和compat局部单调用、透明与不透明PNG判断、GPT和Banana聊天、Banana生图、任务取消不保存或补交均通过，0远端付费调用。
 - 两种NSIS实际解出后核对790个后端/资源文件与Portable一致（base_library.zip按成员字节忽略时间戳）；shell嵌入当前JS/CSS通过，普通/离线WebView2内容正确。
-- 两处G盘Web分发已同步，桌面包与新建干净展开目录正在同步；旧包和用户文件保留。正式发布及远端12附件核验结果随后补记。
+- 两处G盘Web和桌面分发已同步；逐个核对桌面包hash和新建干净展开目录全部793个文件与实际Portable ZIP一致，旧包和用户文件保留，目标Web预检通过。
+- [正式v1.1.6](https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.6)已发布，draft=false、prerelease=false、latest API确认；12附件远端uploaded状态、大小和SHA256全部匹配本地。v1.1.5未覆盖。
+- 7861 health版本1.1.6与HTML/当前JS/CSS/boot guard字节完全一致，未自动刷新用户页面或提交生图。
