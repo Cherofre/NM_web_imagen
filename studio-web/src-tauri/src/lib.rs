@@ -1024,6 +1024,51 @@ fn desktop_save_output_as(
     Ok(Some(target.to_string_lossy().into_owned()))
 }
 
+fn validate_editor_png(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err("导出图片超过 25 MB".to_string());
+    }
+    if bytes.len() < 33 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || &bytes[12..16] != b"IHDR" {
+        return Err("标注导出必须为 PNG 图片".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn desktop_save_image_as(suggested_name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
+    validate_editor_png(&bytes)?;
+    let name = suggested_name.rsplit(['/', '\\']).next().unwrap_or("").replace(['\r', '\n'], "");
+    let name = if name.trim().is_empty() { "marked.png" } else { name.trim() };
+    let Some(target) = choose_save_file_dialog("标注图片另存为", name)? else {
+        return Ok(None);
+    };
+    if target.is_dir() {
+        return Err("请选择文件名，而不是文件夹".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建目标目录: {error}"))?;
+    }
+    fs::write(&target, bytes).map_err(|error| format!("保存标注图片失败: {error}"))?;
+    Ok(Some(target.to_string_lossy().into_owned()))
+}
+
+#[cfg(test)]
+mod editor_export_tests {
+    use super::validate_editor_png;
+
+    #[test]
+    fn validates_editor_export_before_opening_the_dialog() {
+        let mut png = vec![0u8; 33];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        png[12..16].copy_from_slice(b"IHDR");
+        assert!(validate_editor_png(&png).is_ok());
+        assert!(validate_editor_png(b"not a png").is_err());
+        assert!(validate_editor_png(&png[..16]).is_err());
+        png.resize(25 * 1024 * 1024 + 1, 0);
+        assert!(validate_editor_png(&png).is_err());
+    }
+}
+
 #[tauri::command]
 fn desktop_save_text_as(
     suggested_name: String,
@@ -1289,6 +1334,7 @@ pub fn run() {
             desktop_download_output,
             desktop_save_output_as,
             desktop_save_text_as,
+            desktop_save_image_as,
             desktop_open_backend_console,
             desktop_exit,
             desktop_minimize_to_tray,

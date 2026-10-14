@@ -4,6 +4,7 @@ import { annotationTextLayout, buildImageEditPrompt, drawEditObjects, editPoint,
 import "./imageEditor.css";
 import { maskCanvasFitScale } from "./maskEditorModel";
 import { bindEditorWheelZoom } from "./editorViewport";
+import { isDesktopRuntime, saveDesktopImageAs } from "./desktopRuntime";
 
 export type ImageEditorSubmission = { action: ImageEditAction; prompt: string; references: File[]; maskFile?: File; maskEncoding?: "standard" | "compat"; previewFile?: File };
 type Props = {
@@ -217,8 +218,12 @@ export function ImageEditor({ returnToConversation = false, navigation, onBusyCh
     sending.current = true; setBusy(true); setError("");
     try {
       const output = await exportFile("marked");
-      const src = URL.createObjectURL(output), anchor = document.createElement("a");
-      anchor.href = src; anchor.download = output.name; anchor.click(); setTimeout(() => URL.revokeObjectURL(src), 30_000);
+      if (isDesktopRuntime()) {
+        await saveDesktopImageAs(output);
+      } else {
+        const src = URL.createObjectURL(output), anchor = document.createElement("a");
+        anchor.href = src; anchor.download = output.name; anchor.click(); setTimeout(() => URL.revokeObjectURL(src), 30_000);
+      }
     } catch (cause) { setError(String(cause instanceof Error ? cause.message : cause)); }
     finally { sending.current = false; setBusy(false); }
   }

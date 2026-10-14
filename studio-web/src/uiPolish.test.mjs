@@ -580,7 +580,7 @@ test("results actions expose clear labels and output dimensions", () => {
   assert.match(appSource, /function requestedSizeLabel\(entry: HistoryEntry\)/);
   assert.match(appSource, /function dimensionMismatchLabel\(entry: HistoryEntry, image\?: GeneratedImage \| null\)/);
   assert.match(appSource, /<span>\{t\(copyInputSource === src \? "image\.copyingToInput" : copiedReference\?\.source === src \? "image\.copiedToInput" : "image\.continueEdit"\)\}<\/span>/);
-  assert.match(appSource, /<span>\{t\(desktopMode \? "preview\.editMask" : "editor\.local"\)\}<\/span>/);
+  assert.match(appSource, /<span>\{t\("editor\.local"\)\}<\/span>/);
   assert.match(appSource, /className="image-download-action"[\s\S]*aria-label=\{t\("image\.download"\)\}/);
   assert.match(appSource, /<span>\{t\("image\.copyPrompt"\)\}<\/span>/);
   assert.match(appSource, /<span>\{t\("image\.applyPrompt"\)\}<\/span>/);

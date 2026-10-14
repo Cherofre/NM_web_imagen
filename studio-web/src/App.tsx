@@ -195,7 +195,7 @@ import { sanitizeForBrowserStorage, sanitizeStoredJson } from "./clientSafety";
 import { loadReferenceForCurrentMode, referenceUiState, referencesForSubmitMode } from "./chatCapabilities";
 import { appendJobId, cancelJobThenRemove, cancellationNotice, cancelJobUrl, removeCompletedQueueJobs, settleQueueCancellation, withJobId } from "./jobProtocol";
 import { ImageEditorWorkspace } from "./ImageEditorWorkspace";
-import { MaskEditor, type MaskEditorResult } from "./MaskEditor";
+import type { MaskEditorResult } from "./MaskEditor";
 import { type ImageEditorSubmission } from "./ImageEditor";
 import { imageEditActionFrom, recoverableImageEditAction, imageEditorDraftKey, type ImageEditAction } from "./imageEditorModel";
 import { editorDraftFile, editorDraftReturnTarget } from "./editorDraftStore";
@@ -471,7 +471,7 @@ const gptChatModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gp
 /** Same seeds as the select, without the trailing "custom" sentinel. */
 const gptChatModelPresets = gptChatModelOptions.filter((item) => item !== "custom");
 /** Fallback shown for the running version when the desktop shell cannot report one. */
-const APP_VERSION_FALLBACK = "1.1.5";
+const APP_VERSION_FALLBACK = "1.1.6";
 /** The Gemini model the app ships with; the relay's catalogue is the real source. */
 const bananaModelPresets = ["gemini-3-pro-image-preview"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -1547,7 +1547,7 @@ function App() {
     const file = editorDraftFile(record), imageSourceKey = record.imageSourceKey || record.sourceKey;
     if (imageSourceKey.startsWith("/outputs/")) referenceImageIdentity.current.setSource(file, imageSourceKey);
     setImageEditor((current) => current || { file, action: record.action, sourceKey: record.sourceKey, key: imageEditorDraftKey(record.sourceKey, record.action), returnTo: editorDraftReturnTarget(record) });
-  }, () => setNotice(language === "en" ? "Could not save editor drafts locally. Keep this page open to retain your edits." : "编辑草稿暂时无法在本地保存，请保持页面打开以保留编辑内容。"), !desktopMode);
+  }, () => setNotice(language === "en" ? "Could not save editor drafts locally. Keep this page open to retain your edits." : "编辑草稿暂时无法在本地保存，请保持页面打开以保留编辑内容。"), true);
   const [activeEngine, setActiveEngine] = useState<Engine>("gpt-image-2");
   const [drawerEngineState, setDrawerEngineState] = useState<Engine>("gpt-image-2");
   const [gptForm, setGptForm] = useState<GptForm>(() => normalizeGptForm(loadSanitizedBrowserForm(gptStorageKey, defaultGptForm)));
@@ -2139,7 +2139,7 @@ function App() {
         if (desktopCloseBehavior === "tray") {
           void minimizeDesktopToTray();
         } else if (desktopCloseBehavior === "exit") {
-          void exitDesktopApp();
+          void editorDrafts.flush().then(() => exitDesktopApp());
         } else if (!disposed) {
           setDesktopCloseRemember(false);
           setDesktopClosePromptOpen(true);
@@ -3849,7 +3849,7 @@ function App() {
       setNotice(t(maskCapability.reasonKey || "mask.addBaseFirst"));
       return;
     }
-    if (!desktopMode && references[0]) {
+    if (references[0]) {
       void openImageEditor({ src: "", name: references[0].name, sourceFile: references[0] }, "local");
       return;
     }
@@ -4334,31 +4334,7 @@ function App() {
   }
 
   async function editPreviewMask(preview: PreviewImage) {
-    if (!desktopMode) { await openImageEditor(preview, "local"); return; }
-    if (previewMaskLoading) return;
-    const requestId = previewMaskRequestRef.current + 1;
-    previewMaskRequestRef.current = requestId;
-    setPreviewMaskLoading(true);
-    try {
-      const file = preview.sourceFile || await outputReferenceFile(preview.src, preview.name);
-      if (previewMaskRequestRef.current !== requestId) return;
-      if (!file.type.startsWith("image/")) throw new Error(t("status.noImageFiles"));
-      const keepCurrentMask = references[0] === file && Boolean(activeMaskAttachment(maskAttachment, references));
-      setActiveEngine("gpt-image-2");
-      setSubmitMode("generate");
-      setReferences((current) => referencesWithMaskBase(current, file, 16));
-      if (!keepCurrentMask) setMaskAttachment(null);
-      // Hide the preview while editing, preserving its image URL and view for cancel.
-      setMaskEditorOpen(true);
-    } catch (error) {
-      if (previewMaskRequestRef.current === requestId) {
-        setNotice(error instanceof Error && error.message ? error.message : t("status.addReferenceFailed"));
-      }
-    } finally {
-      if (previewMaskRequestRef.current === requestId) {
-        setPreviewMaskLoading(false);
-      }
-    }
+    await openImageEditor(preview, "local");
   }
 
   async function openImageEditor(preview: PreviewImage, action: ImageEditAction) {
@@ -6501,7 +6477,7 @@ function App() {
                       </div>
                     )}
                     {turn.error && <div className="error-card">{formatStoredErrorMessage(t, turn.error)}</div>}
-                    {!desktopMode && turn.status === "error" && recoverableImageEditAction(turn.meta) && <button type="button" className="continue-image-edit" onClick={() => void continueImageEdit(turn)}><PencilLine size={15} />{language === "en" ? "Continue editing" : "继续编辑"}</button>}
+                    {turn.status === "error" && recoverableImageEditAction(turn.meta) && <button type="button" className="continue-image-edit" onClick={() => void continueImageEdit(turn)}><PencilLine size={15} />{language === "en" ? "Continue editing" : "继续编辑"}</button>}
                     {turn.mode === "chat" && turn.reply && (
                       <div className="chat-reply-card">
                         <p>{turn.reply}</p>
@@ -6535,13 +6511,13 @@ function App() {
                                     type="button"
                                     className="image-mask-action"
                                     onClick={() => void editPreviewMask({ src, name, dimensions: image.dimensions })}
-                                    title={isSameOriginOutput(src) ? t(desktopMode ? "preview.editMask" : "editor.local") : t("status.outputOnly")}
-                                    aria-label={t(desktopMode ? "preview.editMask" : "editor.local")}
+                                    title={isSameOriginOutput(src) ? t("editor.local") : t("status.outputOnly")}
+                                    aria-label={t("editor.local")}
                                     aria-busy={previewMaskLoading}
                                     disabled={previewMaskLoading || !isSameOriginOutput(src)}
                                   >
                                     {previewMaskLoading ? <Loader2 className="spin" size={14} /> : <PencilLine size={14} />}
-                                    <span>{t(desktopMode ? "preview.editMask" : "editor.local")}</span>
+                                    <span>{t("editor.local")}</span>
                                   </button>
                                   <button type="button" className="image-download-action" onClick={() => void downloadImage(src, name)} title={t("image.download")} aria-label={t("image.download")}>
                                     <Download size={15} />
@@ -6665,8 +6641,8 @@ function App() {
                               type="button"
                               className="reference-mask-action"
                               onClick={openMaskEditor}
-                              title={desktopMode ? (activeComposerMask ? t("mask.update") : t("mask.edit")) : t("editor.local")}
-                              aria-label={desktopMode ? (activeComposerMask ? t("mask.update") : t("mask.edit")) : t("editor.local")}
+                              title={t("editor.local")}
+                              aria-label={t("editor.local")}
                             >
                               <PencilLine size={13} />
                             </button>
@@ -7471,7 +7447,7 @@ function App() {
             </label>
             <div className="drawer-actions">
               <button type="button" onClick={() => { if (desktopCloseRemember) setDesktopCloseBehavior("tray"); setDesktopClosePromptOpen(false); void confirmDesktopClose("tray"); }}>{t("desktop.closeToTray")}</button>
-              <button type="button" className="primary-action" onClick={() => { if (desktopCloseRemember) setDesktopCloseBehavior("exit"); setDesktopClosePromptOpen(false); void confirmDesktopClose("exit"); }}>{t("desktop.closeNow")}</button>
+              <button type="button" className="primary-action" onClick={() => { if (desktopCloseRemember) setDesktopCloseBehavior("exit"); setDesktopClosePromptOpen(false); void editorDrafts.flush().then(() => confirmDesktopClose("exit")); }}>{t("desktop.closeNow")}</button>
               <button type="button" onClick={() => setDesktopClosePromptOpen(false)}>{t("desktop.closeCancel")}</button>
             </div>
           </section>
@@ -8241,21 +8217,11 @@ function App() {
         </div>
       )}
 
-      {maskEditorOpen && references[0] && (desktopMode ? (
-        <MaskEditor
-          file={references[0]}
-          initialMaskFile={activeComposerMask?.maskFile}
-          initialEncoding={activeComposerMask?.encoding}
-          t={t}
-          onCancel={() => { setMaskEditorOpen(false); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
-          onApply={applyMaskResult}
-          onRemove={activeComposerMask ? removeMask : undefined}
-        />
-      ) : <ImageEditorWorkspace file={references[0]} action="local" language={language} t={t}
+      {maskEditorOpen && references[0] && <ImageEditorWorkspace file={references[0]} action="local" language={language} t={t}
         initialMaskFile={activeComposerMask?.maskFile} initialEncoding={activeComposerMask?.encoding}
         onClose={() => { setMaskEditorOpen(false); window.requestAnimationFrame(() => previewDialogRef.current?.focus()); }}
         onApply={applyMaskResult} onRemove={activeComposerMask ? removeMask : undefined}
-        onSent={() => { setMaskEditorOpen(false); closePreviewImage(); }} onSend={sendImageEdit} />)}
+        onSent={() => { setMaskEditorOpen(false); closePreviewImage(); }} onSend={sendImageEdit} />}
 
       {imageEditor && <ImageEditorWorkspace
         key={imageEditor.key}
@@ -8300,20 +8266,6 @@ function App() {
                     <span>{t("preview.viewHistoryDetails")}</span>
                   </button>
                 )}
-                {desktopMode && !previewImage.isMaskSnapshot && (
-                  <button
-                    type="button"
-                    className="preview-mask-action"
-                    onClick={() => void editPreviewMask(previewImage)}
-                    title={previewImage.sourceFile || isSameOriginOutput(previewImage.src) ? t(desktopMode ? "preview.editMask" : "editor.local") : t("status.outputOnly")}
-                    aria-label={t(desktopMode ? "preview.editMask" : "editor.local")}
-                    aria-busy={previewMaskLoading}
-                    disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))}
-                  >
-                    {previewMaskLoading ? <Loader2 className="spin" size={16} /> : <PencilLine size={16} />}
-                    <span>{t(desktopMode ? "preview.editMask" : "editor.local")}</span>
-                  </button>
-                )}
                 {!previewImage.isMaskSnapshot && (
                   <button type="button" onClick={() => void addOutputAsReference(previewImage.src, previewImage.name)} title={t("preview.useReference")} disabled={referenceActionsDisabled}><ImagePlus size={18} /></button>
                 )}
@@ -8351,7 +8303,7 @@ function App() {
               />
             </div>
             <footer className="preview-footer">
-            {!desktopMode && !previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
+            {!previewImage.isMaskSnapshot && <div className="preview-image-edit-tools" aria-label={language === "en" ? "Image editing" : "图片编辑"}>
               {([["annotate", "标注", "Annotate", PencilLine], ["comment", "添加评论", "Add comments", MessageSquarePlus], ["background", "移除背景", "Remove background", ScanLine], ["local", "局部修改", "Local edit", Eraser]] as const).map(([action, zh, en, Icon]) =>
                 <button type="button" key={action} disabled={previewMaskLoading || (!previewImage.sourceFile && !isSameOriginOutput(previewImage.src))} onClick={() => void openImageEditor(previewImage, action)}><Icon size={16} strokeWidth={1.7} /><span>{language === "en" ? en : zh}</span></button>
               )}

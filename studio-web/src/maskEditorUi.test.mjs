@@ -8,11 +8,11 @@ const styleSource = fs.readFileSync(new URL("./styles.css", import.meta.url), "u
 const i18nSource = fs.readFileSync(new URL("./i18n.ts", import.meta.url), "utf8");
 
 test("Studio exposes a first-reference mask editor and snapshots the mask into queued jobs", () => {
-  assert.match(appSource, /import \{ MaskEditor, type MaskEditorResult \} from "\.\/MaskEditor"/);
+  assert.match(appSource, /import type \{ MaskEditorResult \} from "\.\/MaskEditor"/);
   assert.match(appSource, /maskAttachment/);
   assert.match(appSource, /activeMaskAttachment/);
   assert.match(appSource, /maskFile:\s*currentMask\?\.maskFile/);
-  assert.match(appSource, /<MaskEditor/);
+  assert.match(appSource, /<ImageEditorWorkspace/);
   assert.match(appSource, /mask\.baseBadge/);
   assert.match(appSource, /mask\.appliedBadge/);
   assert.match(appSource, /index === 0 && maskCapability\.available/);
@@ -82,8 +82,8 @@ test("result preview can become the first reference and open mask editing direct
   assert.match(appSource, /const keepCurrentMask = references\[0\] === file/);
   assert.match(appSource, /if \(!keepCurrentMask\) setMaskAttachment\(null\)/);
   assert.match(appSource, /setMaskEditorOpen\(true\)/);
-  assert.match(appSource, /className="preview-mask-action"/);
-  assert.match(appSource, /onClick=\{\(\) => void editPreviewMask\(previewImage\)\}/);
+  assert.match(appSource, /className="preview-image-edit-tools"/);
+  assert.match(appSource, /await openImageEditor\(preview, "local"\)/);
   assert.match(i18nSource, /"preview\.editMask"/);
 });
 

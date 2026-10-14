@@ -129,7 +129,8 @@ test("the config drawer carries its own engine tabs", () => {
   assert.match(appSource, /onClick=\{\(\) => addConfigProfile\(drawerEngine\)\}/);
   assert.match(appSource, /onClick=\{\(\) => void runDiagnostics\(drawerEngine\)\} disabled=\{diagnosticsRunning \|\| !drawerHasCompleteConfig\}/);
   assert.match(appSource, /if \(connectionOpen\) setDrawerEngineState\(activeEngine\);[\s\S]*?\}, \[connectionOpen\]\);/);
-  assert.doesNotMatch(appSource, /function selectEngineInDrawer\(engine: Engine\) \{[\s\S]{0,200}?setActiveEngine\(engine\);/);
+  const drawerHandler = appSource.slice(appSource.indexOf('function selectEngineInDrawer('), appSource.indexOf('function selectEngine(engine:'));
+  assert.doesNotMatch(drawerHandler, /setActiveEngine\(engine\);/);
   // The drawer tabs sit next to the title, and the old hint line is gone.
   assert.match(appSource, /<div className="drawer-head connection-drawer-head">\s*<h2>\{t\("config\.drawerTitle"\)\}<\/h2>\s*<div className="drawer-engine-tabs mode-tabs"/);
   assert.doesNotMatch(appSource, /t\("config\.drawerHint"\)/);

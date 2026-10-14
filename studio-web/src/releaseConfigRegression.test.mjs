@@ -194,12 +194,12 @@ test('real preview handlers restore comments after downloading the same result a
   assert.equal(getDraft('comment'), undefined);
 });
 
-function localEditorContext(references = [], activeComposerMask = null) {
+function localEditorContext(references = [], activeComposerMask = null, desktopMode = false) {
   const ctx = context();
   Object.assign(ctx, {
     imageEditorDraftKey, referenceFileFingerprint, referencesWithMaskBase, editorDraftFile,
     referenceImageIdentity: { current: new ReferenceImageIdentity() },
-    desktopMode: false, previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
+    desktopMode, previewMaskLoading: false, previewMaskRequestRef: { current: 0 },
     references, activeComposerMask, maskAttachment: activeComposerMask,
     editorDrafts: { records: { current: new Map() }, async load() {}, put(record) { this.records.current.set(record.sourceKey, record); } },
     setPreviewMaskLoading() {}, setImageEditor(value) { ctx.imageEditor = value; },
@@ -217,8 +217,9 @@ function localEditorContext(references = [], activeComposerMask = null) {
   return ctx;
 }
 
-test('actual web result local-edit entry adds the original as reference one before any selection is saved', async () => {
-  const ctx = localEditorContext();
+for (const desktopMode of [false, true]) {
+test(`actual ${desktopMode ? 'desktop' : 'web'} result local-edit entry adds the original as reference one before any selection is saved`, async () => {
+  const ctx = localEditorContext([], null, desktopMode);
   ctx.activeEngine = 'banana'; ctx.submitMode = 'chat';
   await ctx.editPreviewMask({ src: '/outputs/result.png', name: 'result.png' });
   assert.equal(ctx.references.length, 1);
@@ -236,7 +237,7 @@ test('actual local edit promotes the selected image, retains other references an
   const first = new File(['first'], 'first.png', { type: 'image/png' });
   const selected = new File(['selected'], 'selected.png', { type: 'image/png' });
   const other = new File(['other'], 'other.png', { type: 'image/png' });
-  const ctx = localEditorContext([first, selected, other], { baseFile: first, maskFile: new File(['mask'], 'mask.png') });
+  const ctx = localEditorContext([first, selected, other], { baseFile: first, maskFile: new File(['mask'], 'mask.png') }, desktopMode);
   await ctx.openImageEditor({ src: '', name: selected.name, sourceFile: selected }, 'local');
   assert.deepEqual(ctx.references, [selected, first, other]);
   assert.equal(ctx.maskAttachment, null);
@@ -245,7 +246,7 @@ test('actual local edit promotes the selected image, retains other references an
 test('actual local edit preserves the active selection when editing the same first reference', async () => {
   const file = new File(['selected'], 'selected.png', { type: 'image/png' });
   const mask = { baseFile: file, maskFile: new File(['mask'], 'mask.png'), encoding: 'compat' };
-  const ctx = localEditorContext([file], mask);
+  const ctx = localEditorContext([file], mask, desktopMode);
   await ctx.openImageEditor({ src: '', name: file.name, sourceFile: file }, 'local');
   assert.equal(ctx.maskAttachment, mask);
   assert.equal(ctx.references.length, 1);
@@ -256,3 +257,5 @@ test('actual local edit preserves the active selection when editing the same fir
   assert.equal(draft.initialMaskFile, mask.maskFile);
   assert.equal(draft.initialEncoding, 'compat');
 });
+
+}

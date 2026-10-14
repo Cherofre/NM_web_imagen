@@ -1,5 +1,18 @@
 # Next Actions
 
+## Now — 1.1.6桌面编辑修复发布
+- [x] 复现桌面入口条件、补统一编辑和原生标注下载；新增实际桌面JSX/点击与底图回归。
+- [ ] 统一1.1.6版本，完成全量测试/构建并合并main，重建四包。
+- [ ] 核验新包嵌入前端及冻结后端mock，更新两处G盘干净分发，保留已存在的data。
+- [ ] 发布正式v1.1.6，逐一核验附件；不覆盖已发布1.1.5。
+- [ ] 真实GUI受工具策略限制，不能以纯事件模拟或资源入包替代人工验收，明确剩余边界。
+
+## Handoff Notes
+- Start here: codex/desktop-image-editor；desktopImageEditor.test.mjs直接执行App实际条件及处理器，发布目标1.1.6。
+- Do not redo: 1.1.5历史包保留；用户未跟踪.impeccable/、PRODUCT.md、config.local.json.bak不要提交。
+- Verify next: 全量Node/Python、1.1.6构建及重新打包。先定最终分支再打包以免CRLF资源变化。
+- Do not claim: 原生GUI/保存对话框及真实旧安装覆盖升级尚未实测；不绕过管理员浏览器校验。
+
 ## Now — 1.1.5已正式发布
 - [x] 用户要求的本地合并：codex/web-image-editing快进到9e44695，保留未跟踪用户文件。
 - [x] 完成源码审查与具体问题修复，用户确认准备1.1.5；Python322/Node299/Rust6、构建、PS5.1/版本及隔离烟测通过，7861最新后端和资源生效。

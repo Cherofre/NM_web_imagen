@@ -6046,6 +6046,7 @@ button.primary-action:focus-visible,
   grid-column: 3 / -1;
   grid-row: 1;
   display: grid;
+  grid-template-rows: 26px 22px;
   gap: 3px;
   min-width: 0;
 }

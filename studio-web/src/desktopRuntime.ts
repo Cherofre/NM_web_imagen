@@ -90,6 +90,14 @@ export async function saveDesktopTextAs(name: string, contents: string) {
   return await invoke<string | null>("desktop_save_text_as", { suggestedName: name, contents });
 }
 
+/** Save an editor PNG through the same native save dialog as other desktop exports. */
+export async function saveDesktopImageAs(file: File) {
+  if (!isDesktopRuntime()) return null;
+  if (file.size > 25 * 1024 * 1024) throw new Error("导出图片超过 25 MB");
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  return await invoke<string | null>("desktop_save_image_as", { suggestedName: file.name, bytes });
+}
+
 export async function getDesktopDocumentsOutputsDirectory() {
   if (!isDesktopRuntime()) return "";
   return await invoke<string>("desktop_documents_outputs_directory");
