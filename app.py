@@ -1136,6 +1136,31 @@ def extract_upstream_control_message(response: requests.Response) -> str:
     return compact_text(response_text_utf8_first(response), 1000)
 
 
+def background_policy_rejection_type(response: requests.Response) -> str:
+    """Recognize explicit structured policy errors, never guess from HTTP 451 alone."""
+    try:
+        payload = response_json_utf8_first(response)
+    except Exception:
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return ""
+    for field in ("type", "code"):
+        value = error.get(field)
+        if isinstance(value, str) and value.lower() in {"content_policy_violation", "moderation_blocked"}:
+            return value.lower()
+    return ""
+
+
+def safe_upstream_request_id(response: requests.Response, api_key: str) -> str:
+    """Allow known provider ID shapes without echoing arbitrary header text."""
+    for header in ("X-Oneapi-Request-Id", "X-Request-Id", "Openai-Request-Id"):
+        value = response.headers.get(header, "")
+        if isinstance(value, str) and len(value) <= 128 and value != api_key.strip() and re.fullmatch(r"(?:\d{14}|req_)[A-Za-z0-9_-]+", value):
+            return value
+    return ""
+
+
 def background_rejection_detail(message: str, unknown_parameter: str = "") -> Optional[str]:
     """Classify explicit transparency rejections without exposing relay error text."""
     if unknown_parameter.lower() == "background":
@@ -5419,7 +5444,19 @@ def create_app() -> FastAPI:
                 background_diagnostics = None
                 if image_edit_action == "background" and response.status_code >= 400:
                     background_diagnostics = {"request_id": background_request_id, "category": "http_response", "upstream_status": response.status_code, "elapsed_seconds": round(time.time() - started_at, 2), "upstream_calls": 1}
+                    rejection_type = background_policy_rejection_type(response)
+                    if rejection_type:
+                        background_diagnostics["rejection_reason"] = rejection_type
+                    provider_request_id = safe_upstream_request_id(response, api_key)
+                    if provider_request_id:
+                        background_diagnostics["upstream_request_id"] = provider_request_id
                     LOGGER.warning("background_edit_response %s", json.dumps(background_diagnostics, ensure_ascii=True))
+                    if rejection_type:
+                        raise client_http_error(
+                            "E_UPSTREAM_REQUEST", status_code=400,
+                            detail="图片服务的安全审核拒绝了此请求，移除背景未完成。具体原因需由该图片服务核查。",
+                            diagnostics=background_diagnostics,
+                        )
                 if response.status_code == 400:
                     error_message = extract_upstream_control_message(response)
                     unknown_param = unknown_param_pattern.search(error_message)

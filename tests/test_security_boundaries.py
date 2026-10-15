@@ -483,6 +483,51 @@ class SecurityBoundaryApiTests(unittest.TestCase):
                 self.assertEqual(webapp.CLIENT_ERROR_DETAILS['E_UPSTREAM_REQUEST'], response.json()['detail'])
                 self.assertEqual(1, upstream.call_count)
 
+    def test_background_structured_safety_rejection_is_explicit_and_not_retried(self):
+        for status, fields, reason in [
+            (451, {"type": "content_policy_violation", "code": "ERR-D2C10AD220"}, "content_policy_violation"),
+            (403, {"type": "content_policy_violation"}, "content_policy_violation"),
+            (400, {"type": "image_generation_user_error", "code": "moderation_blocked"}, "moderation_blocked"),
+        ]:
+            reply = webapp.requests.Response()
+            reply.status_code = status
+            reply.headers["X-Oneapi-Request-Id"] = "202610150741342299466128268d9d6TEST"
+            reply._content = json.dumps({"error": {**fields, "message": "sk-private https://private.example/private prompt"}}).encode()
+            with self.subTest(status=status), patch.object(webapp.requests, "post", return_value=reply) as upstream, self.assertLogs("app", level="WARNING") as logs:
+                response = self.post_background()
+            result = response.json()
+            self.assertEqual(400, response.status_code)
+            self.assertIn("安全审核拒绝", result["detail"])
+            self.assertNotIn("检查模型与生成参数", result["detail"])
+            self.assertEqual(reason, result["diagnostics"]["rejection_reason"])
+            self.assertEqual(status, result["diagnostics"]["upstream_status"])
+            self.assertEqual(reply.headers["X-Oneapi-Request-Id"], result["diagnostics"]["upstream_request_id"])
+            self.assertEqual(1, upstream.call_count)
+            self.assertEqual("transparent", upstream.call_args.kwargs["data"]["background"])
+            for text in (response.text, " ".join(logs.output)):
+                self.assertNotIn("private", text)
+                self.assertNotIn("sk-", text)
+
+    def test_background_unknown_451_is_not_assumed_to_be_a_policy_rejection(self):
+        reply = webapp.requests.Response()
+        reply.status_code = 451
+        reply._content = b'{"error":{"message":"content_policy_violation in quoted text", "type":"other_error"}}'
+        with patch.object(webapp.requests, "post", return_value=reply) as upstream:
+            response = self.post_background()
+        self.assertEqual(webapp.CLIENT_ERROR_DETAILS["E_UPSTREAM_REQUEST"], response.json()["detail"])
+        self.assertNotIn("rejection_reason", response.json()["diagnostics"])
+        self.assertEqual(1, upstream.call_count)
+
+    def test_background_request_id_is_allowlisted_and_cannot_echo_key_or_url(self):
+        for identifier in ["sk-test", "https://private.example/path", "private\nheader", "2026" * 40]:
+            reply = webapp.requests.Response()
+            reply.status_code = 451
+            reply.headers["X-Oneapi-Request-Id"] = identifier
+            reply._content = b'{"error":{"type":"content_policy_violation"}}'
+            with self.subTest(identifier=identifier), patch.object(webapp.requests, "post", return_value=reply):
+                response = self.post_background()
+            self.assertNotIn("upstream_request_id", response.json()["diagnostics"])
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)

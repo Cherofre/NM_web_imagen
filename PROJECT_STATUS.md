@@ -1,6 +1,9 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-10-15
+- Confirmed KB rejection: 用户追加授权1次后，以原始参考图和官方最小透明参数直接POST KB gpt-image-2，30.44秒返回451，type=content_policy_violation、code=ERR-D2C10AD220，0图/0重试；该新增额度已用尽。不能判断具体触发规则或KB自身/更上游审核层。此前四次背景失败分别YS403、CS403、XJ300秒超时、KB451，不应合并为同一权限错误；令牌只读31条全成功，YS当前不在模型目录。分支codex/background-policy-diagnostics已修源码明确安全拒绝提示与安全请求编号日志，83定向/331全量后端/编译/diff检查通过，工作保留在本地分支。尚未重新打包、推送发布或替换安装的1.1.6。报告docs/background-policy-rejection-2026-10-15.md，实际结果和预算.runtime/background-live-{result,budget}-20261015.json。
+- Transparent output investigation: 官方当前image-prompting/API edit文档确认gpt-image-2透明输出为preview，需background=transparent与PNG/WebP；官方明确禁止画棋盘格代替Alpha。核对桌面实际1.1.6及用户D:/Documents/NM Image Studio两张10/15结果：RGB PNG，1048576像素全部Alpha255；历史image_edit_action为空且没有background_validation。用户确认直接移除背景遇拒绝/超时后改在主输入框生成，因此普通请求缺透明参数；不能据此断言直接入口丢动作或官方模型不支持。桌面日志存在403、451和300.18s ReadTimeout，具体渠道拒绝原因尚未证实。已对照本项目内置prompt和后台透明参数条件；0新生图/0付费，本轮未修改产品代码或用户配置。
 - Last Updated: 2026-10-14
 - Current task complete: 用户要求按G公司目录现状同步，固定桌面三包+说明、不创建便携展开目录/.sha256/manifest、不恢复已删旧包；新增scripts/sync_desktop_release_to_g.ps1与docs/g-share-layout.md。5项临时目录实际PS5.1测试通过，实跑G同步前后恰好四文件且内容hash完全不变；根目录Web历史包/说明/素材保留，未动另一处G分发。用户追问1.1.5自动检查：实际旧标签调度/检查处理器执行验证24h成功检查节流、启动7s与静默失败；1.1.6附件缺签名feed/包，fallback下载页。未读取旧实例实际检查记录，未更改产品更新策略或签名，详见docs/update-check-1.1.5-diagnosis.md。
 - 1.1.6 formally published: https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.6 ，正式/latest，12附件远端大小/SHA256逐个匹配本地；产品提交/标签77602f3，main已合并。补齐桌面四入口/草稿恢复/失败继续、退出前flush和原生标注PNG保存，以及参考卡片两行统一高度。Python323/Node311/Rust7、构建、四包hash/资源、Web实际离线启动、Portable实际冻结mock、两NSIS嵌入资源核验均通过；两处G盘Web与桌面包/新建干净展开目录全部文件核验通过，旧包保留。7861版本及当前资源逐字匹配1.1.6。0付费调用；原生GUI/保存对话框/真实覆盖安装未验，不绕过浏览器限制。报告docs/desktop-editor-v1.1.6-review.md。

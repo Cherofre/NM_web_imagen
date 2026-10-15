@@ -1,5 +1,29 @@
 # Next Actions
 
+## Now — KB透明请求已确认安全拦截
+- [x] 对应四模型失败会话与本地日志，读取令牌自己的31条成功日志及当前目录；0新增生图的只读排查完成。
+- [x] 用户授权新增1次KB透明请求；原图/最小参数复现451 content_policy_violation，30.44秒、0图、无重试，额度用尽。
+- [x] 复现并修源码误导提示：只按结构化安全错误分类，保留安全格式渠道请求编号；83定向安全测试/编译通过。
+- [x] 全量后端331项通过并保存本地分支；若用户后续要求交付，重新构建新桌面包，不能声称安装的1.1.6已修正。
+- [ ] 具体安全规则需要渠道根据请求编号核查；未经新额度授权，不自动再试模型/提示词组合，不代发外部消息。
+
+## Handoff Notes — KB拒绝
+- Start here: codex/background-policy-diagnostics，docs/background-policy-rejection-2026-10-15.md；.runtime/background-live-result-20261015.json含实际脱敏响应。
+- Do not redo: .runtime/background-live-budget-20261015.json已锁定此次单请求预算；不能重跑或删除预算后再测。
+- Verify next: 全量回归已完成，后续如用户要交付则按版本/桌面包流程重建核验；具体渠道审核条款须对方依请求ID核查。
+- Do not claim: 返回安全拒绝没有细分原图/文本/渠道或官方审核；源码改动未打进1.1.6，未构建、发布或同步G。
+
+## Now — 透明输出官方文档与实际文件核查
+- [x] 查阅最新官方image-prompting与Images edit文档：gpt-image-2 preview透明、显式background及PNG/WebP、保存原始Alpha。
+- [x] 核对10/15两张RGB不透明原文件、实际桌面1.1.6和历史动作标记为空；用户确认主框重发，区别于直接移除背景的拒绝/超时。
+- [x] 检查内置prompt已禁止棋盘格；直接入口才固定transparent/png、单调用和Alpha校验，普通生成不根据文字推断动作。
+- [ ] 如继续修复，优先核查直接入口上游拒绝的脱敏原因，或设计显式透明生成选项；不自动付费、删透明参数、改模型或猜测关键词劫持普通生成。
+
+## Handoff Notes — 透明核查
+- Start here: app.py:validate_background_images、background请求参数分支；studio-web/src/imageEditorModel.ts:REMOVE_BACKGROUND_PROMPT；实际原文件D:/Documents/NM Image Studio/20261015-151136-969446-gpt-image-2-01.png。
+- Do not redo: 旧预算已耗完，当前任务0新图片请求；只读核查已确认RGB与普通提交。
+- Do not claim: 主输入框重发不能证明移除背景入口丢动作；403/451/超时不能直接认定该渠道不支持透明或原图违规；Codex工具与KB代理链路不等同。
+
 ## Now — 用户自定义G分发形态与更新检查核查
 - [x] 读取公司G目录现状，桌面仅三包+说明，写入docs/g-share-layout.md与同步脚本。
 - [x] PS5.1五项隔离测试及实际G同步幂等核验；不再展开便携包或补校验文件，旧桌面包轮换到本地备份。
