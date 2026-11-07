@@ -1,5 +1,17 @@
 # Next Actions
 
+## Now — 1.1.7正式发布
+- [x] 用户明确授权；复核四包和当前源码，main快进/推送及v1.1.7标签完成。
+- [x] 两处G同步/预检通过；公司桌面仅三包+说明，其他目录沿用既有形态，94旧材料hash保留。
+- [x] GitHub草稿上传12附件后逐一核对size/SHA256，转正式非预发布latest并复查。
+- [x] 记录正式发布地址/时间/验证，提交并推送交接；不改变已验收产品标签。
+
+## Handoff Notes — 1.1.7已正式发布
+- Start here: `docs/release-v1.1.7.md`，https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.7 ，release id437420496，正式latest，12附件完整校验通过。
+- Do not redo: 不重建、覆盖既有发行包或挪动标签；G两处已同步/预检，用户本机已安装1.1.7并确认正常；所有备份保留。
+- Verify next: 本轮发布无待办；后续新需求另开版本。若需要复核，只读现有metadata/本地manifest及G布局。
+- Do not claim: 原生自动化控制器/保存对话框已通过，或两张9/10源图已找到；这些边界未改变。产品标签698dfca，交接文档可继续追加main，不改产品包。
+
 ## Now — 1.1.7候选准备
 - [x] 修复audit构建依赖并统一1.1.7版本；audit0、Python串行345/Node316/Rust10通过。
 - [x] 重建Web、Portable、普通/离线NSIS，逐包核对版本、资源、数据排除和mock运行；Web随包离线启动通过。

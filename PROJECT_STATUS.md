@@ -1,6 +1,10 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（1.1.7正式发布与G同步完成）
+- Release complete: 用户明确要求「那就发布吧」后，2026-11-07 15:46:24（Asia/Shanghai）正式发布 https://github.com/Cherofre/NM_web_imagen/releases/tag/v1.1.7 ，非草稿/非预发布/latest。main已快进推送，产品提交/标签目标698dfca；12附件远端状态/大小/SHA256全部匹配本地，中文正文一致。报告 `docs/release-v1.1.7.md`。
+- Distribution complete: 两处G Web各54文件及版本ZIP/说明、桌面三包全部核验通过，94既有根目录材料hash不变。公司Desktop恰好三包+说明，旧桌面包本地归档，无新增展开目录/校验文件；另一处保留旧布局并更新现有793文件展开目录，原目录已备份。两处G预检通过。
+- Scope complete: audit0、Python345/Node316/Rust10、冻结mock和真实安装/用户显示确认沿用已验收候选；本轮0付费，不重复安装或重启用户程序。无剩余发布/G待办；三个既有未跟踪用户文件及图库/安装备份保持不动。
 - Last Updated: 2026-11-07（1.1.7候选准备和实际升级验收完成）
 - Current task complete: 依赖按兼容范围修复（29包），npm audit0；1.1.7统一，正式四包已重建，manifest/hash/当前资源、本地Web预检与离线启动通过。Python最终串行345/Node316/Rust10，实际Portable广泛mock回归及Portable/两种NSIS各14项GIF/Alpha/保存/鉴权/热切换检查通过，0付费。报告 `docs/release-candidate-v1.1.7.md`，用户版说明 `docs/release-notes-v1.1.7.md`。
 - Actual install: 用户明确授权本机备份后覆盖、确认正常退出；完整备份6697文件/1,746,652,740字节保留于 `.runtime/release117-native-backup`。普通1.1.7实际覆盖退出0，791程序文件匹配、5840保留文件原样；已重开运行，配置字节/存图根及19会话127轮保持，162图片URL中160有效，其余既有9/10两张仍缺失。用户明确确认图片和生成设置均正常。原生控制器因app-server路径错误不可用，显示由用户人工验收；不冒充自动化/保存对话框通过。
