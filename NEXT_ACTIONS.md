@@ -1,5 +1,17 @@
 # Next Actions
 
+## Now — 历史图片404与存图目录保护
+- [x] 补回167缺失文件；原备份保留，API按revision补回17会话并保留已有会话；实际截图原图GET200。
+- [x] 切换到非空目录明确拒绝，复制独占新建、来源保留；路径别名及嵌套保护，Rust10/Node桌面21通过。
+- [x] 修正版Setup已生成并解包核验790后端/实际保护代码/最新UI，报告 `docs/gallery-recovery-2026-11-07.md`。
+- [ ] 两张9/10旧图在备份及已查候选中缺失，仍待原文件来源；不可宣称所有161链接已恢复。
+
+## Handoff Notes — 图库恢复
+- Start here: `docs/gallery-recovery-2026-11-07.md`；当前用户目录已恢复，别重复覆盖会话或搬目录。
+- Do not redo: 原D盘 `.backup-1794023789`完整保留；补文件用xb跳过已有，随后仅按后端revision合并缺失会话。不得把整份备份JSON覆盖当前状态。
+- Verify next: 用户刷新窗口并安装storage-fix试用EXE以防再次选目录；缺失两张旧图需原始来源才能继续，不无界扫磁盘。
+- Do not claim: 已替用户安装修正版、原生GUI已刷新、两张旧图已找到或安装器直接删除了图片；目录被备份的时间早于本次EXE安装。
+
 ## Now — EXE 安装包测试交付
 - [x] 普通NSIS安装版已生成：`_release/alpha-preview/NM-Image-Studio-Alpha-preview-Setup-x64.exe`。
 - [x] 实际提取核对790后端文件与最新内嵌界面，无便携标记或用户数据；提取后端六项透明/GIF实际mock通过。

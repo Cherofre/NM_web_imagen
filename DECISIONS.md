@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-11-07 — 图库恢复与非破坏性目录切换
+- Status: active
+- Decision: 普通更换存图目录只接受空目标；不再将用户已有图库改名并用当前空状态替换。复制原文件保留来源，目标create_new拒绝覆盖。同一目录/嵌套判断统一Windows扩展路径与真实父目录别名。
+- Recovery: 文件只补缺失，当前会话另存后经实际后端expected_revision接口只添加缺失会话；完整备份不动。159/161图片URL已可用，两个旧源文件缺失另记，不伪造或删记录。
+- Delivery: 新本地storage-fix测试安装包，不自动安装、正式发布或G同步。此前只验证新空数据目录和包内容的矩阵漏掉了已有图库切换，后续发布必须覆盖该场景。
+
 ## 2026-11-07 — 透明生成与紧凑设置面板
 - Status: active
 - Decision: 普通生成增加background（auto/opaque/transparent），透明使用PNG/WebP并检查真实Alpha；不根据提示词猜透明意图，不额外请求。界面选择透明时切PNG（若已经WebP则保留）；切到JPEG/GIF时清除透明选择，防止不兼容组合。背景参数显式发送后不可被渠道兼容降级删除。

@@ -1,6 +1,9 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（图库恢复与目录保护完成）
+- Current task complete: 已从D盘同级11:56备份仅补回缺失167文件/465,972,817字节；通过实际后端revision接口补回17旧会话，保留当前1会话，合计18会话121轮。截图原图与小狗图实际GET200且字节匹配。161图片链接中159有效，另两张9/10旧图备份及有界查找均缺失，仍未找回，详见 `docs/gallery-recovery-2026-11-07.md`。
+- Fix/artifact: 切换存图目录改为只复制到空目录、独占新建不覆盖，Windows别名/父目录/嵌套判断修正；Rust10/Node桌面21与生产/NSIS构建通过。`_release/storage-fix-preview/NM-Image-Studio-Storage-fix-preview-Setup-x64.exe`（34,157,786字节）实际解包核对790后端及最新内嵌UI/保护逻辑。未代安装、关闭用户程序或发布/G同步，0付费；当前恢复已生效，需刷新窗口，修正版防复发。
 - Last Updated: 2026-11-07（EXE安装包测试交付完成）
 - Current request complete: `_release/alpha-preview/NM-Image-Studio-Alpha-preview-Setup-x64.exe` 已构建（34,153,603字节，内部1.1.6本地试用）；普通NSIS当前用户安装，沿用既有覆盖安装模板。实际7-Zip提取核对790后端文件、主程序与当前构建相同，主程序内嵌最新JS/CSS，无portable.mode/用户数据；提取后端实际mock六项PNG/WebP Alpha及GIF回归通过。0付费；未代用户安装/发布/G同步。
 - Last Updated: 2026-11-07（透明通道与生成设置优化完成）

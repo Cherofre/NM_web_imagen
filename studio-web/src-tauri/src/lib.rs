@@ -141,25 +141,54 @@ fn normalized_absolute_path(path: &Path) -> Result<PathBuf, String> {
             .map_err(|error| format!("failed to resolve current directory: {error}"))?
             .join(path)
     };
-    Ok(absolute)
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        if component == std::path::Component::ParentDir {
+            normalized.pop();
+        } else if component != std::path::Component::CurDir {
+            normalized.push(component.as_os_str());
+        }
+    }
+    Ok(normalized)
+}
+
+fn comparison_path(path: &Path) -> String {
+    // A not-yet-created destination can still sit below a junction or short-path alias.
+    let mut ancestor = path;
+    let mut tail = Vec::new();
+    let mut resolved = loop {
+        if let Ok(canonical) = fs::canonicalize(ancestor) {
+            break canonical;
+        }
+        let (Some(name), Some(parent)) = (ancestor.file_name(), ancestor.parent()) else {
+            break ancestor.to_path_buf();
+        };
+        tail.push(name.to_os_string());
+        ancestor = parent;
+    };
+    for name in tail.iter().rev() {
+        resolved.push(name);
+    }
+    let text = resolved
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    let text = if let Some(unc) = text.strip_prefix("\\\\?\\unc\\") {
+        format!("\\\\{unc}")
+    } else {
+        text.strip_prefix("\\\\?\\").unwrap_or(&text).to_string()
+    };
+    text.trim_end_matches('\\').to_string()
 }
 
 fn is_same_or_nested(path: &Path, root: &Path) -> bool {
-    let path = path
-        .to_string_lossy()
-        .replace('/', "\\")
-        .to_ascii_lowercase();
-    let root = root
-        .to_string_lossy()
-        .replace('/', "\\")
-        .to_ascii_lowercase();
+    let path = comparison_path(path);
+    let root = comparison_path(root);
     path == root || path.starts_with(&(root + "\\"))
 }
 
 fn paths_equal_case_insensitive(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .replace('/', "\\")
-        .eq_ignore_ascii_case(&right.to_string_lossy().replace('/', "\\"))
+    comparison_path(left) == comparison_path(right)
 }
 
 fn configured_outputs_root(data_root: &Path) -> PathBuf {
@@ -427,6 +456,35 @@ fn backup_directory(path: &Path) -> Result<Option<PathBuf>, String> {
     fs::rename(path, &backup)
         .map_err(|error| format!("无法备份现有目录 {}: {error}", path.display()))?;
     Ok(Some(backup))
+}
+
+fn copy_outputs_to_empty_directory(source: &Path, target: &Path) -> Result<(), String> {
+    if is_same_or_nested(source, target) || is_same_or_nested(target, source) {
+        return Err("新的存图目录不能与当前目录相同或互相嵌套。".to_string());
+    }
+    if target.exists() {
+        let mut entries = fs::read_dir(target)
+            .map_err(|error| format!("无法读取目标目录: {error}"))?;
+        if entries.next().is_some() {
+            return Err("所选目录已有文件，未替换或移动其中的数据。请选择空文件夹用于迁移。".to_string());
+        }
+    }
+    let mut files = Vec::new();
+    collect_files(source, &mut files)?;
+    fs::create_dir_all(target).map_err(|error| format!("无法创建目标目录: {error}"))?;
+    for source_file in files {
+        let relative = source_file.strip_prefix(source).map_err(|error| error.to_string())?;
+        let destination = target.join(relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut input = fs::File::open(&source_file).map_err(|error| error.to_string())?;
+        // A late-created file must also be protected, even after the empty-folder check.
+        let mut output = OpenOptions::new().write(true).create_new(true).open(&destination)
+            .map_err(|error| format!("未覆盖目标文件 {}: {error}", destination.display()))?;
+        std::io::copy(&mut input, &mut output).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn replace_directory_contents(source: &Path, target: &Path) -> Result<Option<PathBuf>, String> {
@@ -785,9 +843,7 @@ fn desktop_set_outputs_directory(
         }
         return Err("新的存图目录不能与当前目录相同或互相嵌套。".to_string());
     }
-    fs::create_dir_all(&target_root)
-        .map_err(|error| format!("无法创建新的存图目录 {}: {error}", target_root.display()))?;
-    replace_directory_contents(&current_root, &target_root)?;
+    copy_outputs_to_empty_directory(&current_root, &target_root)?;
     write_storage_settings(Path::new(&state.info.data_root), &target_root)?;
     state
         .outputs_root
@@ -1661,5 +1717,55 @@ mod tests {
         let sanitized = sanitize_folder_dialog_output(&polluted).unwrap();
         assert_eq!(sanitized, root);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn changing_outputs_never_replaces_an_existing_gallery_with_a_blank_session() {
+        let root = test_root("protect-existing-gallery");
+        let source = root.join("new-install");
+        let target = root.join("existing-gallery");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(source.join("studio_sessions.json"), br#"{"sessions":[{"turns":[]}]}"#).unwrap();
+        fs::write(target.join("image.png"), b"original image").unwrap();
+        fs::write(target.join("history.json"), br#"{"entries":[{"id":"original"}]}"#).unwrap();
+        assert!(copy_outputs_to_empty_directory(&source, &target).is_err());
+        assert_eq!(fs::read(target.join("image.png")).unwrap(), b"original image");
+        assert_eq!(fs::read(target.join("history.json")).unwrap(), br#"{"entries":[{"id":"original"}]}"#);
+        assert!(!target.join("studio_sessions.json").exists());
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn changing_outputs_copies_to_empty_target_and_keeps_source() {
+        let root = test_root("safe-output-copy");
+        let source = root.join("source");
+        let target = root.join("empty");
+        fs::create_dir_all(source.join("session_refs")).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(source.join("image.gif"), b"gif animation").unwrap();
+        fs::write(source.join("session_refs/reference.png"), b"reference").unwrap();
+        fs::write(source.join("studio_sessions.json"), br#"{"sessions":[{"id":"existing"}]}"#).unwrap();
+        copy_outputs_to_empty_directory(&source, &target).unwrap();
+        for name in ["image.gif", "session_refs/reference.png", "studio_sessions.json"] {
+            assert_eq!(fs::read(source.join(name)).unwrap(), fs::read(target.join(name)).unwrap());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn output_path_checks_resolve_parent_components_and_windows_extended_aliases() {
+        let root = test_root("output-aliases");
+        let source = root.join("gallery");
+        fs::create_dir_all(&source).unwrap();
+        let nested = normalized_absolute_path(&root.join("unused/../gallery/new")).unwrap();
+        assert!(is_same_or_nested(&nested, &source));
+        assert!(copy_outputs_to_empty_directory(&source, &nested).is_err());
+        let canonical = fs::canonicalize(&source).unwrap();
+        assert!(paths_equal_case_insensitive(&canonical, &source));
+        assert!(copy_outputs_to_empty_directory(&source, &canonical).is_err());
+        assert!(source.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }
