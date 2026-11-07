@@ -31,6 +31,15 @@ def response(payload, status=200):
     return result
 
 
+def alpha_bytes(format="PNG", empty=False):
+    image = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    if not empty:
+        image.paste((255, 80, 20, 255), (8, 8, 24, 24))
+    buffer = io.BytesIO()
+    image.save(buffer, format=format, lossless=True)
+    return buffer.getvalue()
+
+
 class ImageOutputTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -89,6 +98,60 @@ class ImageOutputTests(unittest.TestCase):
         sent = upstream.call_args.kwargs["json"]
         self.assertNotIn("output_format", sent)
         self.assertNotIn("frame_count", sent)
+        self.assertNotIn("background", sent)
+
+    def test_transparent_generation_sends_parameters_and_validates_png_or_webp_alpha(self):
+        for file_format in ("PNG", "WEBP"):
+            raw = alpha_bytes(file_format)
+            reply = response({"data": [{"b64_json": base64.b64encode(raw).decode()}]})
+            for endpoint in ("/v1/images/generations", "/v1/responses"):
+                with self.subTest(format=file_format, endpoint=endpoint), patch.object(webapp.requests, "post", return_value=reply) as upstream:
+                    result = self.generate(background="transparent", output_format="auto" if file_format == "PNG" else "webp", api_endpoint=endpoint).json()
+                self.assertTrue(result["ok"], result)
+                sent = upstream.call_args.kwargs["json"]
+                params = sent["tools"][0] if endpoint.endswith("responses") else sent
+                self.assertEqual("transparent", params["background"])
+                self.assertEqual(file_format.lower(), params["output_format"])
+                self.assertTrue(result["meta"]["background_validation"]["valid"])
+                self.assertEqual("transparent", result["history_entry"]["form_state"]["background"])
+                self.assertEqual(raw, (self.outputs / result["images"][0]["saved_name"]).read_bytes())
+
+    def test_transparent_reference_edit_is_still_one_image_request(self):
+        reply = response({"data": [{"b64_json": base64.b64encode(alpha_bytes()).decode()}]})
+        with patch.object(webapp.requests, "post", return_value=reply) as upstream:
+            result = self.generate(background="transparent", files={"reference_files": ("base.png", image_bytes(False), "image/png")}).json()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual("transparent", upstream.call_args.kwargs["data"]["background"])
+        self.assertEqual(1, upstream.call_count)
+
+    def test_transparent_request_retains_opaque_or_empty_result_but_reports_failure(self):
+        for raw in (image_bytes(False), alpha_bytes(empty=True)):
+            reply = response({"data": [{"b64_json": base64.b64encode(raw).decode()}]})
+            with patch.object(webapp.requests, "post", return_value=reply) as upstream:
+                result = self.generate(background="transparent").json()
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["meta"]["background_validation"]["valid"])
+            self.assertIn("已请求透明通道", result["meta"]["empty_result_reason"])
+            self.assertEqual(1, upstream.call_count)
+            self.assertTrue((self.outputs / result["images"][0]["saved_name"]).exists())
+
+    def test_transparent_rejects_incompatible_formats_before_request(self):
+        for fields in ({"background": "invalid"}, {"background": "transparent", "output_format": "gif"}, {"background": "transparent", "output_format": "jpeg"}):
+            with patch.object(webapp.requests, "post") as upstream:
+                self.assertEqual(400, self.generate(**fields).status_code)
+                upstream.assert_not_called()
+
+    def test_explicit_background_is_not_removed_when_channel_rejects_it(self):
+        with patch.object(webapp.requests, "post", return_value=response({"error": {"message": "Unknown parameter: 'background'"}}, 400)) as upstream:
+            result = self.generate(background="transparent")
+        self.assertEqual(400, result.status_code)
+        self.assertEqual(1, upstream.call_count)
+
+    def test_opaque_background_remains_independent_of_output_format(self):
+        with patch.object(webapp.requests, "post", return_value=self.gif_response()) as upstream:
+            result = self.generate(background="opaque").json()
+        self.assertTrue(result["ok"])
+        self.assertEqual("opaque", upstream.call_args.kwargs["json"]["background"])
 
     def test_responses_places_extensions_and_format_inside_image_tool(self):
         with patch.object(webapp.requests, "post", return_value=self.gif_response()) as upstream:

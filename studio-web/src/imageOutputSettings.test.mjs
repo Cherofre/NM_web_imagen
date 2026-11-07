@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
-import { imageExtraBodyError, IMAGE_OUTPUT_FORMATS } from "./imageOutputSettings.ts";
+import { imageExtraBodyError, IMAGE_OUTPUT_FORMATS, IMAGE_BACKGROUNDS, selectOutputFormat, selectBackground } from "./imageOutputSettings.ts";
 import { buildSubmissionFields } from "./submissionPayload.ts";
 import { profileFormSnapshot } from "./configProfiles.ts";
 import { CONFIG_TRANSFER_FORM_KEYS } from "./configTransfer.ts";
@@ -44,8 +44,8 @@ test("actual composer exposes GIF format and frame controls on both desktop and 
   const js = ts.transpileModule(`(${node.expression.getText(source)})`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
   const React = { Fragment: "fragment", createElement(type, props, ...children) { return { type, props, children: children.flat(Infinity).filter(Boolean) }; } };
   for (const desktopMode of [true, false]) {
-    const ctx = { desktopMode, activeEngine: "gpt-image-2", React, Field: "Field", IMAGE_OUTPUT_FORMATS, imageOutputLabel: (v) => v, t: key => key,
-      gptForm: { output_format: "auto", frame_count: 9, frame_duration_ms: 200 }, setGptForm(value) { ctx.gptForm = value; } };
+    const ctx = { desktopMode, activeEngine: "gpt-image-2", React, Field: "Field", IMAGE_OUTPUT_FORMATS, IMAGE_BACKGROUNDS, selectOutputFormat, selectBackground, imageOutputLabel: (v) => v, t: key => key,
+      gptForm: { output_format: "auto", background: "auto", frame_count: 9, frame_duration_ms: 200 }, setGptForm(value) { ctx.gptForm = value; } };
     let tree = vm.runInNewContext(js, ctx);
     const walk = (element) => element && typeof element === "object" ? [element, ...(element.children || []).flatMap(walk)] : [];
     let nodes = walk(tree);
@@ -56,5 +56,26 @@ test("actual composer exposes GIF format and frame controls on both desktop and 
     assert.equal(frames.length, 2);
     frames[0].props.onChange({ target: { value: "12" } });
     assert.equal(ctx.gptForm.frame_count, 12);
+    nodes.find(element => element.type === "button" && element.props.key === "transparent").props.onClick();
+    assert.equal(ctx.gptForm.background, "transparent");
+    assert.equal(ctx.gptForm.output_format, "png");
+    nodes = walk(vm.runInNewContext(js, ctx));
+    assert.equal(nodes.filter(element => element.type === "input").length, 0);
+    nodes.find(element => element.type === "button" && element.props.key === "gif").props.onClick();
+    assert.equal(ctx.gptForm.background, "auto");
   }
+});
+
+test("transparent output switches to an alpha format and keeps WebP when already selected", () => {
+  for (const output_format of IMAGE_OUTPUT_FORMATS) {
+    const form = selectBackground({ output_format, background: "auto" }, "transparent");
+    assert.equal(form.background, "transparent");
+    assert.equal(form.output_format, output_format === "webp" ? "webp" : "png");
+  }
+  const alpha = { output_format: "png", background: "transparent" };
+  assert.equal(selectOutputFormat(alpha, "jpeg").background, "auto");
+  assert.equal(selectOutputFormat(alpha, "gif").background, "auto");
+  assert.equal(selectOutputFormat(alpha, "webp").background, "transparent");
+  assert.equal(selectOutputFormat(alpha, "auto").output_format, "png");
+  assert.equal(imageExtraBodyError('{"background":"transparent"}'), "settings.extraBodyReserved");
 });

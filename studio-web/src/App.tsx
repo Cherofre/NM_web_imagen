@@ -1,4 +1,4 @@
-import { IMAGE_OUTPUT_FORMATS, imageExtraBodyError, imageOutputLabel } from "./imageOutputSettings";
+import { IMAGE_OUTPUT_FORMATS, IMAGE_BACKGROUNDS, imageExtraBodyError, imageOutputLabel, selectOutputFormat, selectBackground } from "./imageOutputSettings";
 import {
   AlertCircle,
   ArrowLeft,
@@ -28,6 +28,7 @@ import {
   Loader2,
   Maximize2,
   MessageSquarePlus,
+  Minus,
   Monitor,
   PanelLeftClose,
   PanelLeftOpen,
@@ -419,6 +420,7 @@ type GptForm = {
   safety_check: boolean;
   response_format: string;
   output_format: string;
+  background: string;
   frame_count: number;
   frame_duration_ms: number;
   extra_body: string;
@@ -695,6 +697,7 @@ const defaultGptForm: GptForm = {
   safety_check: true,
   response_format: "auto",
   output_format: "auto",
+  background: "auto",
   frame_count: 9,
   frame_duration_ms: 200,
   extra_body: "",
@@ -1348,6 +1351,7 @@ function normalizeGptForm(value: Partial<GptForm> = {}): GptForm {
     chat_model: value.chat_model === "gpt-5.6" ? "gpt-5.6-sol" : value.chat_model || defaultGptForm.chat_model,
     reasoning_effort: reasoningEffort,
     output_format: IMAGE_OUTPUT_FORMATS.includes(value.output_format as typeof IMAGE_OUTPUT_FORMATS[number]) ? String(value.output_format) : "auto",
+    background: IMAGE_BACKGROUNDS.includes(value.background as typeof IMAGE_BACKGROUNDS[number]) ? String(value.background) : "auto",
     frame_count: coerceNumber(value.frame_count, 9),
     frame_duration_ms: coerceNumber(value.frame_duration_ms, 200),
     extra_body: String(value.extra_body || ""),
@@ -1483,6 +1487,7 @@ const gptHistoryKeys: Array<keyof GptForm> = [
   "safety_check",
   "response_format",
   "output_format",
+  "background",
   "frame_count",
   "frame_duration_ms",
   "extra_body",
@@ -1594,6 +1599,7 @@ function App() {
   const [historyBrowserLimit, setHistoryBrowserLimit] = useState(HISTORY_BROWSER_PAGE_SIZE);
   const [historyCollapsed, setHistoryCollapsed] = useState(() => shouldStartHistoryCollapsed());
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [generationSettingsStyle, setGenerationSettingsStyle] = useState<CSSProperties>({});
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(false);
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsSection>("general");
@@ -2759,6 +2765,35 @@ function App() {
   }, [composerPopover, activeEngine, gptForm.custom_size]);
 
   useEffect(() => {
+    if (composerPopover !== "settings") return;
+    const anchor = composerToolsRef.current?.querySelector<HTMLElement>(".generation-settings-wrap");
+    if (!anchor) return;
+    const measure = () => {
+      const rect = anchor.getBoundingClientRect();
+      const scale = rect.width / anchor.offsetWidth || 1;
+      const viewportWidth = window.innerWidth / scale;
+      const width = Math.min(384, viewportWidth - 24);
+      const above = rect.top / scale - 20;
+      const below = (window.innerHeight - rect.bottom) / scale - 20;
+      const placeAbove = above >= Math.min(320, below);
+      const next: CSSProperties = {
+        position: "fixed", width,
+        left: Math.max(12, Math.min(rect.left / scale, viewportWidth - width - 12)), right: "auto",
+        top: placeAbove ? "auto" : (rect.bottom + 8) / scale,
+        bottom: placeAbove ? (window.innerHeight - rect.top + 8) / scale : "auto",
+        maxHeight: Math.max(120, placeAbove ? above : below),
+      };
+      setGenerationSettingsStyle((current) => Object.entries(next).every(([key, value]) => current[key as keyof CSSProperties] === value) ? current : next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(anchor);
+    if (composerToolsRef.current) observer.observe(composerToolsRef.current);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [composerPopover, activeEngine]);
+
+  useEffect(() => {
     void loadDefaults();
     void loadHistory();
   }, []);
@@ -3842,6 +3877,7 @@ function App() {
         normalizeGptForm({
           ...current,
           output_format: "auto",
+          background: "auto",
           extra_body: "",
           ...pickHistoryState<GptForm>(formState, gptHistoryKeys.filter((key) => !["prompt", "negative_prompt", "poster_text"].includes(String(key)))),
         }),
@@ -5118,7 +5154,7 @@ function App() {
       }
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
       if (overrides.imageEditAction) {
-        submitGptForm = { ...submitGptForm, output_format: "auto", extra_body: "" };
+        submitGptForm = { ...submitGptForm, output_format: "auto", background: "auto", extra_body: "" };
       }
       try {
         resolveMaskEndpoint(submitGptForm.api_endpoint, Boolean(currentMask));
@@ -5701,6 +5737,7 @@ function App() {
   function currentGenerationSettingsSummary() {
     return [
       activeEngine === "gpt-image-2" && gptForm.output_format !== "auto" ? imageOutputLabel(gptForm.output_format, "") : "",
+      activeEngine === "gpt-image-2" && gptForm.background === "transparent" ? t("settings.background.transparent") : "",
       activeEngine === "gpt-image-2" && gptForm.extra_body.trim() ? t("settings.extraBodyActive") : "",
       activeEngine === "gpt-image-2" ? currentQualityLabel() : "",
       currentCountLabel(),
@@ -6914,38 +6951,61 @@ function App() {
                 )}
               </button>
               {composerPopover === "settings" && (
-                <div className="composer-popover generation-settings-popover" role="dialog" aria-label={t("composer.generationSettingsDialog")}>
-                  {activeEngine === "gpt-image-2" && (
+                <div className="composer-popover generation-settings-popover" style={generationSettingsStyle} role="dialog" aria-label={t("composer.generationSettingsDialog")}>
+                  <div className="generation-settings-head">
+                    <strong>{t("composer.generationSettings")}</strong>
+                    <button type="button" className="settings-close" aria-label={t("settings.close")} onClick={closeComposerPopover}><X size={16} /></button>
+                  </div>
+                  <div className="generation-settings-body">
+                  {activeEngine === "gpt-image-2" && <>
                     <section className="generation-settings-section">
                       <div className="generation-settings-heading"><strong>{t("settings.outputFormat")}</strong></div>
-                      <div className="choice-grid output-formats">
+                      <div className="choice-grid output-formats" role="group" aria-label={t("settings.outputFormat")}>
                         {IMAGE_OUTPUT_FORMATS.map((format) => <button type="button" key={format}
                           className={gptForm.output_format === format ? "selected" : ""}
-                          onClick={() => setGptForm({ ...gptForm, output_format: format })}>
+                          aria-pressed={gptForm.output_format === format}
+                          onClick={() => setGptForm(selectOutputFormat(gptForm, format))}>
                           {imageOutputLabel(format, t("option.auto"))}
                         </button>)}
                       </div>
-                      {gptForm.output_format === "gif" && <>
+                    </section>
+                    <section className="generation-settings-section background-settings-section">
+                      <div className="generation-settings-heading">
+                        <strong>{t("settings.background")}</strong>
+                        <span>{t("settings.alphaFormats")}</span>
+                      </div>
+                      <div className="choice-grid background-options" role="group" aria-label={t("settings.background")}>
+                        {IMAGE_BACKGROUNDS.map((background) => <button type="button" key={background}
+                          className={gptForm.background === background ? "selected" : ""}
+                          aria-pressed={gptForm.background === background}
+                          onClick={() => setGptForm(selectBackground(gptForm, background))}>
+                          {background === "transparent" && <span className="alpha-swatch" aria-hidden="true" />}
+                          {t(`settings.background.${background}`)}
+                        </button>)}
+                      </div>
+                    </section>
+                    {gptForm.output_format === "gif" && (
+                      <section className="generation-settings-section animation-settings-section">
+                        <div className="generation-settings-heading"><strong>{t("settings.animation")}</strong><span>{t("settings.animationSummary", { frames: gptForm.frame_count, seconds: Number((gptForm.frame_count * gptForm.frame_duration_ms / 1000).toFixed(2)) })}</span></div>
                         <div className="gif-frame-fields">
                           <Field label={t("settings.frameCount")}><input type="number" min={2} max={16} step={1} value={gptForm.frame_count} onChange={(event) => setGptForm({ ...gptForm, frame_count: Number(event.target.value) })} /></Field>
                           <Field label={t("settings.frameDuration")}><input type="number" min={20} max={2000} step={10} value={gptForm.frame_duration_ms} onChange={(event) => setGptForm({ ...gptForm, frame_duration_ms: Number(event.target.value) })} /></Field>
                         </div>
-                        <p className="gif-output-help">{t("settings.gifHelp")}</p>
-                      </>}
-                    </section>
-                  )}
+                      </section>
+                    )}
+                  </>}
                   {activeEngine !== "banana" && (
                     <section className="generation-settings-section quality-settings-section">
                       <div className="generation-settings-heading">
                         <strong>{t("composer.quality")}</strong>
-                        <span>{currentQualityLabel()}</span>
                       </div>
-                    <div className="choice-grid quality">
+                    <div className="choice-grid quality" role="group" aria-label={t("composer.quality")}>
                       {gptQualityOptions.map((item) => (
                         <button
                           type="button"
                           key={item}
                           className={gptForm.quality === item ? "selected" : ""}
+                          aria-pressed={gptForm.quality === item}
                           onClick={() => setGptForm({ ...gptForm, quality: item })}
                         >
                           {optionLabel(item)}
@@ -6955,36 +7015,21 @@ function App() {
                     </section>
                   )}
                   <section className="generation-settings-section count-settings-section">
-                    <div className="generation-settings-heading">
+                    <div className="generation-count-row">
                       <strong>{t("composer.countField")}</strong>
-                      <span>{currentCountLabel()}</span>
+                      <div className="generation-count-stepper">
+                        <button type="button" aria-label={t("settings.decreaseCount")} disabled={generationCountFor(activeEngine, gptForm, bananaForm) <= 1} onClick={() => setGenerationCount(activeEngine, generationCountFor(activeEngine, gptForm, bananaForm) - 1)}><Minus size={14} /></button>
+                        <input aria-label={t("composer.countField")} type="number" min={1} max={activeEngine === "banana" ? 8 : 10} value={activeEngine === "banana" ? bananaForm.batch_size : gptForm.n} onChange={(event) => setGenerationCount(activeEngine, Number(event.target.value))} />
+                        <button type="button" aria-label={t("settings.increaseCount")} disabled={generationCountFor(activeEngine, gptForm, bananaForm) >= (activeEngine === "banana" ? 8 : 10)} onClick={() => setGenerationCount(activeEngine, generationCountFor(activeEngine, gptForm, bananaForm) + 1)}><Plus size={14} /></button>
+                      </div>
                     </div>
-                  {activeEngine === "banana" ? (
-                    <input className="generation-count-input" aria-label={t("composer.countField")} type="number" min={1} max={8} value={bananaForm.batch_size} onChange={(event) => setGenerationCount("banana", Number(event.target.value))} />
-                  ) : (
-                    <input className="generation-count-input" aria-label={t("composer.countField")} type="number" min={1} max={10} value={gptForm.n} onChange={(event) => setGenerationCount("gpt-image-2", Number(event.target.value))} />
-                  )}
-                  <div className="choice-grid counts">
-                    {(activeEngine === "banana" ? [1, 2, 3, 4, 6, 8] : [1, 2, 3, 4, 6, 8, 10]).map((item) => {
-                      const selected = activeEngine === "banana" ? bananaForm.batch_size === item : gptForm.n === item;
-                      return (
-                        <button
-                          type="button"
-                          key={item}
-                          className={selected ? "selected" : ""}
-                          onClick={() => setGenerationCount(activeEngine, item)}
-                        >
-                          {item}
-                        </button>
-                      );
-                    })}
-                  </div>
                     {generationCountFor(activeEngine, gptForm, bananaForm) > 1 && (
                       <div className="generation-count-note" role="status">
                         <AlertCircle size={14} /> {t("composer.multiImageNotice")}
                       </div>
                     )}
                   </section>
+                  </div>
                 </div>
               )}
             </div>

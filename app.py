@@ -288,8 +288,8 @@ def background_transport_error(exc: requests.RequestException, request_id: str, 
     return client_http_error("E_UPSTREAM_TIMEOUT" if is_timeout else "E_UPSTREAM_NETWORK", status_code=504 if is_timeout else 502, detail=detail, diagnostics=diagnostics)
 
 
-def validate_background_images(images: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Inspect actual PNG alpha, independently of the relay's declared format."""
+def validate_background_images(images: List[Dict[str, str]], allowed_formats: Tuple[str, ...] = ("PNG",)) -> Dict[str, Any]:
+    """Inspect actual alpha, independently of the relay's declared format."""
     checks: List[Dict[str, Any]] = []
     for image in images:
         check: Dict[str, Any] = {"status": "unreadable"}
@@ -298,7 +298,7 @@ def validate_background_images(images: List[Dict[str, str]]) -> Dict[str, Any]:
             if extracted:
                 with Image.open(BytesIO(extracted[0])) as decoded:
                     check["format"] = decoded.format
-                    if decoded.format != "PNG":
+                    if decoded.format not in allowed_formats:
                         check["status"] = "format"
                     elif decoded.width * decoded.height > MASK_GUIDANCE_MAX_PIXELS:
                         # Bound decoded memory to the tool's existing image-size budget.
@@ -3491,7 +3491,7 @@ IMAGE_EXTRA_BODY_MAX_BYTES = 16 * 1024
 IMAGE_EXTRA_BODY_RESERVED = {
     "model", "prompt", "input", "image", "image[]", "mask", "tools", "type",
     "n", "size", "quality", "seed", "negative_prompt", "style_preset",
-    "enhance_prompt", "safety_check", "response_format", "output_format",
+    "enhance_prompt", "safety_check", "response_format", "output_format", "background",
     "frame_count", "frame_duration_ms", "stream", "partial_images",
     "api_key", "authorization", "headers", "base_url", "api_base_url",
     "__proto__", "constructor", "prototype",
@@ -3517,12 +3517,19 @@ def parse_image_extra_body(value: str) -> Dict[str, Any]:
     return parsed
 
 
-def image_output_parameters(output_format: str, frame_count: int, frame_duration_ms: int) -> Dict[str, Any]:
+def image_output_parameters(output_format: str, frame_count: int, frame_duration_ms: int, background: str = "auto") -> Dict[str, Any]:
     if output_format not in {"auto", "png", "jpeg", "webp", "gif"}:
         raise ValueError("不支持的输出格式，请选择自动、PNG、JPEG、WebP 或 GIF")
-    if output_format == "auto":
-        return {}
-    params: Dict[str, Any] = {"output_format": output_format}
+    if background not in {"auto", "opaque", "transparent"}:
+        raise ValueError("背景只能选择自动、不透明或透明")
+    if background == "transparent":
+        if output_format == "auto":
+            output_format = "png"
+        if output_format not in {"png", "webp"}:
+            raise ValueError("透明通道需要 PNG 或 WebP 输出，请调整输出格式")
+    params: Dict[str, Any] = {} if output_format == "auto" else {"output_format": output_format}
+    if background != "auto":
+        params["background"] = background
     if output_format == "gif":
         if not 2 <= frame_count <= 16:
             raise ValueError("GIF 帧数必须在 2 到 16 之间")
@@ -5265,6 +5272,7 @@ def create_app() -> FastAPI:
         safety_check: bool = Form(True),
         response_format: str = Form("auto"),
         output_format: str = Form("auto"),
+        background: str = Form("auto"),
         frame_count: int = Form(9),
         frame_duration_ms: int = Form(200),
         extra_body: str = Form(""),
@@ -5302,7 +5310,9 @@ def create_app() -> FastAPI:
         try:
             if image_edit_action:
                 output_format = "auto"
-            output_parameters = image_output_parameters(output_format, frame_count, frame_duration_ms)
+                background = "auto"
+            output_parameters = image_output_parameters(output_format, frame_count, frame_duration_ms, background)
+            output_format = str(output_parameters.get("output_format", output_format))
             extra_parameters = parse_image_extra_body(extra_body)
             if output_format == "gif" and mask_file is not None:
                 raise ValueError("GIF 不支持遮罩或图片编辑工具，请从主输入框使用文字或参考图生成")
@@ -5686,7 +5696,10 @@ def create_app() -> FastAPI:
 
         total_tokens = sum(gpt_usage_total_tokens(item) for item in response_payloads)
         elapsed_seconds = round(time.time() - started_at, 2)
-        background_validation = await asyncio.to_thread(validate_background_images, images) if image_edit_action == "background" and images else None
+        transparency_requested = image_edit_action == "background" or background == "transparent"
+        background_validation = await asyncio.to_thread(
+            validate_background_images, images, ("PNG",) if image_edit_action == "background" else ("PNG", "WEBP"),
+        ) if transparency_requested and images else None
         background_error = ""
         gif_validation = await asyncio.to_thread(validate_gif_output, images) if output_format == "gif" and images else None
         output_error = ""
@@ -5694,7 +5707,16 @@ def create_app() -> FastAPI:
             output_error = "已请求 GIF 动画，但渠道返回的不是有效多帧 GIF；已保留原始结果，请检查渠道是否支持 GIF 输出。"
         if background_validation and not background_validation["valid"]:
             rejected = next(check for check in background_validation["images"] if check["status"] != "transparent")
-            background_error = BACKGROUND_OUTPUT_DETAILS[rejected["status"]]
+            if image_edit_action == "background":
+                background_error = BACKGROUND_OUTPUT_DETAILS[rejected["status"]]
+            else:
+                reason = {
+                    "opaque": "图片没有实际透明区域",
+                    "empty": "图片为全透明空白",
+                    "format": "图片不是 PNG 或 WebP",
+                    "unreadable": "无法检查图片 Alpha 通道",
+                }[rejected["status"]]
+                background_error = f"已请求透明通道，但渠道返回的{reason}；已保留原始结果，请检查渠道的透明输出支持。"
         history_entry: Optional[Dict[str, Any]] = None
         try:
             JOB_REGISTRY.raise_if_canceled(job_id)
@@ -5718,6 +5740,7 @@ def create_app() -> FastAPI:
                 "style_preset": style_preset,
                 "response_format": response_format,
                 "output_format": output_format,
+                "background": "transparent" if image_edit_action == "background" else background,
                 "frame_count": frame_count if output_format == "gif" else None,
                 "frame_duration_ms": frame_duration_ms if output_format == "gif" else None,
                 "extra_parameter_keys": sorted(extra_parameters),
@@ -5761,6 +5784,7 @@ def create_app() -> FastAPI:
                 "safety_check": safety_check,
                 "response_format": response_format,
                 "output_format": output_format,
+                "background": background,
                 "frame_count": frame_count,
                 "frame_duration_ms": frame_duration_ms,
                 "extra_body": extra_body.strip(),

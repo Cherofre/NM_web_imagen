@@ -1,9 +1,19 @@
 export const IMAGE_OUTPUT_FORMATS = ["auto", "png", "jpeg", "webp", "gif"] as const;
+export const IMAGE_BACKGROUNDS = ["auto", "opaque", "transparent"] as const;
+
+export function selectOutputFormat<T extends { output_format: string; background: string }>(form: T, output_format: string): T {
+  const background = form.background === "transparent" && !["png", "webp", "auto"].includes(output_format) ? "auto" : form.background;
+  return { ...form, output_format: background === "transparent" && output_format === "auto" ? "png" : output_format, background };
+}
+
+export function selectBackground<T extends { output_format: string; background: string }>(form: T, background: string): T {
+  return { ...form, background, output_format: background === "transparent" && !["png", "webp"].includes(form.output_format) ? "png" : form.output_format };
+}
 
 const RESERVED_PARAMETERS = new Set([
   "model", "prompt", "input", "image", "image[]", "mask", "tools", "type",
   "n", "size", "quality", "seed", "negative_prompt", "style_preset",
-  "enhance_prompt", "safety_check", "response_format", "output_format",
+  "enhance_prompt", "safety_check", "response_format", "output_format", "background",
   "frame_count", "frame_duration_ms", "stream", "partial_images",
   "api_key", "authorization", "headers", "base_url", "api_base_url",
   "__proto__", "constructor", "prototype",

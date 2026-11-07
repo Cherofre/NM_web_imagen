@@ -2,6 +2,12 @@
 
 ## Active Decisions
 
+## 2026-11-07 — 透明生成与紧凑设置面板
+- Status: active
+- Decision: 普通生成增加background（auto/opaque/transparent），透明使用PNG/WebP并检查真实Alpha；不根据提示词猜透明意图，不额外请求。界面选择透明时切PNG（若已经WebP则保留）；切到JPEG/GIF时清除透明选择，防止不兼容组合。背景参数显式发送后不可被渠道兼容降级删除。
+- UI: 保留现有Studio黑白中性视觉，扩大弹层宽度、单行分段质量、数量步进器，GIF参数只在GIF显示。背景与格式转换即时可见；不增加独立设置弹窗或框架。
+- Positioning: 实际760×640检查发现仅限制视口高度仍会裁掉锚点上方标题；改为测量按钮位置和实际CSS缩放，横向限位，并在上下可用空间中选择方向，滚动仅发生在内容区。4种视口和200%实际浏览器复验通过。
+
 ## 2026-11-07 — GIF 常用控制与图片参数扩展入口
 - Status: active
 - Decision: 沿用 Images/Responses 请求链路，增加 GIF/PNG/JPEG/WebP 输出选择、GIF 帧数和时长；新增配置级 `extra_body` JSON 对象供以后新增图片参数使用。Images 合并正文，Responses 合并图片工具。扩展入口不覆盖界面字段、身份凭证、输入内容或传输控制，明确错误而非静默忽略/降级。

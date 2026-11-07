@@ -1,5 +1,17 @@
 # Next Actions
 
+## Now — 透明通道与设置弹层优化
+- [x] 背景参数进入普通生图、参考图编辑、Responses及历史/重试链路；与透明格式约束联动。
+- [x] 真实Alpha校验，保留不符合要求的结果并提示；不新增上游调用。
+- [x] 紧凑弹层与数量步进器，4种视口/200%缩放/上下限/Escape验证通过；矮窗口裁顶已修。
+- [x] Python345/Node316、最终构建和ZIP解压冻结后端六项Alpha/GIF回归通过；更新试用包与报告已保存。
+
+## Handoff Notes — 透明生成设置
+- Start here: `docs/transparent-generation-settings-2026-11-07.md`；本轮实现与试用包已完成。
+- Do not redo: `.runtime/alpha-ui-result.log`、`alpha-controls-result.log` 与 `alpha-frozen-result.json` 已完成零付费实际验收；旧GIF包保留。
+- Verify next: 后续若用户要正式发布再升版本/验发行包/同步G；若只试用，先退出旧桌面实例并完整解压Alpha试用包。
+- Do not claim: 已安装版或旧7861已生效、真实渠道透明/GIF已测、原生GUI已验或新正式版本已发布。
+
 ## Now — 2026-11-07 GIF 与可扩展图片参数
 - [x] GPT 生图设置增加输出格式、GIF 帧数与每帧时长，提交/历史/队列恢复保持一致。
 - [x] 配置级扩展 JSON 参数直传 Images 正文或 Responses 图片工具，校验冲突，显式字段不自动丢弃重试。

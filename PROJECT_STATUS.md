@@ -1,6 +1,10 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（透明通道与生成设置优化完成）
+- Current task complete: 背景自动/不透明/透明、PNG/WebP联动、真实Alpha校验及历史/队列链路已完成；384px紧凑弹层、单行质量、数量步进器、按需GIF参数、基于锚点与缩放的定位，标题关闭按钮不裁切。报告 `docs/transparent-generation-settings-2026-11-07.md`。
+- Fresh evidence: Python345/Node316、生产与最终Tauri/PyInstaller构建通过；实际浏览器透明提交和4种视口（1280/820/760/400）/200%缩放/数量上下限/Escape通过，默认内容292px无滚动。ZIP解压冻结后端三接口×PNG/WebP六项alpha0–255/下载字节一致，不透明误返回保留和GIF回归通过。
+- Current artifact: `_release/alpha-preview/NM-Image-Studio-Alpha-preview-Portable-x64.zip`（48,435,858字节），793文件hash及当前UI入口匹配；内部仍1.1.6试用，保留旧GIF包。0付费，未覆盖安装/用户数据或重启旧7861；真实渠道与原生GUI未测，未正式发布/G同步。
 - Last Updated: 2026-11-07
 - Current task complete: `codex/gif-output-parameters` 已接入 GPT GIF 输出/帧数/速度和配置级扩展 JSON。Images/编辑 multipart/Responses 参数路径、保存下载动画原字节、静态误返回提示、历史/队列和扩展配置恢复已验证。报告 `docs/gif-output-parameters-2026-11-07.md`。
 - Fresh verification: Python 全量339、末改GIF8与定向112、Node315、生产与Tauri/PyInstaller构建通过。实际浏览器点击提交12帧/150ms/嵌套JSON，5张截图捕捉两种帧色证实播放；820×800设置弹层视觉检查通过。ZIP解压后的冻结后端两接口实际mock与下载字节一致，793文件清单hash全匹配，0付费调用。
