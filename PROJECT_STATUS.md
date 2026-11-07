@@ -1,6 +1,12 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（1.1.7候选准备和实际升级验收完成）
+- Current task complete: 依赖按兼容范围修复（29包），npm audit0；1.1.7统一，正式四包已重建，manifest/hash/当前资源、本地Web预检与离线启动通过。Python最终串行345/Node316/Rust10，实际Portable广泛mock回归及Portable/两种NSIS各14项GIF/Alpha/保存/鉴权/热切换检查通过，0付费。报告 `docs/release-candidate-v1.1.7.md`，用户版说明 `docs/release-notes-v1.1.7.md`。
+- Actual install: 用户明确授权本机备份后覆盖、确认正常退出；完整备份6697文件/1,746,652,740字节保留于 `.runtime/release117-native-backup`。普通1.1.7实际覆盖退出0，791程序文件匹配、5840保留文件原样；已重开运行，配置字节/存图根及19会话127轮保持，162图片URL中160有效，其余既有9/10两张仍缺失。用户明确确认图片和生成设置均正常。原生控制器因app-server路径错误不可用，显示由用户人工验收；不冒充自动化/保存对话框通过。
+- Remaining scope: 发布前准备本轮完成；未创建标签、push、正式发布或G同步，等待用户后续正式发布指令。实际安装版保持运行，测试专用浏览器/host已收尾；三个既有未跟踪用户文件保持不动。
+- Last Updated: 2026-11-07（1.1.7候选准备进行中）
+- Current task: 用户授权执行上轮待办，修构建依赖、升1.1.7、重建并核验正式四包及升级数据保留；当前先进行依赖补丁更新和版本同步。无付费请求；暂未授权正式发布。
 - Last Updated: 2026-11-07（发布前检查完成，暂不建议正式发布）
 - Audit: 对照v1.1.6审查至33c8bd1；Python345/Node316/Rust10、生产构建/尺寸规则/编译、PS5.1共22脚本解析通过。实际storage-fix NSIS核对790后端文件/当前内嵌资源、799提取文件无用户数据；冻结后端14项本机mock检查通过（12次本机上游，0付费），包含三接口GIF/PNG/WebP与热切换源保留。报告 `docs/release-readiness-2026-11-07.md`。
 - Release gates remaining: npm audit发现8个受影响构建依赖（5高/1中/2低，未修复）；VERSION仍1.1.6，建议1.1.7；正式四包仍10/14旧产物，release_preflight -LocalOnly已正确报缺少当前JS。需补丁依赖修复、升版重建/逐包验收及原生升级保留数据实测；本轮没有安装、发布、推送或G同步，用户图库和三个既有未跟踪项不动。

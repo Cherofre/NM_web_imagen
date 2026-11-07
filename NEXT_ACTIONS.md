@@ -1,5 +1,17 @@
 # Next Actions
 
+## Now — 1.1.7候选准备
+- [x] 修复audit构建依赖并统一1.1.7版本；audit0、Python串行345/Node316/Rust10通过。
+- [x] 重建Web、Portable、普通/离线NSIS，逐包核对版本、资源、数据排除和mock运行；Web随包离线启动通过。
+- [x] 验证1.1.5/1.1.6便携数据覆盖保留，以及用户追加明确授权后的实际本机备份/覆盖安装/重启：19会话127轮及配置/图库保留，用户确认图片和设置正常。
+- [x] 更新 `docs/release-candidate-v1.1.7.md`、用户更新说明及交接，本地提交；未正式发布。
+
+## Handoff Notes — 1.1.7候选已就绪
+- Start here: `docs/release-candidate-v1.1.7.md`；四包在_release/desktop和_release/web，完整大小/SHA256见报告及 `.runtime/release117-artifacts.json`。
+- Do not redo: 用户已升级到1.1.7且确认正常，原始图库备份和本次1.75GB完整备份都保留；不再次覆盖安装或更换用户存图目录。
+- Verify next: 若用户要求正式发布，先确认候选源/产物未变化，按既有流程合并/标签/中文Release和G当前四项桌面布局同步；保留旧包与用户材料。
+- Do not claim: 已push、正式发布、G同步或原生自动化点击通过；原生显示是用户人工确认。两个9/10缺失源文件仍是数据恢复遗留。
+
 ## Now — 2026-11-07 发布前检查
 - [x] 完成源码/数据保护/实际普通安装包审查及新鲜全量测试；报告 `docs/release-readiness-2026-11-07.md`。
 - [ ] 按现有主版本范围更新8个受影响构建依赖，复跑audit、Node全量和生产构建；不要npm audit fix --force跨主版本。

@@ -478,7 +478,7 @@ const gptChatModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gp
 /** Same seeds as the select, without the trailing "custom" sentinel. */
 const gptChatModelPresets = gptChatModelOptions.filter((item) => item !== "custom");
 /** Fallback shown for the running version when the desktop shell cannot report one. */
-const APP_VERSION_FALLBACK = "1.1.6";
+const APP_VERSION_FALLBACK = "1.1.7";
 /** The Gemini model the app ships with; the relay's catalogue is the real source. */
 const bananaModelPresets = ["gemini-3-pro-image-preview"];
 const gptReasoningOptions = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
