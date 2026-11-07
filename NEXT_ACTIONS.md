@@ -1,5 +1,18 @@
 # Next Actions
 
+## Now — 2026-11-07 发布前检查
+- [x] 完成源码/数据保护/实际普通安装包审查及新鲜全量测试；报告 `docs/release-readiness-2026-11-07.md`。
+- [ ] 按现有主版本范围更新8个受影响构建依赖，复跑audit、Node全量和生产构建；不要npm audit fix --force跨主版本。
+- [ ] 正式候选建议1.1.7，统一版本后重建Web/Portable/普通NSIS/离线NSIS；逐包验资源、版本、冻结后端和数据排除。
+- [ ] 在隔离Windows用户或测试机完成旧版覆盖升级及图库/会话/配置保留、目录拒绝与迁移实测。
+- [ ] 用户要求正式发布后再发布和按当前G目录规范同步；现有release_preflight正确拦截旧四包，不能跳过门禁上传。
+
+## Handoff Notes — 发布检查
+- Start here: `docs/release-readiness-2026-11-07.md`；本轮仅检查，发现问题未进行依赖升级或升版。
+- Do not redo: 当前代码测试Python345/Node316/Rust10通过，安装包实际后端14项证据 `.runtime/preflight-frozen-result-20261107.json`；不要重动已恢复图库。
+- Verify next: 先处理npm audit8项再重建；前端测试必须cwd=studio-web，Python编译必须cwd=根目录；UTF8读取诊断文件。新版本/新依赖构建将使现有试用安装包资源证据过期，须重验新包。
+- Do not claim: 已正式就绪、依赖已修复、正式四包已重建、原生覆盖升级已验或已发布/G同步。两张旧图缺失仍为原数据恢复遗留。
+
 ## Now — 历史图片404与存图目录保护
 - [x] 补回167缺失文件；原备份保留，API按revision补回17会话并保留已有会话；实际截图原图GET200。
 - [x] 切换到非空目录明确拒绝，复制独占新建、来源保留；路径别名及嵌套保护，Rust10/Node桌面21通过。

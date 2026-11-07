@@ -1,6 +1,9 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（发布前检查完成，暂不建议正式发布）
+- Audit: 对照v1.1.6审查至33c8bd1；Python345/Node316/Rust10、生产构建/尺寸规则/编译、PS5.1共22脚本解析通过。实际storage-fix NSIS核对790后端文件/当前内嵌资源、799提取文件无用户数据；冻结后端14项本机mock检查通过（12次本机上游，0付费），包含三接口GIF/PNG/WebP与热切换源保留。报告 `docs/release-readiness-2026-11-07.md`。
+- Release gates remaining: npm audit发现8个受影响构建依赖（5高/1中/2低，未修复）；VERSION仍1.1.6，建议1.1.7；正式四包仍10/14旧产物，release_preflight -LocalOnly已正确报缺少当前JS。需补丁依赖修复、升版重建/逐包验收及原生升级保留数据实测；本轮没有安装、发布、推送或G同步，用户图库和三个既有未跟踪项不动。
 - Last Updated: 2026-11-07（图库恢复与目录保护完成）
 - Current task complete: 已从D盘同级11:56备份仅补回缺失167文件/465,972,817字节；通过实际后端revision接口补回17旧会话，保留当前1会话，合计18会话121轮。截图原图与小狗图实际GET200且字节匹配。161图片链接中159有效，另两张9/10旧图备份及有界查找均缺失，仍未找回，详见 `docs/gallery-recovery-2026-11-07.md`。
 - Fix/artifact: 切换存图目录改为只复制到空目录、独占新建不覆盖，Windows别名/父目录/嵌套判断修正；Rust10/Node桌面21与生产/NSIS构建通过。`_release/storage-fix-preview/NM-Image-Studio-Storage-fix-preview-Setup-x64.exe`（34,157,786字节）实际解包核对790后端及最新内嵌UI/保护逻辑。未代安装、关闭用户程序或发布/G同步，0付费；当前恢复已生效，需刷新窗口，修正版防复发。
