@@ -127,7 +127,7 @@ export function syncActiveProfileForm(
 }
 
 /** Fields that are scoped to a single profile and must never leak across a switch. */
-const PROFILE_SCOPED_FORM_KEYS = ["api_key", "credential_ref", "credential_pair_id", "model_options", "model_type_options", "chat_model_options", "chat_enabled"];
+const PROFILE_SCOPED_FORM_KEYS = ["api_key", "credential_ref", "credential_pair_id", "model_options", "model_type_options", "chat_model_options", "chat_enabled", "extra_body"];
 
 /**
  * Form state when switching to another profile.

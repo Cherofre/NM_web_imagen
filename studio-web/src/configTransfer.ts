@@ -29,6 +29,7 @@ export const CONFIG_TRANSFER_FORM_KEYS: Record<string, string[]> = {
     "chat_model_options",
     "chat_enabled",
     "reasoning_effort",
+    "extra_body",
     "credential_ref",
     "credential_pair_id",
   ],

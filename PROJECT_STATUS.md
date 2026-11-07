@@ -1,6 +1,12 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07
+- Current task complete: `codex/gif-output-parameters` 已接入 GPT GIF 输出/帧数/速度和配置级扩展 JSON。Images/编辑 multipart/Responses 参数路径、保存下载动画原字节、静态误返回提示、历史/队列和扩展配置恢复已验证。报告 `docs/gif-output-parameters-2026-11-07.md`。
+- Fresh verification: Python 全量339、末改GIF8与定向112、Node315、生产与Tauri/PyInstaller构建通过。实际浏览器点击提交12帧/150ms/嵌套JSON，5张截图捕捉两种帧色证实播放；820×800设置弹层视觉检查通过。ZIP解压后的冻结后端两接口实际mock与下载字节一致，793文件清单hash全匹配，0付费调用。
+- Artifact: `_release/gif-preview/NM-Image-Studio-GIF-preview-Portable-x64.zip`（48,425,928字节），本地试用构建、内部仍1.1.6；未替换安装、重启旧7861、发布或同步G。真实渠道GIF与原生GUI/保存对话框未测；网页版需重启后端生效。
+- Baseline: 系统 Python 的模型列表 21 项通过；便携 `.runtime/python` 缺测试依赖 httpx，测试使用系统 Python，不更改用户运行环境。既有 `.impeccable/`、PRODUCT.md、config.local.json.bak 为未跟踪用户文件，保持不动。台账检查 0 fail / 1 warn（历史 Now 章节多），不移动历史。
+- Delivery target: 源码、构建后的 Web 资源及本地桌面试用包，零付费生成；本轮未要求 GitHub 发布、G 盘同步或覆盖已安装版。
 - Last Updated: 2026-10-15
 - Confirmed KB rejection: 用户追加授权1次后，以原始参考图和官方最小透明参数直接POST KB gpt-image-2，30.44秒返回451，type=content_policy_violation、code=ERR-D2C10AD220，0图/0重试；该新增额度已用尽。不能判断具体触发规则或KB自身/更上游审核层。此前四次背景失败分别YS403、CS403、XJ300秒超时、KB451，不应合并为同一权限错误；令牌只读31条全成功，YS当前不在模型目录。分支codex/background-policy-diagnostics已修源码明确安全拒绝提示与安全请求编号日志，83定向/331全量后端/编译/diff检查通过，工作保留在本地分支。尚未重新打包、推送发布或替换安装的1.1.6。报告docs/background-policy-rejection-2026-10-15.md，实际结果和预算.runtime/background-live-{result,budget}-20261015.json。
 - Transparent output investigation: 官方当前image-prompting/API edit文档确认gpt-image-2透明输出为preview，需background=transparent与PNG/WebP；官方明确禁止画棋盘格代替Alpha。核对桌面实际1.1.6及用户D:/Documents/NM Image Studio两张10/15结果：RGB PNG，1048576像素全部Alpha255；历史image_edit_action为空且没有background_validation。用户确认直接移除背景遇拒绝/超时后改在主输入框生成，因此普通请求缺透明参数；不能据此断言直接入口丢动作或官方模型不支持。桌面日志存在403、451和300.18s ReadTimeout，具体渠道拒绝原因尚未证实。已对照本项目内置prompt和后台透明参数条件；0新生图/0付费，本轮未修改产品代码或用户配置。

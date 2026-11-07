@@ -201,6 +201,7 @@ CONFIG_CONNECTION_FIELDS = {
         "chat_model_options",
         "chat_enabled",
         "reasoning_effort",
+        "extra_body",
         "credential_ref",
         "credential_pair_id",
     },
@@ -3486,6 +3487,68 @@ def normalize_gpt_size(size: str) -> str:
     return f"{width}x{height}"
 
 
+IMAGE_EXTRA_BODY_MAX_BYTES = 16 * 1024
+IMAGE_EXTRA_BODY_RESERVED = {
+    "model", "prompt", "input", "image", "image[]", "mask", "tools", "type",
+    "n", "size", "quality", "seed", "negative_prompt", "style_preset",
+    "enhance_prompt", "safety_check", "response_format", "output_format",
+    "frame_count", "frame_duration_ms", "stream", "partial_images",
+    "api_key", "authorization", "headers", "base_url", "api_base_url",
+    "__proto__", "constructor", "prototype",
+}
+
+
+def parse_image_extra_body(value: str) -> Dict[str, Any]:
+    """Accept new image parameters without letting them replace the request envelope."""
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    if len(text.encode("utf-8")) > IMAGE_EXTRA_BODY_MAX_BYTES:
+        raise ValueError("扩展参数不能超过 16 KiB")
+    try:
+        parsed = json.loads(text)
+        json.dumps(parsed, allow_nan=False)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("扩展参数必须是有效的 JSON 对象") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("扩展参数必须是 JSON 对象，不能是数组或单个值")
+    if any(key.lower() in IMAGE_EXTRA_BODY_RESERVED for key in parsed):
+        raise ValueError("扩展参数不能覆盖模型、提示词、输出格式等界面字段或请求控制字段")
+    return parsed
+
+
+def image_output_parameters(output_format: str, frame_count: int, frame_duration_ms: int) -> Dict[str, Any]:
+    if output_format not in {"auto", "png", "jpeg", "webp", "gif"}:
+        raise ValueError("不支持的输出格式，请选择自动、PNG、JPEG、WebP 或 GIF")
+    if output_format == "auto":
+        return {}
+    params: Dict[str, Any] = {"output_format": output_format}
+    if output_format == "gif":
+        if not 2 <= frame_count <= 16:
+            raise ValueError("GIF 帧数必须在 2 到 16 之间")
+        if not 20 <= frame_duration_ms <= 2000:
+            raise ValueError("GIF 每帧时长必须在 20 到 2000 毫秒之间")
+        params.update(frame_count=frame_count, frame_duration_ms=frame_duration_ms)
+    return params
+
+
+def validate_gif_output(images: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from PIL import Image
+
+    checks = []
+    for image in images:
+        extracted = extract_image_bytes(image.get("src", ""))
+        frames = 0
+        if extracted and extracted[1] == "image/gif":
+            try:
+                with Image.open(BytesIO(extracted[0])) as animation:
+                    frames = getattr(animation, "n_frames", 1)
+            except (OSError, ValueError):
+                pass
+        checks.append({"mime_type": image.get("mime_type", ""), "frame_count": frames})
+    return {"valid": bool(checks) and all(item["frame_count"] > 1 for item in checks), "images": checks}
+
+
 def normalize_gpt_endpoint(api_endpoint: str, has_reference_images: bool) -> str:
     endpoint = str(api_endpoint or "auto").strip()
     if not endpoint:
@@ -5201,6 +5264,10 @@ def create_app() -> FastAPI:
         enhance_prompt: bool = Form(True),
         safety_check: bool = Form(True),
         response_format: str = Form("auto"),
+        output_format: str = Form("auto"),
+        frame_count: int = Form(9),
+        frame_duration_ms: int = Form(200),
+        extra_body: str = Form(""),
         edit_mode: str = Form("generate"),
         reference_strength: float = Form(0.7),
         timeout: int = Form(300),
@@ -5231,6 +5298,20 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="图片编辑工具需要使用 images/edits 接口")
         if image_edit_action in {"erase", "local"} and mask_file is None:
             raise HTTPException(status_code=400, detail="局部修改需要涂抹选区")
+
+        try:
+            if image_edit_action:
+                output_format = "auto"
+            output_parameters = image_output_parameters(output_format, frame_count, frame_duration_ms)
+            extra_parameters = parse_image_extra_body(extra_body)
+            if output_format == "gif" and mask_file is not None:
+                raise ValueError("GIF 不支持遮罩或图片编辑工具，请从主输入框使用文字或参考图生成")
+            if output_format == "gif" and any(key in extra_parameters for key in ("output_compression", "prompt_rewriter")):
+                raise ValueError("GIF 不支持 output_compression 或 prompt_rewriter 扩展参数")
+            if image_edit_action and extra_parameters:
+                raise ValueError("图片编辑工具使用固定请求参数，请清空扩展参数后重试")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         try:
             reference_assets = await read_upload_assets(reference_files, limit=16)
@@ -5325,6 +5406,10 @@ def create_app() -> FastAPI:
         if safety_check is False and image_edit_action != "background":
             payload["safety_check"] = False
 
+        payload.update(extra_parameters)
+        payload.update(output_parameters)
+        explicit_image_parameters = set(extra_parameters) | set(output_parameters)
+
         image_data_urls = [asset["data_url"] for asset in request_reference_assets]
         headers = gpt_headers(api_key)
         request_kwargs: Dict[str, Any]
@@ -5343,6 +5428,8 @@ def create_app() -> FastAPI:
                 image_tool["size"] = normalized_size
             if quality != "auto":
                 image_tool["quality"] = quality
+            image_tool.update(extra_parameters)
+            image_tool.update(output_parameters)
             if n > 1:
                 content[0]["text"] = f"{content[0]['text']}\n\nPlease generate {n} separate image result(s)."
 
@@ -5376,6 +5463,10 @@ def create_app() -> FastAPI:
                         ),
                     )
                 )
+            payload = {
+                key: json.dumps(value, ensure_ascii=False) if key in extra_parameters and (value is None or isinstance(value, (dict, list, bool))) else value
+                for key, value in payload.items()
+            }
             request_kwargs = {"data": payload, "files": files}
         else:
             headers["Content-Type"] = "application/json"
@@ -5469,7 +5560,12 @@ def create_app() -> FastAPI:
                             raise client_http_error("E_UPSTREAM_REQUEST", status_code=400, detail=detail, diagnostics=background_diagnostics)
                     if unknown_param and image_edit_action != "background":
                         parameter_name = unknown_param.group(1)
-                        if parameter_name in current_payload and parameter_name not in {
+                        if parameter_name.split(".")[-1] in explicit_image_parameters:
+                            raise client_http_error(
+                                "E_UPSTREAM_REQUEST", status_code=400,
+                                detail="当前渠道不接受已明确设置的输出或扩展参数，请检查该渠道支持的参数后重试；未自动删除参数。",
+                            )
+                        if parameter_name in current_payload and parameter_name not in explicit_image_parameters and parameter_name not in {
                             "model", "prompt", "image", "input", "tools", "n", "background", "output_format"
                         }:
                             current_payload.pop(parameter_name, None)
@@ -5592,6 +5688,10 @@ def create_app() -> FastAPI:
         elapsed_seconds = round(time.time() - started_at, 2)
         background_validation = await asyncio.to_thread(validate_background_images, images) if image_edit_action == "background" and images else None
         background_error = ""
+        gif_validation = await asyncio.to_thread(validate_gif_output, images) if output_format == "gif" and images else None
+        output_error = ""
+        if gif_validation and not gif_validation["valid"]:
+            output_error = "已请求 GIF 动画，但渠道返回的不是有效多帧 GIF；已保留原始结果，请检查渠道是否支持 GIF 输出。"
         if background_validation and not background_validation["valid"]:
             rejected = next(check for check in background_validation["images"] if check["status"] != "transparent")
             background_error = BACKGROUND_OUTPUT_DETAILS[rejected["status"]]
@@ -5617,6 +5717,10 @@ def create_app() -> FastAPI:
                 "edit_mode": edit_mode,
                 "style_preset": style_preset,
                 "response_format": response_format,
+                "output_format": output_format,
+                "frame_count": frame_count if output_format == "gif" else None,
+                "frame_duration_ms": frame_duration_ms if output_format == "gif" else None,
+                "extra_parameter_keys": sorted(extra_parameters),
                 "reference_count": len(reference_assets),
                 "mask_used": mask_asset is not None,
                 "mask_encoding": normalized_mask_encoding if mask_asset is not None else "",
@@ -5624,7 +5728,7 @@ def create_app() -> FastAPI:
                 "image_edit_action": image_edit_action,
                 "image_count": len(images),
                 "saved_count": saved_count,
-                "empty_result_reason": background_error or (describe_empty_gpt_result(response_data) if not images else ""),
+                "empty_result_reason": background_error or output_error or (describe_empty_gpt_result(response_data) if not images else ""),
                 "output_dir": "outputs",
                 "elapsed_seconds": elapsed_seconds,
                 "tokens_used": total_tokens,
@@ -5638,6 +5742,10 @@ def create_app() -> FastAPI:
                 meta["background_validation"] = background_validation
             if background_error:
                 meta["error_code"] = "E_BACKGROUND_OUTPUT"
+            if gif_validation is not None:
+                meta["gif_validation"] = gif_validation
+            if output_error:
+                meta["error_code"] = "E_UPSTREAM_RESPONSE"
             form_state = {
                 "prompt": prompt,
                 "context_prompt": compact_text(context_prompt.strip(), 1800),
@@ -5652,6 +5760,10 @@ def create_app() -> FastAPI:
                 "enhance_prompt": enhance_prompt,
                 "safety_check": safety_check,
                 "response_format": response_format,
+                "output_format": output_format,
+                "frame_count": frame_count,
+                "frame_duration_ms": frame_duration_ms,
+                "extra_body": extra_body.strip(),
                 "api_endpoint": api_endpoint,
                 "edit_mode": edit_mode,
                 "reference_strength": reference_strength,
@@ -5678,13 +5790,14 @@ def create_app() -> FastAPI:
                 meta["history_id"] = history_entry["id"]
 
             return {
-                "ok": bool(images) and not background_error,
+                "ok": bool(images) and not background_error and not output_error,
                 "engine": "gpt-image-2",
                 "images": images,
                 "messages": [],
                 "meta": meta,
                 "history_entry": history_entry,
                 **({"error_code": "E_BACKGROUND_OUTPUT"} if background_error else {}),
+                **({"error_code": "E_UPSTREAM_RESPONSE"} if output_error else {}),
             }
         except JobCancelled:
             if history_entry:

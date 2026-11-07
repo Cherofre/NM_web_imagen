@@ -2,6 +2,11 @@
 
 ## Active Decisions
 
+## 2026-11-07 — GIF 常用控制与图片参数扩展入口
+- Status: active
+- Decision: 沿用 Images/Responses 请求链路，增加 GIF/PNG/JPEG/WebP 输出选择、GIF 帧数和时长；新增配置级 `extra_body` JSON 对象供以后新增图片参数使用。Images 合并正文，Responses 合并图片工具。扩展入口不覆盖界面字段、身份凭证、输入内容或传输控制，明确错误而非静默忽略/降级。
+- Boundary: 请求参数扩展可以免发版支持新普通参数；新结果格式（例如 SVG）、异步/流式协议仍需专门适配。本次不改主架构、不按提示词猜格式、不自动调用额外聊天接口、不发付费测试。现有用户桌面安装不自动覆盖，提供隔离试用产物。
+
 ## 2026-10-15 — KB透明拒绝定位及提示修正
 - Status: active
 - Evidence: 用户明确新增1次请求后，同原图/KB gpt-image-2/官方最小透明参数实际返回451、content_policy_violation，30.44秒0图无重试。保留原始错误类型和本机结果，不将其解释成透明不支持或用户内容必然违规。

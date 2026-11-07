@@ -1,3 +1,4 @@
+import { IMAGE_OUTPUT_FORMATS, imageExtraBodyError, imageOutputLabel } from "./imageOutputSettings";
 import {
   AlertCircle,
   ArrowLeft,
@@ -417,6 +418,10 @@ type GptForm = {
   enhance_prompt: boolean;
   safety_check: boolean;
   response_format: string;
+  output_format: string;
+  frame_count: number;
+  frame_duration_ms: number;
+  extra_body: string;
   edit_mode: string;
   reference_strength: number;
   timeout: number;
@@ -689,6 +694,10 @@ const defaultGptForm: GptForm = {
   enhance_prompt: true,
   safety_check: true,
   response_format: "auto",
+  output_format: "auto",
+  frame_count: 9,
+  frame_duration_ms: 200,
+  extra_body: "",
   edit_mode: "generate",
   reference_strength: 0.7,
   timeout: 300,
@@ -1338,6 +1347,10 @@ function normalizeGptForm(value: Partial<GptForm> = {}): GptForm {
     chat_enabled: coerceSwitchFlag(value.chat_enabled, "0"),
     chat_model: value.chat_model === "gpt-5.6" ? "gpt-5.6-sol" : value.chat_model || defaultGptForm.chat_model,
     reasoning_effort: reasoningEffort,
+    output_format: IMAGE_OUTPUT_FORMATS.includes(value.output_format as typeof IMAGE_OUTPUT_FORMATS[number]) ? String(value.output_format) : "auto",
+    frame_count: coerceNumber(value.frame_count, 9),
+    frame_duration_ms: coerceNumber(value.frame_duration_ms, 200),
+    extra_body: String(value.extra_body || ""),
     n: coerceNumber(value.n, defaultGptForm.n),
     seed: coerceNumber(value.seed, defaultGptForm.seed),
     reference_strength: coerceNumber(value.reference_strength, defaultGptForm.reference_strength),
@@ -1469,6 +1482,10 @@ const gptHistoryKeys: Array<keyof GptForm> = [
   "enhance_prompt",
   "safety_check",
   "response_format",
+  "output_format",
+  "frame_count",
+  "frame_duration_ms",
+  "extra_body",
   "edit_mode",
   "reference_strength",
   "timeout",
@@ -3824,6 +3841,8 @@ function App() {
       setGptForm((current) =>
         normalizeGptForm({
           ...current,
+          output_format: "auto",
+          extra_body: "",
           ...pickHistoryState<GptForm>(formState, gptHistoryKeys.filter((key) => !["prompt", "negative_prompt", "poster_text"].includes(String(key)))),
         }),
       );
@@ -5086,12 +5105,21 @@ function App() {
 
     let submitGptForm = currentGptForm;
     if (currentEngine === "gpt-image-2") {
+      const extraError = overrides.imageEditAction ? "" : imageExtraBodyError(currentGptForm.extra_body);
+      if (extraError) {
+        setNotice(t(extraError));
+        setAdvancedOpen(true);
+        return;
+      }
       const normalized = normalizeCustomSize(false);
       if (normalized?.notice) {
         const notice = formatSizeAdjustmentNotice(normalized);
         if (notice) setNotice(notice);
       }
       submitGptForm = { ...currentGptForm, custom_size: normalized.value };
+      if (overrides.imageEditAction) {
+        submitGptForm = { ...submitGptForm, output_format: "auto", extra_body: "" };
+      }
       try {
         resolveMaskEndpoint(submitGptForm.api_endpoint, Boolean(currentMask));
       } catch {
@@ -5672,6 +5700,8 @@ function App() {
 
   function currentGenerationSettingsSummary() {
     return [
+      activeEngine === "gpt-image-2" && gptForm.output_format !== "auto" ? imageOutputLabel(gptForm.output_format, "") : "",
+      activeEngine === "gpt-image-2" && gptForm.extra_body.trim() ? t("settings.extraBodyActive") : "",
       activeEngine === "gpt-image-2" ? currentQualityLabel() : "",
       currentCountLabel(),
     ].filter(Boolean).join(" · ");
@@ -6885,6 +6915,25 @@ function App() {
               </button>
               {composerPopover === "settings" && (
                 <div className="composer-popover generation-settings-popover" role="dialog" aria-label={t("composer.generationSettingsDialog")}>
+                  {activeEngine === "gpt-image-2" && (
+                    <section className="generation-settings-section">
+                      <div className="generation-settings-heading"><strong>{t("settings.outputFormat")}</strong></div>
+                      <div className="choice-grid output-formats">
+                        {IMAGE_OUTPUT_FORMATS.map((format) => <button type="button" key={format}
+                          className={gptForm.output_format === format ? "selected" : ""}
+                          onClick={() => setGptForm({ ...gptForm, output_format: format })}>
+                          {imageOutputLabel(format, t("option.auto"))}
+                        </button>)}
+                      </div>
+                      {gptForm.output_format === "gif" && <>
+                        <div className="gif-frame-fields">
+                          <Field label={t("settings.frameCount")}><input type="number" min={2} max={16} step={1} value={gptForm.frame_count} onChange={(event) => setGptForm({ ...gptForm, frame_count: Number(event.target.value) })} /></Field>
+                          <Field label={t("settings.frameDuration")}><input type="number" min={20} max={2000} step={10} value={gptForm.frame_duration_ms} onChange={(event) => setGptForm({ ...gptForm, frame_duration_ms: Number(event.target.value) })} /></Field>
+                        </div>
+                        <p className="gif-output-help">{t("settings.gifHelp")}</p>
+                      </>}
+                    </section>
+                  )}
                   {activeEngine !== "banana" && (
                     <section className="generation-settings-section quality-settings-section">
                       <div className="generation-settings-heading">
@@ -8442,6 +8491,14 @@ function GptSettings({ form, onChange, t }: { form: GptForm; onChange: (value: G
   };
   return (
     <div className="settings-grid">
+      <div className="image-extra-body-field">
+        <Field label={t("settings.extraBody")} help={t("settings.extraBodyHelp")}>
+          <textarea rows={5} spellCheck={false} placeholder={'{ "complexity": "low" }'} value={form.extra_body}
+            aria-invalid={Boolean(imageExtraBodyError(form.extra_body))}
+            onChange={(event) => update("extra_body", event.target.value)} />
+        </Field>
+        {imageExtraBodyError(form.extra_body) && <p className="parameter-error" role="alert">{t(imageExtraBodyError(form.extra_body))}</p>}
+      </div>
       <Field label={t("settings.seed")} help={t("settings.seedHelp")}><input type="number" value={form.seed} onChange={(event) => update("seed", Number(event.target.value))} /></Field>
       <Field label={t("settings.stylePreset")} help={t("settings.stylePresetHelp")}>
         <select value={form.style_preset} onChange={(event) => update("style_preset", event.target.value)}>

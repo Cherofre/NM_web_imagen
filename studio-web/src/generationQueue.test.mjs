@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { imageExtraBodyError } from "./imageOutputSettings.ts";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
@@ -114,7 +115,7 @@ test("actual generation admission rejects the 81st live payload before creating 
     sessions: [{ id: "session", drafts: {} }], gptForm: {}, bananaForm: {}, references: [], maskAttachment: null,
     referencesForSubmitMode: (_mode, files) => files, activeMaskAttachment: () => null, configIssues: () => [],
     generationCountFor: () => 1, resolveSubmissionDrafts: () => ({ prompt: "synthetic", context_prompt: "", negative_prompt: "", poster_text: "" }),
-    makeId: (prefix) => prefix, normalizeCustomSize: () => ({ value: "1024x1024" }), resolveMaskEndpoint() {},
+    makeId: (prefix) => prefix, normalizeCustomSize: () => ({ value: "1024x1024" }), resolveMaskEndpoint() {}, imageExtraBodyError,
     createReferenceSnapshots: async () => [], MAX_ACTIVE_QUEUE_JOBS: 80,
     queuePayloadsRef: { current: Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`job-${i}`, {}])) },
     setNotice(value) { ctx.notice = value; }, t: createTranslator("zh-CN"),

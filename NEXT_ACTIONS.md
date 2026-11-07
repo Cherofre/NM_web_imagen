@@ -1,5 +1,18 @@
 # Next Actions
 
+## Now — 2026-11-07 GIF 与可扩展图片参数
+- [x] GPT 生图设置增加输出格式、GIF 帧数与每帧时长，提交/历史/队列恢复保持一致。
+- [x] 配置级扩展 JSON 参数直传 Images 正文或 Responses 图片工具，校验冲突，显式字段不自动丢弃重试。
+- [x] 后端验证 GIF 动画及原字节保存/下载，渠道静态误返回保留结果并报告失败。
+- [x] Python339/末改8/定向112、Node315、Web/桌面构建、实际浏览器播放及ZIP解压冻结后端两接口mock通过。
+- [x] 本地试用ZIP已交付，793文件hash逐一匹配；报告 `docs/gif-output-parameters-2026-11-07.md`。
+
+## Handoff Notes — GIF
+- Start here: `codex/gif-output-parameters`，app.py GPT 生成路由、Studio 生图设置/高级参数。
+- Do not redo: 用户 11/7 09:38 实际文件已验证 PNG 单帧；本任务无付费调用授权。
+- Verify next: 若用户要求正式发版，再更新版本并执行正式桌面/Web发布与G同步；真实渠道付费验证需另获额度授权。现有7861需重启加载新后端，安装版需使用试用包或后续正式升级。
+- Do not claim: 当前安装的 1.1.6 已有 GIF 请求参数，真实渠道 GIF 生成或原生GUI已验证；源码和本地试用包已完成，无本轮实现待办。
+
 ## Now — KB透明请求已确认安全拦截
 - [x] 对应四模型失败会话与本地日志，读取令牌自己的31条成功日志及当前目录；0新增生图的只读排查完成。
 - [x] 用户授权新增1次KB透明请求；原图/最小参数复现451 content_policy_violation，30.44秒、0图、无重试，额度用尽。
