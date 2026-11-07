@@ -1,5 +1,10 @@
 # Next Actions
 
+## Now — EXE 安装包测试交付
+- [x] 普通NSIS安装版已生成：`_release/alpha-preview/NM-Image-Studio-Alpha-preview-Setup-x64.exe`。
+- [x] 实际提取核对790后端文件与最新内嵌界面，无便携标记或用户数据；提取后端六项透明/GIF实际mock通过。
+- [x] 已记录并提供安装EXE；本轮任务完成，下一步由用户退出旧版后安装实机测试，未代执行安装或正式发布。
+
 ## Now — 透明通道与设置弹层优化
 - [x] 背景参数进入普通生图、参考图编辑、Responses及历史/重试链路；与透明格式约束联动。
 - [x] 真实Alpha校验，保留不符合要求的结果并提示；不新增上游调用。

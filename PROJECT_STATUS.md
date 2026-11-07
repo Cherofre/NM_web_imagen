@@ -1,6 +1,8 @@
 # Project Status
 
 ## Current Snapshot
+- Last Updated: 2026-11-07（EXE安装包测试交付完成）
+- Current request complete: `_release/alpha-preview/NM-Image-Studio-Alpha-preview-Setup-x64.exe` 已构建（34,153,603字节，内部1.1.6本地试用）；普通NSIS当前用户安装，沿用既有覆盖安装模板。实际7-Zip提取核对790后端文件、主程序与当前构建相同，主程序内嵌最新JS/CSS，无portable.mode/用户数据；提取后端实际mock六项PNG/WebP Alpha及GIF回归通过。0付费；未代用户安装/发布/G同步。
 - Last Updated: 2026-11-07（透明通道与生成设置优化完成）
 - Current task complete: 背景自动/不透明/透明、PNG/WebP联动、真实Alpha校验及历史/队列链路已完成；384px紧凑弹层、单行质量、数量步进器、按需GIF参数、基于锚点与缩放的定位，标题关闭按钮不裁切。报告 `docs/transparent-generation-settings-2026-11-07.md`。
 - Fresh evidence: Python345/Node316、生产与最终Tauri/PyInstaller构建通过；实际浏览器透明提交和4种视口（1280/820/760/400）/200%缩放/数量上下限/Escape通过，默认内容292px无滚动。ZIP解压冻结后端三接口×PNG/WebP六项alpha0–255/下载字节一致，不透明误返回保留和GIF回归通过。

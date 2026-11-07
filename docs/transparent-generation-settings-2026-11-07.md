@@ -28,3 +28,9 @@
 实际 ZIP 解压验收通过：793 文件逐一匹配清单大小/SHA256，包内 UI 入口与当前构建逐字匹配，无用户配置/历史。对解压出的冻结后端执行生成、编辑、Responses 三接口 × PNG/WebP 六项本机 mock，实际 Alpha 极值均为0–255，下载与保存字节一致；不透明误返回保留且报告失败，GIF 回归通过。证据 `.runtime/alpha-frozen-result.json`。
 
 ZIP：48,435,858 字节，SHA256 `a559a0e8c4cf89b5fb7a8f2274d50c30c1f26580c7fe61e14e4276ea7f0c3297`。保留既有 GIF 试用包；本地试用内部版本仍为 1.1.6，不表示正式发布。未覆盖已安装程序或用户配置、未重启旧 7861 服务、未发布 GitHub 或同步 G 盘。真实渠道付费请求、原生 GUI 和保存对话框未验。
+
+## 追加安装版交付
+
+用户明确要求安装包后，生成 `_release/alpha-preview/NM-Image-Studio-Alpha-preview-Setup-x64.exe`（34,153,603字节），普通NSIS当前用户安装版，已有WebView2时直接使用，缺失时下载安装运行时。沿用既有覆盖安装模板，内部版本仍为1.1.6测试构建，未执行用户机器上的安装。
+
+使用本地7-Zip实际提取EXE，790个后端文件与当前构建逐字匹配、主程序相同且实际嵌入最新boot-guard/JS/CSS，无portable.mode、用户配置或历史。对提取的真实后端再次完成三接口×PNG/WebP六项Alpha/保存下载验证、不透明误返回保留及GIF回归，0付费。脚本 `.runtime/verify_alpha_installer.py`、`.runtime/verify_alpha_frozen.py`；构建记录 `.runtime/alpha-installer-build.log`。未发布或同步G，用户下一步退出旧版后运行该EXE实机测试。
